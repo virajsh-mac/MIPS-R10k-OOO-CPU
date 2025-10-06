@@ -21,29 +21,21 @@
 // RS entry structure (extended for full control signals)
 typedef struct packed {
     logic valid;               // Entry occupied
-    ALU_OPA_SELECT opa_select; // From decode
-    ALU_OPB_SELECT opb_select; // From decode
-    ALU_FUNC alu_func;         // From decode
-    logic mult;                // Is multiply?
-    logic rd_mem;              // Load?
-    logic wr_mem;              // Store?
-    logic cond_branch;         // Conditional branch?
-    logic uncond_branch;       // Unconditional branch?
+    ALU_OPA_SELECT opa_select; // From decode (where is OPA coming from)
+    ALU_OPB_SELECT opb_select; // From decode (where is OPB coming from)
+    OP_TYPE op_type;           // Which unit are we routing to in EX and what suboperation
     PHYS_TAG src1_tag;         // Physical source 1 tag
     logic src1_ready;          // Source 1 ready
-    DATA src1_value;           // Source 1 value if ready
+    DATA src1_value;           // Source 1 value if immediate
     PHYS_TAG src2_tag;         // Physical source 2 tag
     logic src2_ready;          // Source 2 ready
-    DATA src2_value;           // Source 2 value if ready
+    DATA src2_value;           // Source 2 value if immediate
     PHYS_TAG dest_tag;         // Physical destination tag
     ROB_IDX rob_idx;           // Associated ROB index (for flush and potential age selection)
-    ADDR PC;                   // PC for branch/debug
+    ADDR PC;                   // PC for branch/debug (MIGHT merge with SRC but only if we can resolve mispredicts othersive)
     // Added for branches (prediction info from fetch via dispatch)
     logic pred_taken;
     ADDR pred_target;
-    // Added for mem ops (from decode)
-    MEM_SIZE mem_size;
-    logic mem_unsigned;
 } RS_ENTRY;
 
 // CDB packet (from complete, for wakeup)
@@ -80,70 +72,14 @@ module rs (
     // Internal storage: array of RS entries
     RS_ENTRY [`RS_SZ-1:0] rs_array, rs_array_next;
 
-    // Combinational logic for free count
-    always_comb begin
-        free_count = 0;
-        for (int i = 0; i < `RS_SZ; i++) begin
-            if (!rs_array[i].valid) free_count += 1;
-        end
-    end
-
-    // Output the current RS array
-    assign entries = rs_array;
+    // Combinational logic for free count (number of free RS entries)
 
     // Sequential logic for updates: wakeup, clear, alloc, flush
-    always_comb begin
-        rs_array_next = rs_array;
 
         // Step 1: Wakeup operands via CDB (associative tag match)
-        for (int i = 0; i < `RS_SZ; i++) begin
-            if (rs_array_next[i].valid) begin
-                // Check src1
-                if (!rs_array_next[i].src1_ready) begin
-                    for (int c = 0; c < `CDB_SZ; c++) begin
-                        if (cdb_broadcast.valid[c] && cdb_broadcast.tags[c] == rs_array_next[i].src1_tag) begin
-                            rs_array_next[i].src1_ready = 1'b1;
-                            rs_array_next[i].src1_value = cdb_broadcast.values[c];
-                        end
-                    end
-                end
-                // Check src2
-                if (!rs_array_next[i].src2_ready) begin
-                    for (int c = 0; c < `CDB_SZ; c++) begin
-                        if (cdb_broadcast.valid[c] && cdb_broadcast.tags[c] == rs_array_next[i].src2_tag) begin
-                            rs_array_next[i].src2_ready = 1'b1;
-                            rs_array_next[i].src2_value = cdb_broadcast.values[c];
-                        end
-                    end
-                end
-            end
-        end
-
         // Step 2: Clear issued entries
-        for (int c = 0; c < `N; c++) begin
-            if (clear_valid[c]) begin
-                rs_array_next[clear_idxs[c]].valid = 1'b0;
-            end
-        end
-
         // Step 3: Allocate new entries into lowest free indices
-        int alloc_cnt = 0;
-        for (int i = 0; i < `RS_SZ; i++) begin
-            if (!rs_array_next[i].valid && alloc_cnt < `N && alloc_valid[alloc_cnt]) begin
-                rs_array_next[i] = alloc_entries[alloc_cnt];
-                alloc_cnt++;
-            end
-        end
-
         // Step 4: Flush speculative entries on mispredict
-        if (mispredict) begin
-            for (int i = 0; i < `RS_SZ; i++) begin
-                if (rs_array_next[i].valid && (rs_array_next[i].rob_idx > mispred_rob_idx)) begin
-                    rs_array_next[i].valid = 1'b0;
-                end
-            end
-        end
-    end
 
     // Clocked update
     always_ff @(posedge clock) begin
