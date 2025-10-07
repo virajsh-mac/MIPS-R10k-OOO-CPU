@@ -75,14 +75,6 @@ typedef struct packed {
     ADDR correct_target;       // Correct target for fetch redirect
 } MISPRED_RECOVERY_PACKET;
 
-// Packet for CDB broadcast (from Complete to RS/Dispatch for wake-up; shared system-wide)
-typedef struct packed {
-    logic [`CDB_SZ-1:0] valid; // Valid broadcasts this cycle
-    PHYS_TAG [`CDB_SZ-1:0] tags; // Completed physical tags
-    DATA [`CDB_SZ-1:0] values; // Completed values (for forwarding if needed)
-    ROB_IDX [`CDB_SZ-1:0] rob_idxs; // Associated ROB indices
-} CDB_PACKET;
-
 // Packet from Retire to Dispatch (for committed map updates and free list additions)
 typedef struct packed {
     logic [`N-1:0] valid;      // Valid commits this cycle

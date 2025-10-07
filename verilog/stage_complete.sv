@@ -28,13 +28,6 @@ typedef struct packed {
     ROB_IDX [`N-1:0] rob_idxs; // ROB indices for complete marking
 } EX_COMP_PACKET;
 
-// CDB broadcast packet (to RS for wakeup and map table for ready bit set)
-typedef struct packed {
-    logic [`CDB_SZ-1:0] valid;  // Valid broadcasts this cycle
-    PHYS_TAG [`CDB_SZ-1:0] tags;  // Physical dest tags
-    DATA [`CDB_SZ-1:0] values;    // Computed values
-} CDB_PACKET;
-
 // ROB update packet (to mark done and store value in ROB entries)
 typedef struct packed {
     logic [`N-1:0] valid;      // Valid updates this cycle

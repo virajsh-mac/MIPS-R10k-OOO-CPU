@@ -38,12 +38,6 @@ typedef struct packed {
     ADDR pred_target;
 } RS_ENTRY;
 
-// CDB packet (from complete, for wakeup)
-typedef struct packed {
-    logic [`CDB_SZ-1:0] valid;  // Valid broadcasts this cycle
-    PHYS_TAG [`CDB_SZ-1:0] tags;  // Physical dest tags
-} CDB_PACKET;
-
 module rs (
     input              clock,           // system clock
     input              reset,           // system reset
