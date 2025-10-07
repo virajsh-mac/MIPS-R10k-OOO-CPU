@@ -18,25 +18,7 @@
 
 // Parameters and typedefs are now centrally defined in sys_defs.svh
 
-// ROB entry structure (consolidated from stages)
-typedef struct packed {
-    logic valid;               // Entry occupied
-    ADDR PC;                   // PC of instruction
-    INST inst;                 // Full instruction
-    REG_IDX arch_rd;           // Architectural destination reg
-    PHYS_TAG phys_rd;          // Assigned physical dest reg
-    PHYS_TAG prev_phys_rd;     // Previous physical mapping (for free on commit)
-    DATA value;                // Computed value (from Complete, if needed)
-    logic complete;            // Instruction has completed
-    EXCEPTION_CODE exception;  // Any exception code
-    logic branch;              // Is this a branch?
-    ADDR branch_target;        // Resolved branch target
-    logic branch_taken;        // Resolved taken/not taken
-    ADDR pred_target;          // Predicted branch target
-    logic pred_taken;          // Predicted taken/not taken
-    logic halt;                // Is this a halt?
-    logic illegal;             // Is this illegal?
-} ROB_ENTRY;
+// ROB entry structure is now defined in sys_defs.svh
 
 // ROB update packet (extended for branch info)
 typedef struct packed {

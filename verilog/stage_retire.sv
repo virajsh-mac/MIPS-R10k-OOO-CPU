@@ -21,24 +21,7 @@
 
 // Parameters and typedefs are now centrally defined in sys_defs.svh
 
-// ROB entry: tracks in-flight instructions for commit/order (extended for retire needs)
-typedef struct packed {
-    logic valid;               // Entry occupied
-    ADDR PC;                   // PC of instruction
-    INST inst;                 // Full instruction
-    REG_IDX arch_rd;           // Architectural destination reg
-    PHYS_TAG phys_rd;          // Assigned physical dest reg
-    PHYS_TAG prev_phys_rd;     // Previous physical mapping (for free on commit)
-    logic complete;            // Instruction has completed (from Complete stage)
-    EXCEPTION_CODE exception;  // Any exception code
-    logic branch;              // Is this a branch? (for mispredict handling)
-    ADDR branch_target;        // Resolved branch target (updated in Execute)
-    logic branch_taken;        // Resolved taken/not taken (updated in Execute)
-    ADDR pred_target;          // Predicted branch target (from Fetch/Dispatch)
-    logic pred_taken;          // Predicted taken/not taken (from Fetch/Dispatch)
-    logic halt;                // Is this a halt? (pass-through for commit packet)
-    logic illegal;             // Is this illegal? (pass-through for commit packet)
-} ROB_ENTRY;
+// ROB entry is now defined in sys_defs.svh
 
 // Packet to Dispatch for committed updates (free list and committed map)
 typedef struct packed {

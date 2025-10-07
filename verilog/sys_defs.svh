@@ -162,6 +162,46 @@ typedef struct packed {
     PHYS_TAG [`CDB_SZ-1:0] tags;  // Physical dest tags
 } CDB_PACKET;
 
+// RS entry structure (extended for full control signals)
+typedef struct packed {
+    logic valid;               // Entry occupied
+    ALU_OPA_SELECT opa_select; // From decode (where is OPA coming from)
+    ALU_OPB_SELECT opb_select; // From decode (where is OPB coming from)
+    OP_TYPE op_type;           // Which unit are we routing to in EX and what suboperation
+    PHYS_TAG src1_tag;         // Physical source 1 tag
+    logic src1_ready;          // Source 1 ready
+    DATA src1_value;           // Source 1 value if immediate
+    PHYS_TAG src2_tag;         // Physical source 2 tag
+    logic src2_ready;          // Source 2 ready
+    DATA src2_value;           // Source 2 value if immediate
+    PHYS_TAG dest_tag;         // Physical destination tag
+    ROB_IDX rob_idx;           // Associated ROB index (for flush and potential age selection)
+    ADDR PC;                   // PC for branch/debug (MIGHT merge with SRC but only if we can resolve mispredicts othersive)
+    // Added for branches (prediction info from fetch via dispatch)
+    logic pred_taken;
+    ADDR pred_target;
+} RS_ENTRY;
+
+// ROB entry structure
+typedef struct packed {
+    logic valid;               // Entry occupied
+    ADDR PC;                   // PC of instruction
+    INST inst;                 // Full instruction
+    REG_IDX arch_rd;           // Architectural destination reg
+    PHYS_TAG phys_rd;          // Assigned physical dest reg
+    PHYS_TAG prev_phys_rd;     // Previous physical mapping (for free on commit)
+    DATA value;                // Computed value (from Complete, if needed)
+    logic complete;            // Instruction has completed
+    EXCEPTION_CODE exception;  // Any exception code
+    logic branch;              // Is this a branch?
+    ADDR branch_target;        // Resolved branch target
+    logic branch_taken;        // Resolved taken/not taken
+    ADDR pred_target;          // Predicted branch target
+    logic pred_taken;          // Predicted taken/not taken
+    logic halt;                // Is this a halt?
+    logic illegal;             // Is this illegal?
+} ROB_ENTRY;
+
 ///////////////////////////////
 // ---- Exception Codes ---- //
 ///////////////////////////////

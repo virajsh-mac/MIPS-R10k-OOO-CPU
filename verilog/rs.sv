@@ -18,25 +18,7 @@
 
 // Parameters and typedefs are now centrally defined in sys_defs.svh
 
-// RS entry structure (extended for full control signals)
-typedef struct packed {
-    logic valid;               // Entry occupied
-    ALU_OPA_SELECT opa_select; // From decode (where is OPA coming from)
-    ALU_OPB_SELECT opb_select; // From decode (where is OPB coming from)
-    OP_TYPE op_type;           // Which unit are we routing to in EX and what suboperation
-    PHYS_TAG src1_tag;         // Physical source 1 tag
-    logic src1_ready;          // Source 1 ready
-    DATA src1_value;           // Source 1 value if immediate
-    PHYS_TAG src2_tag;         // Physical source 2 tag
-    logic src2_ready;          // Source 2 ready
-    DATA src2_value;           // Source 2 value if immediate
-    PHYS_TAG dest_tag;         // Physical destination tag
-    ROB_IDX rob_idx;           // Associated ROB index (for flush and potential age selection)
-    ADDR PC;                   // PC for branch/debug (MIGHT merge with SRC but only if we can resolve mispredicts othersive)
-    // Added for branches (prediction info from fetch via dispatch)
-    logic pred_taken;
-    ADDR pred_target;
-} RS_ENTRY;
+// RS entry structure is now defined in sys_defs.svh
 
 module rs (
     input              clock,           // system clock

@@ -38,15 +38,14 @@ typedef struct packed {
     // Control signals from decoder (for dispatch to use in FU selection, etc.)
     ALU_OPA_SELECT [`N-1:0] opa_select;
     ALU_OPB_SELECT [`N-1:0] opb_select;
-    ALU_FUNC [`N-1:0] alu_func;
-    logic [`N-1:0] mult;
-    logic [`N-1:0] rd_mem;
-    logic [`N-1:0] wr_mem;
-    logic [`N-1:0] cond_branch;
-    logic [`N-1:0] uncond_branch;
+    OP_TYPE [`N-1:0] op_type;  // Consolidated operation type
     logic [`N-1:0] csr_op;
     logic [`N-1:0] halt;
     logic [`N-1:0] illegal;
+    
+    // Branch prediction fields (from branch predictor)
+    logic [`N-1:0] pred_taken;
+    ADDR [`N-1:0] pred_target;
 } FETCH_DISP_PACKET;
 
 // Packet for branch predictor update (from Retire/Execute)
@@ -191,12 +190,7 @@ module stage_fetch (
                 .opa_select(fetch_packet.opa_select[i]),
                 .opb_select(fetch_packet.opb_select[i]),
                 .has_dest(fetch_packet.uses_rd[i]),
-                .alu_func(fetch_packet.alu_func[i]),
-                .mult(fetch_packet.mult[i]),
-                .rd_mem(fetch_packet.rd_mem[i]),
-                .wr_mem(fetch_packet.wr_mem[i]),
-                .cond_branch(fetch_packet.cond_branch[i]),
-                .uncond_branch(fetch_packet.uncond_branch[i]),
+                .op_type(fetch_packet.op_type[i]),
                 .csr_op(fetch_packet.csr_op[i]),
                 .halt(fetch_packet.halt[i]),
                 .illegal(fetch_packet.illegal[i])
@@ -212,6 +206,10 @@ module stage_fetch (
             // Assign inst and PC
             assign fetch_packet.inst[i] = raw_insts[i];
             assign fetch_packet.PC[i]   = inst_pcs[i];
+            
+            // Assign branch prediction fields
+            assign fetch_packet.pred_taken[i] = pred_taken[i];
+            assign fetch_packet.pred_target[i] = pred_targets[i];
         end
     endgenerate
 
@@ -219,7 +217,7 @@ module stage_fetch (
     always_comb begin
         first_taken_idx = 3;  // None
         for (int i = 0; i < `N; i++) begin
-            if (raw_valids[i] && (fetch_packet.cond_branch[i] || fetch_packet.uncond_branch[i]) &&
+            if (raw_valids[i] && (fetch_packet.op_type[i].category == CAT_BRANCH) &&
                 pred_taken[i]) begin
                 first_taken_idx = i;
                 break;

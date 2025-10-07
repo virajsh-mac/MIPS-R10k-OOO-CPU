@@ -24,30 +24,10 @@
 
 // Parameters and typedefs are now centrally defined in sys_defs.svh
 
-// Extend RS_ENTRY from dispatch for execute (add prediction info for branches)
+// Extend RS_ENTRY from dispatch for execute (add memory-specific fields)
 typedef struct packed {
-    logic valid;               // Entry occupied
-    ALU_OPA_SELECT opa_select; // From decode (though values pre-computed)
-    ALU_OPB_SELECT opb_select; // From decode
-    ALU_FUNC alu_func;         // From decode
-    logic mult;                // Is multiply?
-    logic rd_mem;              // Load?
-    logic wr_mem;              // Store?
-    logic cond_branch;         // Conditional branch?
-    logic uncond_branch;       // Unconditional branch?
-    PHYS_TAG src1_tag;         // Physical source 1 tag (for potential bypass)
-    logic src1_ready;          // Source 1 ready (should be 1 at issue)
-    DATA src1_value;           // Source 1 value (OPA mux result)
-    PHYS_TAG src2_tag;         // Physical source 2 tag (for potential bypass)
-    logic src2_ready;          // Source 2 ready (should be 1 at issue)
-    DATA src2_value;           // Source 2 value (OPB mux result)
-    PHYS_TAG dest_tag;         // Physical destination tag
-    ROB_IDX rob_idx;           // Associated ROB index
-    ADDR PC;                   // PC for branch/target calc/debug
-    // Added for branches: prediction info (from fetch via dispatch)
-    logic pred_taken;
-    ADDR pred_target;
-    // For mem ops: size and sign (extracted from funct3 in decode)
+    RS_ENTRY base;             // Base RS entry from sys_defs.svh
+    // For mem ops: size and sign (extracted from OP_TYPE.func)
     MEM_SIZE mem_size;
     logic mem_unsigned;
 } EX_RS_ENTRY;
@@ -170,7 +150,7 @@ module stage_execute (
             alu alu_i (
                 .opa(opa_values[i]),
                 .opb(opb_values[i]),
-                .alu_func(issue_packet.entries[i].alu_func),
+                .alu_func(issue_packet.entries[i].base.op_type.func),
 
                 .result(alu_results[i])
             );
@@ -270,70 +250,70 @@ module stage_execute (
             for (int i = 0; i < `N; i++) begin
                 if (issue_packet.valid[i]) begin
                     // Potential bypass from concurrent CDB (advanced; base skips)
-                    opa_values[i] = issue_packet.entries[i].src1_value;
-                    opb_values[i] = issue_packet.entries[i].src2_value;
+                    opa_values[i] = issue_packet.entries[i].base.src1_value;
+                    opb_values[i] = issue_packet.entries[i].base.src2_value;
                     // Check for CDB match (if tag not ready somehow; rare)
                     for (int c = 0; c < `CDB_SZ; c++) begin
                         if (cdb_broadcast.valid[c]) begin
-                            if (cdb_broadcast.tags[c] == issue_packet.entries[i].src1_tag) opa_values[i] = cdb_broadcast.values[c];
-                            if (cdb_broadcast.tags[c] == issue_packet.entries[i].src2_tag) opb_values[i] = cdb_broadcast.values[c];
+                            if (cdb_broadcast.tags[c] == issue_packet.entries[i].base.src1_tag) opa_values[i] = cdb_broadcast.values[c];
+                            if (cdb_broadcast.tags[c] == issue_packet.entries[i].base.src2_tag) opb_values[i] = cdb_broadcast.values[c];
                         end
                     end
 
                     // Route to FU based on control
-                    if (issue_packet.entries[i].mult) begin
+                    if (issue_packet.entries[i].base.op_type.category == CAT_MULT) begin
                         // Start mult (assume available; issue checks)
                         mult_start = 1'b1;
                         mult_opa = opa_values[i];
                         mult_opb = opb_values[i];
-                        mult_func = issue_packet.entries[i].inst.r.funct3;  // Assume inst avail
+                        mult_func = issue_packet.entries[i].base.op_type.func;  // Use OP_TYPE func
                         // If done this cycle (placeholder; multi-cycle outputs later)
                         if (mult_done) begin
                             execute_packet.valid[fu_idx] = 1'b1;
                             execute_packet.results[fu_idx] = mult_results[0];
-                            execute_packet.dest_tags[fu_idx] = issue_packet.entries[i].dest_tag;
-                            execute_packet.rob_idxs[fu_idx] = issue_packet.entries[i].rob_idx;
+                            execute_packet.dest_tags[fu_idx] = issue_packet.entries[i].base.dest_tag;
+                            execute_packet.rob_idxs[fu_idx] = issue_packet.entries[i].base.rob_idx;
                             fu_idx++;
                         end  // Else, handled in pipeline output to execute_packet
-                    end else if (issue_packet.entries[i].cond_branch || issue_packet.entries[i].uncond_branch) begin
+                    end else if (issue_packet.entries[i].base.op_type.category == CAT_BRANCH) begin
                         // Compute branch outcome/target
-                        logic take = issue_packet.entries[i].uncond_branch ? 1'b1 : take_conds[i];
+                        logic take = (issue_packet.entries[i].base.op_type == OP_JAL || issue_packet.entries[i].base.op_type == OP_JALR) ? 1'b1 : take_conds[i];
                         ADDR target;
-                        if (issue_packet.entries[i].inst.j.opcode == `RV32_JALR_OP) begin
+                        if (issue_packet.entries[i].base.op_type == OP_JALR) begin
                             target = (opa_values[i] + opb_values[i]) & ~32'h1;  // Clear LSB
                         end else begin
-                            target = issue_packet.entries[i].PC + opb_values[i];  // IMM
+                            target = issue_packet.entries[i].base.PC + opb_values[i];  // IMM
                         end
                         branch_targets[i] = target;
-                        per_inst_mispred[i] = (take != issue_packet.entries[i].pred_taken) ||
-                                              (take && target != issue_packet.entries[i].pred_target);
+                        per_inst_mispred[i] = (take != issue_packet.entries[i].base.pred_taken) ||
+                                              (take && target != issue_packet.entries[i].base.pred_target);
                         if (per_inst_mispred[i]) begin
                             mispred_recovery.valid = 1'b1;
-                            mispred_recovery.rob_idx = issue_packet.entries[i].rob_idx;
-                            mispred_recovery.correct_target = take ? target : issue_packet.entries[i].PC + 4;
+                            mispred_recovery.rob_idx = issue_packet.entries[i].base.rob_idx;
+                            mispred_recovery.correct_target = take ? target : issue_packet.entries[i].base.PC + 4;
                         end
                         // Branch has no dest value unless JAL/JALR (rd link)
-                        if (issue_packet.entries[i].uses_rd) begin  // Link reg
+                        if (issue_packet.entries[i].base.op_type == OP_JAL || issue_packet.entries[i].base.op_type == OP_JALR) begin  // Link reg
                             execute_packet.valid[fu_idx] = 1'b1;
-                            execute_packet.results[fu_idx] = issue_packet.entries[i].PC + 4;
-                            execute_packet.dest_tags[fu_idx] = issue_packet.entries[i].dest_tag;
-                            execute_packet.rob_idxs[fu_idx] = issue_packet.entries[i].rob_idx;
+                            execute_packet.results[fu_idx] = issue_packet.entries[i].base.PC + 4;
+                            execute_packet.dest_tags[fu_idx] = issue_packet.entries[i].base.dest_tag;
+                            execute_packet.rob_idxs[fu_idx] = issue_packet.entries[i].base.rob_idx;
                             fu_idx++;
                         end else begin
                             // Just complete (no value)
                             execute_packet.valid[fu_idx] = 1'b1;
                             execute_packet.results[fu_idx] = '0;
                             execute_packet.dest_tags[fu_idx] = '0;
-                            execute_packet.rob_idxs[fu_idx] = issue_packet.entries[i].rob_idx;
+                            execute_packet.rob_idxs[fu_idx] = issue_packet.entries[i].base.rob_idx;
                             fu_idx++;
                         end
-                    end else if (issue_packet.entries[i].rd_mem || issue_packet.entries[i].wr_mem) begin
+                    end else if (issue_packet.entries[i].base.op_type.category == CAT_MEM) begin
                         // Mem op (assume only one; issue ensures)
                         mem_addr = opa_values[i] + opb_values[i];
                         proc2Dcache_addr = mem_addr;
                         proc2Dcache_size = issue_packet.entries[i].mem_size;
-                        mem_is_load = issue_packet.entries[i].rd_mem;
-                        mem_is_store = issue_packet.entries[i].wr_mem;
+                        mem_is_load = (issue_packet.entries[i].base.op_type.category == CAT_MEM && issue_packet.entries[i].base.op_type.func[3] == 0);
+                        mem_is_store = (issue_packet.entries[i].base.op_type.category == CAT_MEM && issue_packet.entries[i].base.op_type.func[3] == 1);
                         if (mem_is_store) begin
                             proc2Dcache_command = MEM_STORE;
                             proc2Dcache_data = opb_values[i];  // rs2_value
@@ -352,22 +332,22 @@ module stage_execute (
                                 endcase
                                 execute_packet.valid[fu_idx] = 1'b1;
                                 execute_packet.results[fu_idx] = load_result;
-                                execute_packet.dest_tags[fu_idx] = issue_packet.entries[i].dest_tag;
-                                execute_packet.rob_idxs[fu_idx] = issue_packet.entries[i].rob_idx;
+                                execute_packet.dest_tags[fu_idx] = issue_packet.entries[i].base.dest_tag;
+                                execute_packet.rob_idxs[fu_idx] = issue_packet.entries[i].base.rob_idx;
                                 fu_idx++;
                             end else begin  // Store complete
                                 execute_packet.valid[fu_idx] = 1'b1;
                                 execute_packet.results[fu_idx] = '0;
                                 execute_packet.dest_tags[fu_idx] = '0;
-                                execute_packet.rob_idxs[fu_idx] = issue_packet.entries[i].rob_idx;
+                                execute_packet.rob_idxs[fu_idx] = issue_packet.entries[i].base.rob_idx;
                                 fu_idx++;
                             end
                         end else begin
                             // Miss: set pending (blocking stall)
                             pending_mem_next.valid = 1'b1;
                             pending_mem_next.mem_tag = 1;  // Placeholder; actual from dcache request
-                            pending_mem_next.dest_tag = issue_packet.entries[i].dest_tag;
-                            pending_mem_next.rob_idx = issue_packet.entries[i].rob_idx;
+                            pending_mem_next.dest_tag = issue_packet.entries[i].base.dest_tag;
+                            pending_mem_next.rob_idx = issue_packet.entries[i].base.rob_idx;
                             pending_mem_next.addr = mem_addr;
                             pending_mem_next.mem_size = proc2Dcache_size;
                             pending_mem_next.mem_unsigned = issue_packet.entries[i].mem_unsigned;
@@ -378,8 +358,8 @@ module stage_execute (
                         // Standard ALU op
                         execute_packet.valid[fu_idx] = 1'b1;
                         execute_packet.results[fu_idx] = alu_results[i];
-                        execute_packet.dest_tags[fu_idx] = issue_packet.entries[i].dest_tag;
-                        execute_packet.rob_idxs[fu_idx] = issue_packet.entries[i].rob_idx;
+                        execute_packet.dest_tags[fu_idx] = issue_packet.entries[i].base.dest_tag;
+                        execute_packet.rob_idxs[fu_idx] = issue_packet.entries[i].base.rob_idx;
                         fu_idx++;
                     end
                 end

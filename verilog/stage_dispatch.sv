@@ -25,42 +25,9 @@ typedef struct packed {
     PHYS_TAG phys_tag;  // Current physical register mapping
 } MAP_ENTRY;
 
-// ROB entry: tracks in-flight instructions for commit/order
-typedef struct packed {
-    logic valid;               // Entry occupied
-    ADDR PC;                   // PC of instruction
-    INST inst;                 // Full instruction
-    REG_IDX arch_rd;           // Architectural destination reg
-    PHYS_TAG phys_rd;          // Assigned physical dest reg
-    PHYS_TAG prev_phys_rd;     // Previous physical mapping (for free on commit)
-    logic complete;            // Instruction has completed (from Complete stage)
-    EXCEPTION_CODE exception;  // Any exception code
-    logic branch;              // Is this a branch? (for mispredict handling)
-    ADDR branch_target;        // Resolved branch target (updated in Execute)
-    logic branch_taken;        // Resolved taken/not taken (updated in Execute)
-} ROB_ENTRY;
+// ROB entry is now defined in sys_defs.svh
 
-// RS entry: reservation station for issue readiness
-typedef struct packed {
-    logic valid;               // Entry occupied
-    ALU_OPA_SELECT opa_select; // From decode
-    ALU_OPB_SELECT opb_select; // From decode
-    ALU_FUNC alu_func;         // From decode
-    logic mult;                // Is multiply?
-    logic rd_mem;              // Load?
-    logic wr_mem;              // Store?
-    logic cond_branch;         // Conditional branch?
-    logic uncond_branch;       // Unconditional branch?
-    PHYS_TAG src1_tag;         // Physical source 1 tag
-    logic src1_ready;          // Source 1 ready (value available)
-    DATA src1_value;           // Source 1 value if ready
-    PHYS_TAG src2_tag;         // Physical source 2 tag
-    logic src2_ready;          // Source 2 ready
-    DATA src2_value;           // Source 2 value if ready
-    PHYS_TAG dest_tag;         // Physical destination tag
-    ROB_IDX rob_idx;           // Associated ROB index (for ordering/CDB)
-    ADDR PC;                   // PC for branch/debug
-} RS_ENTRY;
+// RS entry is now defined in sys_defs.svh
 
 // Packet from Dispatch to Issue (minimal, since Issue reads from RS directly; this could signal new entries)
 typedef struct packed {
@@ -231,19 +198,14 @@ module stage_dispatch (
                     rob_alloc_entries[i].prev_phys_rd = prev_rd_phys[i];
                     rob_alloc_entries[i].complete = 1'b0;
                     rob_alloc_entries[i].exception = NO_ERROR;
-                    rob_alloc_entries[i].branch = fetch_packet.cond_branch[i] || fetch_packet.uncond_branch[i];
+                    rob_alloc_entries[i].branch = (fetch_packet.op_type[i].category == CAT_BRANCH);
 
                     // Allocate RS (priority insert from top for oldest)
                     rs_alloc_valid[i] = 1'b1;
                     rs_alloc_entries[i].valid = 1'b1;
                     rs_alloc_entries[i].opa_select = fetch_packet.opa_select[i];
                     rs_alloc_entries[i].opb_select = fetch_packet.opb_select[i];
-                    rs_alloc_entries[i].alu_func = fetch_packet.alu_func[i];
-                    rs_alloc_entries[i].mult = fetch_packet.mult[i];
-                    rs_alloc_entries[i].rd_mem = fetch_packet.rd_mem[i];
-                    rs_alloc_entries[i].wr_mem = fetch_packet.wr_mem[i];
-                    rs_alloc_entries[i].cond_branch = fetch_packet.cond_branch[i];
-                    rs_alloc_entries[i].uncond_branch = fetch_packet.uncond_branch[i];
+                    rs_alloc_entries[i].op_type = fetch_packet.op_type[i];
                     rs_alloc_entries[i].src1_tag = rs1_phys[i];
                     rs_alloc_entries[i].src1_ready = src1_ready[i];
                     rs_alloc_entries[i].src1_value = src1_value[i];
@@ -253,6 +215,8 @@ module stage_dispatch (
                     rs_alloc_entries[i].dest_tag = rd_phys[i];
                     rs_alloc_entries[i].rob_idx = new_tail;  // Current tail as idx
                     rs_alloc_entries[i].PC = fetch_packet.PC[i];
+                    rs_alloc_entries[i].pred_taken = fetch_packet.pred_taken[i];
+                    rs_alloc_entries[i].pred_target = fetch_packet.pred_target[i];
 
                     // Update map table (after all prev in bundle)
                     if (fetch_packet.uses_rd[i]) begin
