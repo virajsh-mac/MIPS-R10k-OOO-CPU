@@ -42,7 +42,6 @@ typedef struct packed {
 typedef struct packed {
     logic [`CDB_SZ-1:0] valid;  // Valid broadcasts this cycle
     PHYS_TAG [`CDB_SZ-1:0] tags;  // Physical dest tags
-    DATA [`CDB_SZ-1:0] values;    // Computed values
 } CDB_PACKET;
 
 module rs (
