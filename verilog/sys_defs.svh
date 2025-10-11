@@ -20,28 +20,54 @@
 // some starting parameters that you should set
 // this is *your* processor, you decide these values (try analyzing which is best!)
 
-// superscalar width
-`define N 1
-`define CDB_SZ `N // This MUST match your superscalar width
+// =========================================
+// R10K Processor Parameters (6-stage pipeline)
+// =========================================
 
-// sizes
-`define ROB_SZ xx
-`define RS_SZ xx
-`define PHYS_REG_SZ_P6 32
-`define PHYS_REG_SZ_R10K (32 + `ROB_SZ)
+// superscalar width (3-way superscalar)
+`define N 3
+`define CDB_SZ `N // This MUST match superscalar width
+`define MAX_RS_FREE_CNT 3 // max broadcasted free spots in RS
 
-// worry about these later
-`define BRANCH_PRED_SZ xx
-`define LSQ_SZ xx
+// structure sizes
+`define ROB_SZ 32 // ROB Size
+`define RS_SZ 16 // Reservation Station Size
+`define PHYS_REG_SZ_P6 32 // 32 Physical Register Size for P6
+`define PHYS_REG_SZ_R10K (32 + `ROB_SZ)  // 64 physical registers for R10K
 
-// functional units (you should decide if you want more or fewer types of FUs)
-`define NUM_FU_ALU xx
-`define NUM_FU_MULT xx
-`define NUM_FU_LOAD xx
-`define NUM_FU_STORE xx
+// physical register and index bit widths
+`define PHYS_TAG_BITS $clog2(`PHYS_REG_SZ_R10K)  // 6 bits for phys tag
+`define ROB_IDX_BITS $clog2(`ROB_SZ)            // 5 bits for ROB index
+`define RS_IDX_BITS $clog2(`RS_SZ)              // 4 bits for RS index
+
+// branch prediction
+`define BRANCH_PRED_SZ 512  // Branch predictor size
+
+// functional units
+`define NUM_FU_ALU 3      // Enough for superscalar width
+`define NUM_FU_MULT 1     // Single pipelined multiplier
+`define NUM_FU_BRANCH 1   // Single branch resolver
+`define NUM_FU_ADDR 1     // Single address calculator for mem ops
+`define NUM_FU_LOAD xx // KEEP THIS???
+`define NUM_FU_STORE xx // KEEP THIS???
 
 // number of mult stages (2, 4) (you likely don't need 8)
 `define MULT_STAGES 4
+
+// cache parameters
+`define ICACHE_ASSOC 2           // 2-way associative I-cache
+`define ICACHE_LINES 32
+`define ICACHE_LINE_BITS $clog2(`ICACHE_LINES)
+`define ICACHE_LINE_BYTES 16     // 16 bytes (4 instructions) for superscalar support
+`define VICTIM_CACHE_SZ 4        // Small victim cache
+
+`define DCACHE_ASSOC 2           // 2-way associative D-cache
+`define DCACHE_LINES 32
+`define DCACHE_LINE_BYTES 8      // 8 bytes/line (2 words; 256 bytes total)
+`define DCACHE_VICTIM_SZ 4       // Small victim cache
+
+// Load/Store Queue (not implemented in base design)
+`define LSQ_SZ 8
 
 ///////////////////////////////
 // ---- Basic Constants ---- //
@@ -57,6 +83,19 @@
 typedef logic [31:0] ADDR;
 typedef logic [31:0] DATA;
 typedef logic [4:0] REG_IDX;
+
+// =========================================
+// R10K Typedefs (used across all stages)
+// =========================================
+
+// Physical register tag
+typedef logic [`PHYS_TAG_BITS-1:0] PHYS_TAG;
+
+// ROB index
+typedef logic [`ROB_IDX_BITS-1:0] ROB_IDX;
+
+// RS index
+typedef logic [`RS_IDX_BITS-1:0] RS_IDX;
 
 // the zero register
 // In RISC-V, any read of this register returns zero and any writes are thrown away
@@ -117,6 +156,52 @@ typedef struct packed {
     logic [12-`ICACHE_LINE_BITS:0] tags;
     logic                          valid;
 } ICACHE_TAG;
+
+// CDB packet (from complete, for wakeup)
+typedef struct packed {
+    logic [`CDB_SZ-1:0] valid;  // Valid broadcasts this cycle
+    PHYS_TAG [`CDB_SZ-1:0] tags;  // Physical dest tags
+} CDB_PACKET;
+
+// RS entry structure (extended for full control signals)
+typedef struct packed {
+    logic valid;               // Entry occupied
+    ALU_OPA_SELECT opa_select; // From decode (where is OPA coming from)
+    ALU_OPB_SELECT opb_select; // From decode (where is OPB coming from)
+    OP_TYPE op_type;           // Which unit are we routing to in EX and what suboperation
+    PHYS_TAG src1_tag;         // Physical source 1 tag
+    logic src1_ready;          // Source 1 ready
+    DATA src1_value;           // Source 1 value if immediate
+    PHYS_TAG src2_tag;         // Physical source 2 tag
+    logic src2_ready;          // Source 2 ready
+    DATA src2_value;           // Source 2 value if immediate
+    PHYS_TAG dest_tag;         // Physical destination tag
+    ROB_IDX rob_idx;           // Associated ROB index (for flush and potential age selection)
+    ADDR PC;                   // PC for branch/debug (MIGHT merge with SRC but only if we can resolve mispredicts othersive)
+    // Added for branches (prediction info from fetch via dispatch)
+    logic pred_taken;
+    ADDR pred_target;
+} RS_ENTRY;
+
+// ROB entry structure
+typedef struct packed {
+    logic valid;               // Entry occupied
+    ADDR PC;                   // PC of instruction
+    INST inst;                 // Full instruction
+    REG_IDX arch_rd;           // Architectural destination reg
+    PHYS_TAG phys_rd;          // Assigned physical dest reg
+    PHYS_TAG prev_phys_rd;     // Previous physical mapping (for free on commit)
+    DATA value;                // Computed value (from Complete, if needed)
+    logic complete;            // Instruction has completed
+    EXCEPTION_CODE exception;  // Any exception code
+    logic branch;              // Is this a branch?
+    ADDR branch_target;        // Resolved branch target
+    logic branch_taken;        // Resolved taken/not taken
+    ADDR pred_target;          // Predicted branch target
+    logic pred_taken;          // Predicted taken/not taken
+    logic halt;                // Is this a halt?
+    logic illegal;             // Is this illegal?
+} ROB_ENTRY;
 
 ///////////////////////////////
 // ---- Exception Codes ---- //
@@ -253,28 +338,89 @@ typedef enum logic [3:0] {
     OPB_IS_J_IMM  = 4'h5
 } ALU_OPB_SELECT;
 
-// ALU function code
-typedef enum logic [3:0] {
-    ALU_ADD     = 4'h0,
-    ALU_SUB     = 4'h1,
-    ALU_SLT     = 4'h2,
-    ALU_SLTU    = 4'h3,
-    ALU_AND     = 4'h4,
-    ALU_OR      = 4'h5,
-    ALU_XOR     = 4'h6,
-    ALU_SLL     = 4'h7,
-    ALU_SRL     = 4'h8,
-    ALU_SRA     = 4'h9
-} ALU_FUNC;
+// // ALU function code
+// typedef enum logic [3:0] {
+//     ALU_ADD     = 4'h0,
+//     ALU_SUB     = 4'h1,
+//     ALU_SLT     = 4'h2,
+//     ALU_SLTU    = 4'h3,
+//     ALU_AND     = 4'h4,
+//     ALU_OR      = 4'h5,
+//     ALU_XOR     = 4'h6,
+//     ALU_SLL     = 4'h7,
+//     ALU_SRL     = 4'h8,
+//     ALU_SRA     = 4'h9
+// } ALU_FUNC;
 
-// MULT funct3 code
-// we don't include division or rem options
+// // MULT funct3 code
+// // we don't include division or rem options
+// typedef enum logic [2:0] {
+//     M_MUL,
+//     M_MULH,
+//     M_MULHSU,
+//     M_MULHU
+// } MULT_FUNC;
+
+// Category enum (3 bits, matches your [6:4])
 typedef enum logic [2:0] {
-    M_MUL,
-    M_MULH,
-    M_MULHSU,
-    M_MULHU
-} MULT_FUNC;
+    CAT_ALU   = 3'b000,
+    CAT_MULT  = 3'b001,
+    CAT_MEM   = 3'b010,
+    CAT_BRANCH= 3'b011,
+    CAT_CSR   = 3'b100  // Control and Status Register operations
+} OP_CATEGORY;
+
+// Packed struct for OP_TYPE (total 7 bits)
+typedef struct packed {
+    OP_CATEGORY category;  // 3 bits
+    logic [3:0] func;      // 4 bits for sub-op (e.g., ADD=4'h0, MUL=4'h0, BYTE=4'h0)
+} OP_TYPE;
+
+// Constants for specific ops (assign struct values)
+const OP_TYPE OP_ALU_ADD     = '{category: CAT_ALU, func: 4'h0};
+const OP_TYPE OP_ALU_SUB     = '{category: CAT_ALU, func: 4'h1};
+const OP_TYPE OP_ALU_SLT     = '{category: CAT_ALU, func: 4'h2};
+const OP_TYPE OP_ALU_SLTU    = '{category: CAT_ALU, func: 4'h3};
+const OP_TYPE OP_ALU_AND     = '{category: CAT_ALU, func: 4'h4};
+const OP_TYPE OP_ALU_OR      = '{category: CAT_ALU, func: 4'h5};
+const OP_TYPE OP_ALU_XOR     = '{category: CAT_ALU, func: 4'h6};
+const OP_TYPE OP_ALU_SLL     = '{category: CAT_ALU, func: 4'h7};
+const OP_TYPE OP_ALU_SRL     = '{category: CAT_ALU, func: 4'h8};
+const OP_TYPE OP_ALU_SRA     = '{category: CAT_ALU, func: 4'h9};
+
+// Multiply operations
+const OP_TYPE OP_MULT_MUL    = '{category: CAT_MULT, func: 4'h0};
+const OP_TYPE OP_MULT_MULH   = '{category: CAT_MULT, func: 4'h1};
+const OP_TYPE OP_MULT_MULHSU = '{category: CAT_MULT, func: 4'h2};
+const OP_TYPE OP_MULT_MULHU  = '{category: CAT_MULT, func: 4'h3};
+
+// Memory operations (func[3]=1 for unsigned loads, func[2:0] for size)
+const OP_TYPE OP_LOAD_BYTE   = '{category: CAT_MEM, func: 4'b0000};  // Signed byte
+const OP_TYPE OP_LOAD_HALF   = '{category: CAT_MEM, func: 4'b0001};  // Signed half
+const OP_TYPE OP_LOAD_WORD   = '{category: CAT_MEM, func: 4'b0010};  // Signed word
+const OP_TYPE OP_LOAD_DOUBLE = '{category: CAT_MEM, func: 4'b0011};  // Signed double (if supported)
+const OP_TYPE OP_STORE_BYTE  = '{category: CAT_MEM, func: 4'b0100};
+const OP_TYPE OP_STORE_HALF  = '{category: CAT_MEM, func: 4'b0101};
+const OP_TYPE OP_STORE_WORD  = '{category: CAT_MEM, func: 4'b0110};
+const OP_TYPE OP_STORE_DOUBLE= '{category: CAT_MEM, func: 4'b0111};
+// Unsigned loads (bit 3=1 for unsigned)
+const OP_TYPE OP_LOAD_BYTE_U = '{category: CAT_MEM, func: 4'b1000};  // Unsigned byte
+const OP_TYPE OP_LOAD_HALF_U = '{category: CAT_MEM, func: 4'b1001};  // Unsigned half
+
+// Branch operations
+const OP_TYPE OP_BR_EQ       = '{category: CAT_BRANCH, func: 4'h0};
+const OP_TYPE OP_BR_NE       = '{category: CAT_BRANCH, func: 4'h1};
+const OP_TYPE OP_BR_LT       = '{category: CAT_BRANCH, func: 4'h2};
+const OP_TYPE OP_BR_GE       = '{category: CAT_BRANCH, func: 4'h3};
+const OP_TYPE OP_BR_LTU      = '{category: CAT_BRANCH, func: 4'h4};
+const OP_TYPE OP_BR_GEU      = '{category: CAT_BRANCH, func: 4'h5};
+const OP_TYPE OP_JAL         = '{category: CAT_BRANCH, func: 4'h6};
+const OP_TYPE OP_JALR        = '{category: CAT_BRANCH, func: 4'h7};
+
+// CSR operations
+const OP_TYPE OP_CSRRW       = '{category: CAT_CSR, func: 4'h0};
+const OP_TYPE OP_CSRRS       = '{category: CAT_CSR, func: 4'h1};
+const OP_TYPE OP_CSRRC       = '{category: CAT_CSR, func: 4'h2};
 
 ////////////////////////////////
 // ---- Datapath Packets ---- //
