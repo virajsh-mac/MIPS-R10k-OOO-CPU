@@ -49,7 +49,7 @@ module rs (
 
     // Priority selector module that take turns dispatches to highest and lowest index entries in RS
     logic [`N-1:0][`RS_SZ-1:0] available_entries;
-    logic [`RS_SZ-1:0] free_mask;
+    wor [`RS_SZ-1:0] free_mask;
     psel_gen #(
         .WIDTH(`RS_SZ),
         .REQS(`N)
@@ -67,6 +67,14 @@ module rs (
         // Compute free_mask
         for (int i = 0; i < `RS_SZ; i++) begin
             free_mask[i] = !rs_array[i].valid;  // 1 for free slots
+        end
+
+        // Clear issued entries
+        for (int i = 0; i < `N; i++) begin
+            if (clear_valid[i]) begin
+                rs_array_next[clear_idxs[i]].valid = 1'b0;
+                free_mask[clear_idxs[i]] = 1'b1;
+            end
         end
 
         // Allocate new entries from dispatch
@@ -99,13 +107,6 @@ module rs (
                         rs_array_next[i].src2_ready = 1'b1;
                     end
                 end
-            end
-        end
-
-        // Clear issued entries and flush on mispredict
-        for (int i = 0; i < `N; i++) begin
-            if (clear_valid[i]) begin
-                rs_array_next[clear_idxs[i]].valid = 1'b0;
             end
         end
     end
