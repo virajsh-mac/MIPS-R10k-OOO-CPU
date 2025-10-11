@@ -37,7 +37,7 @@ module rs (
 
     // From execute: mispredict flush signal
     input logic   mispredict,      // Mispredict detected (flush speculative)
-    input ROB_IDX mispred_rob_idx, // ROB index of mispredicted branch TODO: maybe delete?
+    // input ROB_IDX mispred_rob_idx, ROB index of mispredicted branch used for EARLY BRANCH RESOLUTION
 
     // Outputs to issue/dispatch
     output RS_ENTRY [`RS_SZ-1:0] entries,  // Full RS entries for issue selection
@@ -102,56 +102,32 @@ module rs (
             end
         end
 
-        // Clear issued entries
-        for (int k = 0; k < `N; k++) begin
-            if (clear_valid[k]) begin
-                rs_array_next[clear_idxs[k]].valid = 1'b0;
+        // Clear issued entries and flush on mispredict
+        for (int i = 0; i < `N; i++) begin
+            if (clear_valid[i]) begin
+                rs_array_next[clear_idxs[i]].valid = 1'b0;
             end
         end
-
-        // Flush speculative entries on mispredict
-        // TODO will be determined by our exception handling strategy
-
-        // Compute effective free
-        // TODO: use a counter
-        // for (int i = 0; i < `N; i++) begin
-        //     if (|available_entries[i]) effective_free += 1;
-        // end
     end
 
-    // effective_free state machine
-    // Compute effective free count (capped at N) for dispatch stall
-    // define `MAX_COUNT; //
-    always_comb begin
+    logic [$clog2(`RS_SZ+1)-1:0] effective_free, next_effective_free;
+    assign next_effective_free = effective_free + $countones(clear_valid) - $countones(alloc_valid);
 
-    end
-
-    logic [$clog2(`N+1)-1:0] effective_free;
-    always_comb begin
-        next_effective_free = effective_free;
-
-    end
-
-    always_ff @(posedge clock) begin
-        if (reset) begin
-            effective_free <=`MAX_RS_FREE_CNT;
-        end else begin
-            effective_free <=next_effective_free;
-        end
-    end
-
-    assign free_count = effective_free;  // Capped at N=3
+    assign free_count = (effective_free > `N) ? `N : effective_free;  // Capped at N=3
 
     // Assign output entries
     assign entries = rs_array;
 
     // Clocked update
     always_ff @(posedge clock) begin
-        if (reset) begin
+        if (reset | mispredict) begin
+            effective_free <=`RS_SZ;
+
             for (int i = 0; i < `RS_SZ; i++) begin
                 rs_array[i].valid <= 1'b0;
             end
         end else begin
+            effective_free <=next_effective_free;
             rs_array <= rs_array_next;
         end
     end
