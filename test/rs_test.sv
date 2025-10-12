@@ -233,7 +233,7 @@ module testbench;
 
         // Test 3: Allocate multiple (3) entries
         $display("\nTest 3: Allocate multiple (3) entries");
-        reset = 1; @(negedge clock); reset = 0; @(negedge clock);
+        reset = 1; #10; reset = 0;
         begin
             RS_ENTRY [`N-1:0] a_e;
             for (int i = 0; i < `N; i++) begin
@@ -244,16 +244,14 @@ module testbench;
                 a_e[i].src2_tag = 6'h20 + i;
                 a_e[i].src2_ready = 0;
             end
-            print_free_mask();
-            print_rs_arrays(all_empty());
             apply_inputs(3'b111, a_e, empty_cdb(), 3'b000, '{0,0,0}, 0);
         end
         begin
             RS_ENTRY [`RS_SZ-1:0] exp = all_empty();
-            for (int i = 0; i < `N; i++) exp[i] = alloc_entries[i];
-            print_free_mask();
-            print_rs_arrays(exp);
-            print_available_entries();
+            // Priority selector alternates: MSB (15), LSB (0), next MSB (14)
+            exp[`RS_SZ-1] = alloc_entries[0];  // Index 15
+            exp[0] = alloc_entries[1];         // Index 0
+            exp[`RS_SZ-2] = alloc_entries[2];  // Index 14
             check_entries(exp);
             check_free_count(3);
         end
