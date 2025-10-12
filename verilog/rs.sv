@@ -33,7 +33,8 @@ module rs (
 
     // Outputs to issue/dispatch
     output RS_ENTRY [`RS_SZ-1:0] entries,  // Full RS entries for issue selection
-    output logic [$clog2(`RS_SZ+1)-1:0] free_count  // Number of free entries (for dispatch stall)
+    output logic [$clog2(`RS_SZ+1)-1:0] free_count,  // Number of free entries (for dispatch stall)
+    output logic [`N-1:0][`RS_SZ-1:0] available_entries_out  // Available entries for allocation (for debugging)
 );
 
     // Internal storage: array of RS entries
@@ -111,16 +112,17 @@ module rs (
 
     // Assign output entries
     assign entries = rs_array;
+    assign available_entries_out = available_entries;
 
     // Clocked update
     always_ff @(posedge clock) begin
         if (reset | mispredict) begin
             effective_free <=`RS_SZ;
-            rs_array <='0;
+            // rs_array <='0;
 
-            // for (int i = 0; i < `RS_SZ; i++) begin
-            //     rs_array[i].valid <= 1'b0;
-            // end
+            for (int i = 0; i < `RS_SZ; i++) begin
+                rs_array[i].valid <= 1'b0;
+            end
         end else begin
             effective_free <=next_effective_free;
             rs_array <= rs_array_next;

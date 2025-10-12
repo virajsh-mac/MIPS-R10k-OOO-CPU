@@ -33,6 +33,7 @@ module testbench;
     // Outputs
     RS_ENTRY [`RS_SZ-1:0] entries;
     logic [$clog2(`RS_SZ+1)-1:0] free_count;
+    logic [`N-1:0][`RS_SZ-1:0] available_entries;
 
     rs dut (
         .clock(clock),
@@ -44,7 +45,8 @@ module testbench;
         .clear_idxs(clear_idxs),
         .mispredict(mispredict),
         .entries(entries),
-        .free_count(free_count)
+        .free_count(free_count),
+        .available_entries_out(available_entries)
     );
 
     always begin
@@ -94,6 +96,30 @@ module testbench;
             $display("  Entry %2d: valid=%b, src1_tag=%h, src1_ready=%b, src2_tag=%h, src2_ready=%b",
                      i, entries[i].valid, entries[i].src1_tag, entries[i].src1_ready, entries[i].src2_tag, entries[i].src2_ready);
         end
+    endtask
+
+    // Helper task to print the free mask
+    task print_free_mask;
+        $display("FREE MASK:");
+        $write("  ");
+        for (int i = 0; i < `RS_SZ; i++) begin
+            $write("%b", !entries[i].valid);
+        end
+        $display("");
+        $display("  (1=free, 0=occupied, LSB=index 0, MSB=index %0d)", `RS_SZ-1);
+    endtask
+
+    // Helper task to print available entries for allocation
+    task print_available_entries;
+        $display("AVAILABLE ENTRIES:");
+        for (int req = 0; req < `N; req++) begin
+            $write("  Request %0d: ", req);
+            for (int i = 0; i < `RS_SZ; i++) begin
+                $write("%b", available_entries[req][i]);
+            end
+            $display("");
+        end
+        $display("  (1=available for allocation, 0=not available, LSB=index 0, MSB=index %0d)", `RS_SZ-1);
     endtask
 
     // Helper task to check all entries against expected
@@ -205,27 +231,32 @@ module testbench;
             check_free_count(`N);  // Still >N free
         end
 
-        // // Test 3: Allocate multiple (3) entries to lowest indices
-        // $display("\nTest 3: Allocate multiple (3) entries to lowest indices");
-        // reset = 1; @(negedge clock); reset = 0; @(negedge clock);  // Reset for clean start
-        // begin
-        //     RS_ENTRY [`N-1:0] a_e;
-        //     for (int i = 0; i < `N; i++) begin
-        //         a_e[i] = empty_entry();
-        //         a_e[i].valid = 1;
-        //         a_e[i].src1_tag = 6'h10 + i;
-        //         a_e[i].src1_ready = 0;
-        //         a_e[i].src2_tag = 6'h20 + i;
-        //         a_e[i].src2_ready = 0;
-        //     end
-        //     apply_inputs(3'b111, a_e, empty_cdb(), 3'b000, '{0,0,0}, 0);
-        // end
-        // begin
-        //     RS_ENTRY [`RS_SZ-1:0] exp = all_empty();
-        //     for (int i = 0; i < `N; i++) exp[i] = alloc_entries[i];
-        //     check_entries(exp);
-        //     check_free_count(3);
-        // end
+        // Test 3: Allocate multiple (3) entries
+        $display("\nTest 3: Allocate multiple (3) entries");
+        reset = 1; @(negedge clock); reset = 0; @(negedge clock);
+        begin
+            RS_ENTRY [`N-1:0] a_e;
+            for (int i = 0; i < `N; i++) begin
+                a_e[i] = empty_entry();
+                a_e[i].valid = 1;
+                a_e[i].src1_tag = 6'h10 + i;
+                a_e[i].src1_ready = 0;
+                a_e[i].src2_tag = 6'h20 + i;
+                a_e[i].src2_ready = 0;
+            end
+            print_free_mask();
+            print_rs_arrays(all_empty());
+            apply_inputs(3'b111, a_e, empty_cdb(), 3'b000, '{0,0,0}, 0);
+        end
+        begin
+            RS_ENTRY [`RS_SZ-1:0] exp = all_empty();
+            for (int i = 0; i < `N; i++) exp[i] = alloc_entries[i];
+            print_free_mask();
+            print_rs_arrays(exp);
+            print_available_entries();
+            check_entries(exp);
+            check_free_count(3);
+        end
 
         // // Test 4: Allocate when some occupied, check next lowest free
         // $display("\nTest 4: Allocate when some occupied, check next lowest free");
@@ -263,12 +294,17 @@ module testbench;
         //     end
         //     // Allocate 3 per cycle until full
         //     for (int c = 0; c < 5; c++) begin  // 5*3=15
+        //         print_rs_arrays(all_empty());  // Print current vs expected empty
         //         apply_inputs(3'b111, a_e_base, empty_cdb(), 3'b000, '{0,0,0}, 0);
         //     end
         //     // One more to make 16
+        //     $display("RS state before first check_free_count(0):");
+        //     print_rs_arrays(all_empty());  // Print current vs expected empty
         //     apply_inputs(3'b001, a_e_base, empty_cdb(), 3'b000, '{0,0,0}, 0);
         //     check_free_count(0);
         //     // Attempt to allocate 3 more, should not happen
+        //     $display("RS state before second check_free_count(0):");
+        //     print_rs_arrays(all_empty());  // Print current vs expected empty
         //     apply_inputs(3'b111, a_e_base, empty_cdb(), 3'b000, '{0,0,0}, 0);
         //     check_free_count(0);  // No change
         // end
