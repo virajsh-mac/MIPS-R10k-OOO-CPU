@@ -80,6 +80,22 @@ module testbench;
         end
     endtask
 
+    // Helper task to print full expected and actual RS arrays
+    task print_rs_arrays(
+        input RS_ENTRY [`RS_SZ-1:0] expected
+    );
+        $display("EXPECTED RS:");
+        for (int i = 0; i < `RS_SZ; i++) begin
+            $display("  Entry %2d: valid=%b, src1_tag=%h, src1_ready=%b, src2_tag=%h, src2_ready=%b",
+                     i, expected[i].valid, expected[i].src1_tag, expected[i].src1_ready, expected[i].src2_tag, expected[i].src2_ready);
+        end
+        $display("ACTUAL RS:");
+        for (int i = 0; i < `RS_SZ; i++) begin
+            $display("  Entry %2d: valid=%b, src1_tag=%h, src1_ready=%b, src2_tag=%h, src2_ready=%b",
+                     i, entries[i].valid, entries[i].src1_tag, entries[i].src1_ready, entries[i].src2_tag, entries[i].src2_ready);
+        end
+    endtask
+
     // Helper task to check all entries against expected
     task check_entries(
         input RS_ENTRY [`RS_SZ-1:0] expected
@@ -174,6 +190,7 @@ module testbench;
         begin
             RS_ENTRY [`RS_SZ-1:0] exp = all_empty();
             exp[`RS_SZ-1] = alloc_entries[0];  // priority selector inserts top-bottom alternating
+            // print_rs_arrays(exp);  // Debug: print full expected and actual RS
             check_entries(exp);
             check_free_count(`N);  // Still >N free
         end
