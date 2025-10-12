@@ -336,6 +336,16 @@ typedef struct packed {
     logic [3:0] func;      // 4 bits for sub-op (e.g., ADD=4'h0, MUL=4'h0, BYTE=4'h0)
 } OP_TYPE;
 
+// for ROB via Complete
+typedef struct packed {
+    logic [`N-1:0] valid;      // Valid updates this cycle
+    ROB_IDX [`N-1:0] idx;      // ROB indices to update
+    DATA [`N-1:0] values;      // Values to store (if applicable)
+    logic [`N-1:0] branch_taken;  // Resolved taken/not taken (if branch)
+    ADDR [`N-1:0] branch_targets; // Resolved branch targets (if branch)
+} ROB_UPDATE_PACKET;
+
+
 // Constants for specific ops (assign struct values)
 const OP_TYPE OP_ALU_ADD     = '{category: CAT_ALU, func: 4'h0};
 const OP_TYPE OP_ALU_SUB     = '{category: CAT_ALU, func: 4'h1};

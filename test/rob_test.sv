@@ -1,5 +1,8 @@
 
 `include "sys_defs.svh"
+// sys_defs.svh
+
+
 
 module rob_test;
 
@@ -12,7 +15,7 @@ module rob_test;
     ROB_UPDATE_PACKET rob_update_packet;
     ROB_ENTRY [`N-1:0] head_entries;
     logic [`N-1:0] head_valids;
-    logic [`N:0] retire_count;
+    //logic [`N:0] retire_count;
     logic mispredict;
     ROB_IDX mispred_idx;
 
@@ -27,7 +30,6 @@ module rob_test;
         .rob_update_packet(rob_update_packet),
         .head_entries(head_entries),
         .head_valids(head_valids),
-        .retire_count(retire_count),
         .mispredict(mispredict),
         .mispred_idx(mispred_idx)
     );
@@ -39,11 +41,12 @@ module rob_test;
     bit failed = 0;
 
     initial begin
+        integer remainder;
         // --- Initialization ---
         clock = 0;
         reset = 1;
         alloc_valid = 0;
-        retire_count = 0;
+        //retire_count = 0;
         rob_update_packet = '{default:0};
         mispredict = 0;
         mispred_idx = '0;
@@ -53,6 +56,10 @@ module rob_test;
         @(negedge clock);
         reset = 0;
         @(posedge clock);  // Allow one cycle after reset
+    
+        // monitor the following signals (can add more later):
+        $monitor("Time %0t | head=%0d tail=%0d free_slots=%0d",
+                  $time, dut.head, dut.tail, dut.free_slots);
 
         // --- Check conditions ---
         $display("Checking if ROB is empty after reset...");
@@ -74,12 +81,44 @@ module rob_test;
         else
             $display("ROB failed initial empty-state check.");
 
+        // --- Fill the ROB ---
+    $display("Filling the ROB...");
+
+    // Mark all allocations as valid
+    alloc_valid = '1;  // all bits 1
+    for (int i = 0; i < `ROB_SZ / `N; i++) begin
+        rob_entry_packet = '{default:'0};  // you can set some dummy values
+        @(posedge clock);
+    end
+
+    // Allocate any remaining entries if `ROB_SZ` is not a multiple of `N`
+    remainder = `ROB_SZ % `N;
+    if (remainder > 0) begin
+        alloc_valid = '0;
+        for (int i = 0; i < remainder; i++) alloc_valid[i] = 1'b1;
+        rob_entry_packet = '{default:'0};
+        @(posedge clock);
+    end
+
+    // --- Check if ROB is full ---
+    $display("Checking if ROB is full...");
+    if (free_slots !== 0) begin
+        $display("FAIL: Expected free_slots = 0, got %0d", free_slots);
+        failed = 1;
+    end
+
+    if (!failed)
+        $display("PASS: ROB full condition detected correctly.");
+    else
+        $display("ROB full test failed.");
+    
         $finish;
     end
 
 endmodule
 
 
+//ignore below just used as reference (can delete)
 
 // // Compute the correct mult output similar to project 3
 // module correct_mult (

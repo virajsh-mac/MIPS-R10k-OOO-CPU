@@ -20,14 +20,8 @@
 
 // ROB entry structure is now defined in sys_defs.svh
 
-// ROB update packet (extended for branch info)
-typedef struct packed {
-    logic [`N-1:0] valid;      // Valid updates this cycle
-    ROB_IDX [`N-1:0] idx;      // ROB indices to update
-    DATA [`N-1:0] values;      // Values to store (if applicable)
-    logic [`N-1:0] branch_taken;  // Resolved taken/not taken (if branch)
-    ADDR [`N-1:0] branch_targets; // Resolved branch targets (if branch)
-} ROB_UPDATE_PACKET;
+// ROB update packet (extended for branch info) now in SYS_DEFS
+
 
 module rob (
     input              clock,           // system clock
@@ -47,26 +41,29 @@ module rob (
     output logic [`N-1:0] head_valids,   // Valid bits for each head entry
 
     // to delete
-    input logic [`N:0] retire_count,  // Number of instructions to retire (0 to N) -> the maximum number of instructions that can be retired in a single cycle
+    //input logic [`N:0] retire_count,  // Number of instructions to retire (0 to N) -> the maximum number of instructions that can be retired in a single cycle
 
     // Flush on mispredict (from Execute or Retire)
     input logic mispredict,             // Flush signal
     input ROB_IDX mispred_idx           // ROB index of mispredicted branch (truncate after this)
 );
-
+    
+    localparam ALLOC_CNT_WIDTH = $clog2(`N);
     // Internal storage: circular buffer of entries
     ROB_ENTRY [`ROB_SZ-1:0] rob_array;
 
-    logic [$clog2(`N)-1:0] retire_count;
+    logic [ALLOC_CNT_WIDTH - 1:0] retire_count;
 
     // Head (oldest) and tail (next allocation) pointers
     ROB_IDX head, tail;
     ROB_IDX head_next, tail_next;
+    ROB_IDX idx1, idx2, idx3, idx4;
+    
 
     // Combinational: compute free slots
-    always_comb begin
-        free_slots = `ROB_SZ - ((tail - head) % `ROB_SZ);
-    end
+    
+    assign free_slots = `ROB_SZ - ((tail - head) % `ROB_SZ);
+    
 
     // Combinational: assign allocation indices starting from tail
     always_comb begin
@@ -83,17 +80,18 @@ module rob (
     always_comb begin
         retire_count = '0;
         for (int i = 0; i < `N; i++) begin
-            ROB_IDX idx = (head + i) % `ROB_SZ;
-            head_entries[i] = rob_array[idx];
+            idx1 = (head + i) % `ROB_SZ;
+            head_entries[i] = rob_array[idx1];
             // Valid if within committed range and entry is valid
-            head_valids[i] = ((tail - head) % `ROB_SZ > i) && rob_array[idx].valid;
-            retire_count = retire_count + rob_array[idx].valid;
+            head_valids[i] = ((tail - head) % `ROB_SZ > i) && rob_array[idx1].valid;
+            retire_count = retire_count + rob_array[idx1].valid;
         end
     end
 
     // Next state logic (combinational)
     ROB_ENTRY [`ROB_SZ-1:0] rob_next;
-
+    logic [(ALLOC_CNT_WIDTH-1):0] alloc_cnt;
+    logic [(ALLOC_CNT_WIDTH-1):0] retire_cnt;
     always_comb begin
         rob_next = rob_array;
         head_next = head;
@@ -108,41 +106,46 @@ module rob (
             // ### ALLOCATION: write new entries at alloc_idxs
             for (int i = 0; i < `N; i++) begin
                 if (alloc_valid[i]) begin
-                    ROB_IDX idx = alloc_idxs[i];
-                    rob_next[idx] = rob_entry_packet[i];
-                    rob_next[idx].valid = 1'b1;
-                    rob_next[idx].complete = 1'b0;
-                    rob_next[idx].exception = NO_ERROR;
+                    idx2 = alloc_idxs[i];
+                    rob_next[idx2] = rob_entry_packet[i];
+                    rob_next[idx2].valid = 1'b1;
+                    rob_next[idx2].complete = 1'b0;
+                    rob_next[idx2].exception = NO_ERROR;
                 end
             end
             // ### ADVANCE TAIL HEADER: advance tail by number allocated
-            int alloc_cnt = 0;
-            for (int i = 0; i < `N; i++) alloc_cnt += alloc_valid[i];
+            alloc_cnt = 0;
+            for (int i = 0; i < `N; i++) begin
+                alloc_cnt = alloc_cnt + alloc_valid[i];
+            end 
             tail_next = (tail + alloc_cnt) % `ROB_SZ;
+
 
             // Updates from Complete: set complete, value, and branch info
             for (int i = 0; i < `N; i++) begin
                 if (rob_update_packet.valid[i]) begin
-                    ROB_IDX idx = rob_update_packet.idx[i];
-                    rob_next[idx].complete = 1'b1;
+                    idx3 = rob_update_packet.idx[i];
+                    rob_next[idx3].complete = 1'b1;
                     // FIGURE OUT WHAT BELOW LINE MEANS
-                   // rob_next[idx].value = rob_update_packet.values[i];
-                    if (rob_next[idx].branch) begin
-                        rob_next[idx].branch_taken = rob_update_packet.branch_taken[i];
-                        rob_next[idx].branch_target = rob_update_packet.branch_targets[i];
+                    // rob_next[idx].value = rob_update_packet.values[i];
+                    if (rob_next[idx3].branch) begin
+                        rob_next[idx3].branch_taken = rob_update_packet.branch_taken[i];
+                        rob_next[idx3].branch_target = rob_update_packet.branch_targets[i];
                     end
                 end
             end
 
             // Retire: advance head, invalidate retired entries (optional)
-            int retire_cnt = 0;
-            for (int i = 0; i < `N; i++) retire_cnt += retire_valid[i]
+            retire_cnt = 0;
+            for (int i = 0; i < `N; i++) begin
+                retire_cnt = retire_cnt + rob_array[(head + i) % `ROB_SZ] ;
+            end 
             head_next = (head + retire_cnt) % `ROB_SZ;
 
             for (int i = 0; i < retire_count; i++) begin
                 if (i < `N) begin  // Guard against over-retire
-                    ROB_IDX idx = (head + i) % `ROB_SZ;
-                    rob_next[idx].valid = 1'b0;
+                    idx4 = (head + i) % `ROB_SZ;
+                    rob_next[idx4].valid = 1'b0;
                     //  T to update arch. map, and put Told into free list.
                 end
             end
