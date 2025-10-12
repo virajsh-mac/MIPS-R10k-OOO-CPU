@@ -55,6 +55,7 @@ module rs (
     // Combinational logic for updates: wakeup, clear, alloc, flush
     always_comb begin
         rs_array_next = rs_array;
+        free_mask = `RS_SZ'b0;
 
         // Compute free_mask
         for (int i = 0; i < `RS_SZ; i++) begin
