@@ -116,10 +116,11 @@ module rs (
     always_ff @(posedge clock) begin
         if (reset | mispredict) begin
             effective_free <=`RS_SZ;
+            rs_array <='0;
 
-            for (int i = 0; i < `RS_SZ; i++) begin
-                rs_array[i].valid <= 1'b0;
-            end
+            // for (int i = 0; i < `RS_SZ; i++) begin
+            //     rs_array[i].valid <= 1'b0;
+            // end
         end else begin
             effective_free <=next_effective_free;
             rs_array <= rs_array_next;
