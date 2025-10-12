@@ -41,7 +41,7 @@ module rs (
 
     // Priority selector module that take turns dispatches to highest and lowest index entries in RS
     logic [`N-1:0][`RS_SZ-1:0] available_entries;
-    wor [`RS_SZ-1:0] free_mask;
+    logic [`RS_SZ-1:0] free_mask;
     psel_gen #(
         .WIDTH(`RS_SZ),
         .REQS(`N)
