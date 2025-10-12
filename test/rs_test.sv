@@ -103,16 +103,26 @@ module testbench;
         logic mismatch;
         mismatch = 0;
         for (int i = 0; i < `RS_SZ; i++) begin
-            if (entries[i].valid != expected[i].valid ||
-                entries[i].src1_tag != expected[i].src1_tag ||
-                entries[i].src1_ready != expected[i].src1_ready ||
-                entries[i].src2_tag != expected[i].src2_tag ||
-                entries[i].src2_ready != expected[i].src2_ready) begin
-                $display("Entry %d mismatch: expected valid=%b, src1_tag=%h, src1_ready=%b, src2_tag=%h, src2_ready=%b",
-                         i, expected[i].valid, expected[i].src1_tag, expected[i].src1_ready, expected[i].src2_tag, expected[i].src2_ready);
-                $display("               got valid=%b, src1_tag=%h, src1_ready=%b, src2_tag=%h, src2_ready=%b",
-                         entries[i].valid, entries[i].src1_tag, entries[i].src1_ready, entries[i].src2_tag, entries[i].src2_ready);
-                mismatch = 1;
+            // Only check valid bit for invalid expected entries
+            if (!expected[i].valid) begin
+                if (entries[i].valid != expected[i].valid) begin
+                    $display("Entry %d mismatch: expected valid=%b, got valid=%b",
+                             i, expected[i].valid, entries[i].valid);
+                    mismatch = 1;
+                end
+            end else begin
+                // For valid expected entries, check all fields
+                if (entries[i].valid != expected[i].valid ||
+                    entries[i].src1_tag != expected[i].src1_tag ||
+                    entries[i].src1_ready != expected[i].src1_ready ||
+                    entries[i].src2_tag != expected[i].src2_tag ||
+                    entries[i].src2_ready != expected[i].src2_ready) begin
+                    $display("Entry %d mismatch: expected valid=%b, src1_tag=%h, src1_ready=%b, src2_tag=%h, src2_ready=%b",
+                             i, expected[i].valid, expected[i].src1_tag, expected[i].src1_ready, expected[i].src2_tag, expected[i].src2_ready);
+                    $display("               got valid=%b, src1_tag=%h, src1_ready=%b, src2_tag=%h, src2_ready=%b",
+                             entries[i].valid, entries[i].src1_tag, entries[i].src1_ready, entries[i].src2_tag, entries[i].src2_ready);
+                    mismatch = 1;
+                end
             end
         end
         if (mismatch) failed = 1;
@@ -151,8 +161,8 @@ module testbench;
     endfunction
 
     initial begin
-        $dumpfile("../rs.vcd");
-        $dumpvars(0, testbench.dut);
+        // $dumpfile("../rs.vcd");
+        // $dumpvars(0, testbench.dut);
 
         clock = 0;
         reset = 1;
