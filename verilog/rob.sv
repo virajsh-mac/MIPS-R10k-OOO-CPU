@@ -57,12 +57,21 @@ module rob (
     // Head (oldest) and tail (next allocation) pointers
     ROB_IDX head, tail;
     ROB_IDX head_next, tail_next;
-    ROB_IDX idx1, idx2, idx3, idx4;
+    ROB_IDX idx1, idx3, idx4;
     
 
     // Combinational: compute free slots
-    
-    assign free_slots = `ROB_SZ - ((tail - head) % `ROB_SZ);
+    logic [$clog2(`ROB_SZ):0] valid_count;
+    always_comb begin
+        valid_count = 0;
+        for (int i = 0; i < `ROB_SZ; i++) begin
+            if (rob_array[i].valid) begin
+                valid_count = valid_count + 1;
+            end
+        end
+
+        free_slots = `ROB_SZ - valid_count;
+    end
     
 
     // Combinational: assign allocation indices starting from tail
@@ -103,22 +112,20 @@ module rob (
             // No need to invalidate entries explicitly; overwriting on future alloc suffices
         end else begin
 
-            // ### ALLOCATION: write new entries at alloc_idxs
+            // Retire: advance head, invalidate retired entries (optional)
+            retire_cnt = 0;
             for (int i = 0; i < `N; i++) begin
-                if (alloc_valid[i]) begin
-                    idx2 = alloc_idxs[i];
-                    rob_next[idx2] = rob_entry_packet[i];
-                    rob_next[idx2].valid = 1'b1;
-                    rob_next[idx2].complete = 1'b0;
-                    rob_next[idx2].exception = NO_ERROR;
+                retire_cnt = retire_cnt + (rob_array[(head + i) % `ROB_SZ].complete && rob_array[(head + i) % `ROB_SZ].valid);
+            end 
+            head_next = (head + retire_cnt) % `ROB_SZ;
+
+            for (int i = 0; i < retire_cnt; i++) begin
+                if (i < `N) begin  // Guard against over-retire
+                    idx4 = (head + i) % `ROB_SZ;
+                    rob_next[idx4].valid = 1'b0;
+                    //  T to update arch. map, and put Told into free list.
                 end
             end
-            // ### ADVANCE TAIL HEADER: advance tail by number allocated
-            alloc_cnt = 0;
-            for (int i = 0; i < `N; i++) begin
-                alloc_cnt = alloc_cnt + alloc_valid[i];
-            end 
-            tail_next = (tail + alloc_cnt) % `ROB_SZ;
 
 
             // Updates from Complete: set complete, value, and branch info
@@ -135,20 +142,23 @@ module rob (
                 end
             end
 
-            // Retire: advance head, invalidate retired entries (optional)
-            retire_cnt = 0;
-            for (int i = 0; i < `N; i++) begin
-                retire_cnt = retire_cnt + rob_array[(head + i) % `ROB_SZ] ;
-            end 
-            head_next = (head + retire_cnt) % `ROB_SZ;
 
-            for (int i = 0; i < retire_count; i++) begin
-                if (i < `N) begin  // Guard against over-retire
-                    idx4 = (head + i) % `ROB_SZ;
-                    rob_next[idx4].valid = 1'b0;
-                    //  T to update arch. map, and put Told into free list.
+            // ### ALLOCATION: write new entries at alloc_idxs
+            for (int i = 0; i < `N; i++) begin
+                if (alloc_valid[i]) begin
+                    //idx2 = alloc_idxs[i];
+                    rob_next[(tail + i) % `ROB_SZ] = rob_entry_packet[i];
+                    rob_next[(tail + i) % `ROB_SZ].valid = 1'b1;
+                    rob_next[(tail + i) % `ROB_SZ].complete = 1'b0;
+                    rob_next[(tail + i) % `ROB_SZ].exception = NO_ERROR;
                 end
             end
+            // ### ADVANCE TAIL HEADER: advance tail by number allocated
+            alloc_cnt = 0;
+            for (int i = 0; i < `N; i++) begin
+                alloc_cnt = alloc_cnt + alloc_valid[i];
+            end 
+            tail_next = (tail + alloc_cnt) % `ROB_SZ;
         end
     end
 
@@ -165,6 +175,7 @@ module rob (
             tail <= tail_next;
             rob_array <= rob_next;
         end
+
     end
 
 endmodule // rob
