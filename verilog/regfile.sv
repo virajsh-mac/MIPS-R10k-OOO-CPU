@@ -1,76 +1,56 @@
-/////////////////////////////////////////////////////////////////////////
-//                                                                     //
-//   Modulename :  regfile.sv                                          //
-//                                                                     //
-//  Description :  This module creates the Regfile used by the ID and  //
-//                 WB Stages of the Pipeline.                          //
-//                                                                     //
-/////////////////////////////////////////////////////////////////////////
-
 `include "sys_defs.svh"
 
-// P4 TODO: update this with the new parameters from sys_defs
-// namely: PHYS_REG_SZ_P6 or PHYS_REG_SZ_R10K
-
 module regfile (
-    input         clock, // system clock
-    // note: no system reset, register values must be written before they can be read
-    input REG_IDX read_idx_1, read_idx_2, write_idx,
-    input         write_en,
-    input DATA    write_data,
+  input  logic                         clock,
+  input  logic                         reset_n,
 
-    output DATA   read_out_1, read_out_2
+  input  PHYS_TAG [2*`N-1:0]           read_idx,
+  output DATA    [2*`N-1:0]            read_out,
+
+  input  logic   [`N-1:0]              write_en,
+  input  PHYS_TAG[`N-1:0]              write_idx,
+  input  DATA    [`N-1:0]              write_data
 );
 
-    // Intermediate data before accounting for register 0
-    DATA  rdata2, rdata1;
-    // Don't read or write when dealing with register 0
-    logic re2, re1;
-    logic we;
+  DATA mem [`PHYS_REG_SZ_R10K-1:0];
 
-    // Technically we only need 31 registers since reg 0 is hard wired to 0
-    // But since we're not grading area, just set size to 32 to make interface
-    // easier and avoid having to subtract 1 from all addresses
-    memDP #(
-        .WIDTH     ($bits(DATA)), // 32-bit registers
-        .DEPTH     (32),
-        .READ_PORTS(2), // 2 read ports
-        .BYPASS_EN (1)) // Allow internal forwarding
-    regfile_mem (
-        .clock(clock),
-        .reset(1'b0),   // must be written before read
-        .re   ({re2,        re1}),
-        .raddr({read_idx_2, read_idx_1}),
-        .rdata({rdata2,     rdata1}),
-        .we   (we),
-        .waddr(write_idx),
-        .wdata(write_data)
-    );
+  // Combinational reads with same-cycle bypass
+  genvar i;
+  generate
+    for (i = 0; i < 2*`N; i++) begin : GEN_READS
+      always_comb begin
+        DATA r;
 
-    // Read port 1
-    always_comb begin
-        if (read_idx_1 == `ZERO_REG) begin
-            read_out_1 = '0;
-            re1        = 1'b0;
-        end else begin
-            read_out_1 = rdata1;
-            re1       = 1'b1;
+        // zero-reg or array
+        if (read_idx[i] == PHYS_TAG'(0)) r = '0;
+        else                             r = mem[read_idx[i]];
+
+        // same-cycle bypass logic
+        for (int w = 0; w < `N; w++) begin
+          if (write_en[w] &&
+              (write_idx[w] != PHYS_TAG'(0)) &&
+              (write_idx[w] == read_idx[i])) begin
+            r = write_data[w];
+          end
         end
-    end
 
-    // Read port 2
-    always_comb begin
-        if (read_idx_2 == `ZERO_REG) begin
-            read_out_2 = '0;
-            re2        = 1'b0;
-        end else begin
-            read_out_2 = rdata2;
-            re2       = 1'b1;
+        read_out[i] = r;
+      end
+    end
+  endgenerate
+
+  // Posedge writes and reset logic
+  always_ff @(posedge clock or negedge reset_n) begin
+    if (!reset_n) begin
+      for (int k = 0; k < `PHYS_REG_SZ_R10K; k++) mem[k] <= '0;
+    end else begin
+      for (int w = 0; w < `N; w++) begin
+        if (write_en[w] && (write_idx[w] != PHYS_TAG'(0))) begin
+          mem[write_idx[w]] <= write_data[w];
         end
+      end
+      mem[PHYS_TAG'(0)] <= '0; // keep zero hard-wired
     end
+  end
 
-    // Write port
-    // Can't write to zero register
-    assign we = write_en && (write_idx != `ZERO_REG);
-
-endmodule // regfile
+endmodule
