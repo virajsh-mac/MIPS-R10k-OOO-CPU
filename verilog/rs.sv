@@ -33,8 +33,7 @@ module rs (
 
     // Outputs to issue/dispatch
     output RS_ENTRY [`RS_SZ-1:0] entries,  // Full RS entries for issue selection
-    output logic [$clog2(`RS_SZ+1)-1:0] free_count,  // Number of free entries (for dispatch stall)
-    output logic [`N-1:0][`RS_SZ-1:0] available_entries_out  // Available entries for allocation (for debugging REMOVE LATER)
+    output logic [$clog2(`RS_SZ+1)-1:0] free_count // Number of free entries (for dispatch stall)
 );
 
     // Internal storage: array of RS entries
@@ -87,17 +86,17 @@ module rs (
 
         // Wakeup operands via CDB (associative tag match)
         for (int i = 0; i < `RS_SZ; i++) begin
-            if (rs_array[i].valid) begin
+            if (rs_array_next[i].valid) begin
                 for (int j = 0; j < `CDB_SZ; j++) begin
                     // Note that we theoretically don't care whether the existing
                     // bit is zero because we will only broadcast one physical
                     // register over the CDB that could ever correspond to a RS entry
                     // over its lifetime.
-                    if (rs_array[i].src1_tag == cdb_broadcast.tags[j]) begin
+                    if (cdb_broadcast.valid[j] && rs_array_next[i].src1_tag == cdb_broadcast.tags[j]) begin
                         rs_array_next[i].src1_ready = 1'b1;
                     end
 
-                    if (rs_array[i].src2_tag == cdb_broadcast.tags[j]) begin
+                    if (cdb_broadcast.valid[j] && rs_array_next[i].src2_tag == cdb_broadcast.tags[j]) begin
                         rs_array_next[i].src2_ready = 1'b1;
                     end
                 end
@@ -108,11 +107,10 @@ module rs (
     logic [$clog2(`RS_SZ+1)-1:0] effective_free, next_effective_free;
     assign next_effective_free = effective_free + $countones(clear_valid) - $countones(alloc_valid);
 
-    assign free_count = (effective_free > `N) ? `N : effective_free;  // Capped at N=3
+    assign free_count = (effective_free > `N) ? `N : effective_free;  // Capped at N
 
     // Assign output entries
     assign entries = rs_array;
-    assign available_entries_out = available_entries;
 
     // Clocked update
     always_ff @(posedge clock) begin
