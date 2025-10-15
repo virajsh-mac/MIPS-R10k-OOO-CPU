@@ -190,7 +190,7 @@ GREP = grep -E --color=auto
 # ---- Modules to Test ---- #
 
 # TODO: add more modules here
-MODULES = cpu mult rob rs
+MODULES = cpu mult rob rs regfile
 
 # TODO: update this if you add more header files
 ALL_HEADERS = $(CPU_HEADERS)
@@ -213,6 +213,12 @@ ROB_FILES = verilog/sys_defs.svh
 build/rob.simv: $(ROB_FILES)
 build/rob.cov: $(ROB_FILES)
 synth/rob.vg: $(ROB_FILES)
+
+# ---- regfile testbench deps (like RS_FILES / ROB_FILES) ---- #
+REGFILE_FILES = verilog/sys_defs.svh verilog/ISA.svh
+build/regfile.simv: $(REGFILE_FILES)
+build/regfile.cov:  $(REGFILE_FILES)
+synth/regfile.vg:   $(REGFILE_FILES)
 
 #################################
 # ---- Main CPU Definition ---- #
