@@ -163,46 +163,6 @@ typedef struct packed {
     PHYS_TAG [`CDB_SZ-1:0] tags;  // Physical dest tags
 } CDB_PACKET;
 
-// RS entry structure (extended for full control signals)
-typedef struct packed {
-    logic valid;               // Entry occupied
-    ALU_OPA_SELECT opa_select; // From decode (where is OPA coming from)
-    ALU_OPB_SELECT opb_select; // From decode (where is OPB coming from)
-    OP_TYPE op_type;           // Which unit are we routing to in EX and what suboperation
-    PHYS_TAG src1_tag;         // Physical source 1 tag
-    logic src1_ready;          // Source 1 ready
-    DATA src1_value;           // Source 1 value if immediate
-    PHYS_TAG src2_tag;         // Physical source 2 tag
-    logic src2_ready;          // Source 2 ready
-    DATA src2_value;           // Source 2 value if immediate
-    PHYS_TAG dest_tag;         // Physical destination tag
-    ROB_IDX rob_idx;           // Associated ROB index (for flush and potential age selection)
-    ADDR PC;                   // PC for branch/debug (MIGHT merge with SRC but only if we can resolve mispredicts othersive)
-    // Added for branches (prediction info from fetch via dispatch)
-    logic pred_taken;
-    ADDR pred_target;
-} RS_ENTRY;
-
-// ROB entry structure
-typedef struct packed {
-    logic valid;               // Entry occupied
-    ADDR PC;                   // PC of instruction
-    INST inst;                 // Full instruction
-    REG_IDX arch_rd;           // Architectural destination reg
-    PHYS_TAG phys_rd;          // Assigned physical dest reg
-    PHYS_TAG prev_phys_rd;     // Previous physical mapping (for free on commit)
-    DATA value;                // Computed value (from Complete, if needed)
-    logic complete;            // Instruction has completed
-    EXCEPTION_CODE exception;  // Any exception code
-    logic branch;              // Is this a branch?
-    ADDR branch_target;        // Resolved branch target
-    logic branch_taken;        // Resolved taken/not taken
-    ADDR pred_target;          // Predicted branch target
-    logic pred_taken;          // Predicted taken/not taken
-    logic halt;                // Is this a halt?
-    logic illegal;             // Is this illegal?
-} ROB_ENTRY;
-
 ///////////////////////////////
 // ---- Exception Codes ---- //
 ///////////////////////////////
@@ -422,111 +382,151 @@ const OP_TYPE OP_CSRRW       = '{category: CAT_CSR, func: 4'h0};
 const OP_TYPE OP_CSRRS       = '{category: CAT_CSR, func: 4'h1};
 const OP_TYPE OP_CSRRC       = '{category: CAT_CSR, func: 4'h2};
 
-////////////////////////////////
-// ---- Datapath Packets ---- //
-////////////////////////////////
-
-/**
- * Packets are used to move many variables between modules with
- * just one datatype, but can be cumbersome in some circumstances.
- *
- * Define new ones in project 4 at your own discretion
- */
-
-/**
- * IF_ID Packet:
- * Data exchanged from the IF to the ID stage
- */
+// RS entry structure (extended for full control signals)
 typedef struct packed {
-    INST  inst;
-    ADDR  PC;
-    ADDR  NPC; // PC + 4
-    logic valid;
-} IF_ID_PACKET;
+    logic valid;               // Entry occupied
+    ALU_OPA_SELECT opa_select; // From decode (where is OPA coming from)
+    ALU_OPB_SELECT opb_select; // From decode (where is OPB coming from)
+    OP_TYPE op_type;           // Which unit are we routing to in EX and what suboperation
+    PHYS_TAG src1_tag;         // Physical source 1 tag
+    logic src1_ready;          // Source 1 ready
+    DATA src1_value;           // Source 1 value if immediate
+    PHYS_TAG src2_tag;         // Physical source 2 tag
+    logic src2_ready;          // Source 2 ready
+    DATA src2_value;           // Source 2 value if immediate
+    PHYS_TAG dest_tag;         // Physical destination tag
+    ROB_IDX rob_idx;           // Associated ROB index (for flush and potential age selection)
+    ADDR PC;                   // PC for branch/debug (MIGHT merge with SRC but only if we can resolve mispredicts othersive)
+    // Added for branches (prediction info from fetch via dispatch)
+    logic pred_taken;
+    ADDR pred_target;
+} RS_ENTRY;
 
-/**
- * ID_EX Packet:
- * Data exchanged from the ID to the EX stage
- */
+// ROB entry structure
 typedef struct packed {
-    INST inst;
-    ADDR PC;
-    ADDR NPC; // PC + 4
+    logic valid;               // Entry occupied
+    ADDR PC;                   // PC of instruction
+    INST inst;                 // Full instruction
+    REG_IDX arch_rd;           // Architectural destination reg
+    PHYS_TAG phys_rd;          // Assigned physical dest reg
+    PHYS_TAG prev_phys_rd;     // Previous physical mapping (for free on commit)
+    DATA value;                // Computed value (from Complete, if needed)
+    logic complete;            // Instruction has completed
+    EXCEPTION_CODE exception;  // Any exception code
+    logic branch;              // Is this a branch?
+    ADDR branch_target;        // Resolved branch target
+    logic branch_taken;        // Resolved taken/not taken
+    ADDR pred_target;          // Predicted branch target
+    logic pred_taken;          // Predicted taken/not taken
+    logic halt;                // Is this a halt?
+    logic illegal;             // Is this illegal?
+} ROB_ENTRY;
 
-    DATA rs1_value; // reg A value
-    DATA rs2_value; // reg B value
+// ////////////////////////////////
+// // ---- Datapath Packets ---- //
+// ////////////////////////////////
 
-    ALU_OPA_SELECT opa_select; // ALU opa mux select (ALU_OPA_xxx *)
-    ALU_OPB_SELECT opb_select; // ALU opb mux select (ALU_OPB_xxx *)
+// /**
+//  * Packets are used to move many variables between modules with
+//  * just one datatype, but can be cumbersome in some circumstances.
+//  *
+//  * Define new ones in project 4 at your own discretion
+//  */
 
-    REG_IDX  dest_reg_idx;  // destination (writeback) register index
-    ALU_FUNC alu_func;      // ALU function select (ALU_xxx *)
-    logic    mult;          // Is inst a multiply instruction?
-    logic    rd_mem;        // Does inst read memory?
-    logic    wr_mem;        // Does inst write memory?
-    logic    cond_branch;   // Is inst a conditional branch?
-    logic    uncond_branch; // Is inst an unconditional branch?
-    logic    halt;          // Is this a halt?
-    logic    illegal;       // Is this instruction illegal?
-    logic    csr_op;        // Is this a CSR operation? (we only used this as a cheap way to get return code)
+// /**
+//  * IF_ID Packet:
+//  * Data exchanged from the IF to the ID stage
+//  */
+// typedef struct packed {
+//     INST  inst;
+//     ADDR  PC;
+//     ADDR  NPC; // PC + 4
+//     logic valid;
+// } IF_ID_PACKET;
 
-    logic    valid;
-} ID_EX_PACKET;
+// /**
+//  * ID_EX Packet:
+//  * Data exchanged from the ID to the EX stage
+//  */
+// typedef struct packed {
+//     INST inst;
+//     ADDR PC;
+//     ADDR NPC; // PC + 4
 
-/**
- * EX_MEM Packet:
- * Data exchanged from the EX to the MEM stage
- */
-typedef struct packed {
-    DATA alu_result;
-    ADDR NPC;
+//     DATA rs1_value; // reg A value
+//     DATA rs2_value; // reg B value
 
-    logic    take_branch; // Is this a taken branch?
-    // Pass-through from decode stage
-    DATA     rs2_value;
-    logic    rd_mem;
-    logic    wr_mem;
-    REG_IDX  dest_reg_idx;
-    logic    halt;
-    logic    illegal;
-    logic    csr_op;
-    logic    rd_unsigned; // Whether proc2Dmem_data is signed or unsigned
-    MEM_SIZE mem_size;
-    logic    valid;
-} EX_MEM_PACKET;
+//     ALU_OPA_SELECT opa_select; // ALU opa mux select (ALU_OPA_xxx *)
+//     ALU_OPB_SELECT opb_select; // ALU opb mux select (ALU_OPB_xxx *)
 
-/**
- * MEM_WB Packet:
- * Data exchanged from the MEM to the WB stage
- *
- * Does not include data sent from the MEM stage to memory
- */
-typedef struct packed {
-    DATA    result;
-    ADDR    NPC;
-    REG_IDX dest_reg_idx; // writeback destination (ZERO_REG if no writeback)
-    logic   take_branch;
-    logic   halt;    // not used by wb stage
-    logic   illegal; // not used by wb stage
-    logic   valid;
-} MEM_WB_PACKET;
+//     REG_IDX  dest_reg_idx;  // destination (writeback) register index
+//     ALU_FUNC alu_func;      // ALU function select (ALU_xxx *)
+//     logic    mult;          // Is inst a multiply instruction?
+//     logic    rd_mem;        // Does inst read memory?
+//     logic    wr_mem;        // Does inst write memory?
+//     logic    cond_branch;   // Is inst a conditional branch?
+//     logic    uncond_branch; // Is inst an unconditional branch?
+//     logic    halt;          // Is this a halt?
+//     logic    illegal;       // Is this instruction illegal?
+//     logic    csr_op;        // Is this a CSR operation? (we only used this as a cheap way to get return code)
 
-/**
- * Commit Packet:
- * This is an output of the processor and used in the testbench for counting
- * committed instructions
- *
- * It also acts as a "WB_PACKET", and can be reused in the final project with
- * some slight changes
- */
-typedef struct packed {
-    ADDR    NPC;
-    DATA    data;
-    REG_IDX reg_idx;
-    logic   halt;
-    logic   illegal;
-    logic   valid;
-} COMMIT_PACKET;
+//     logic    valid;
+// } ID_EX_PACKET;
+
+// /**
+//  * EX_MEM Packet:
+//  * Data exchanged from the EX to the MEM stage
+//  */
+// typedef struct packed {
+//     DATA alu_result;
+//     ADDR NPC;
+
+//     logic    take_branch; // Is this a taken branch?
+//     // Pass-through from decode stage
+//     DATA     rs2_value;
+//     logic    rd_mem;
+//     logic    wr_mem;
+//     REG_IDX  dest_reg_idx;
+//     logic    halt;
+//     logic    illegal;
+//     logic    csr_op;
+//     logic    rd_unsigned; // Whether proc2Dmem_data is signed or unsigned
+//     MEM_SIZE mem_size;
+//     logic    valid;
+// } EX_MEM_PACKET;
+
+// /**
+//  * MEM_WB Packet:
+//  * Data exchanged from the MEM to the WB stage
+//  *
+//  * Does not include data sent from the MEM stage to memory
+//  */
+// typedef struct packed {
+//     DATA    result;
+//     ADDR    NPC;
+//     REG_IDX dest_reg_idx; // writeback destination (ZERO_REG if no writeback)
+//     logic   take_branch;
+//     logic   halt;    // not used by wb stage
+//     logic   illegal; // not used by wb stage
+//     logic   valid;
+// } MEM_WB_PACKET;
+
+// /**
+//  * Commit Packet:
+//  * This is an output of the processor and used in the testbench for counting
+//  * committed instructions
+//  *
+//  * It also acts as a "WB_PACKET", and can be reused in the final project with
+//  * some slight changes
+//  */
+// typedef struct packed {
+//     ADDR    NPC;
+//     DATA    data;
+//     REG_IDX reg_idx;
+//     logic   halt;
+//     logic   illegal;
+//     logic   valid;
+// } COMMIT_PACKET;
 
 
 `endif // __SYS_DEFS_SVH__

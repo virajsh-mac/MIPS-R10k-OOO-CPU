@@ -203,7 +203,7 @@ build/mult.cov: $(MULT_FILES)
 synth/mult.vg: $(MULT_FILES)
 
 # TODO: add any files required for the RS here (besides test/rs_test.sv and verilog/rs.sv)
-RS_REQS = verilog/sys_defs.svh
+RS_FILES = verilog/sys_defs.svh verilog/psel_gen.sv
 build/rs.simv: $(RS_FILES)
 build/rs.cov: $(RS_FILES)
 synth/rs.vg: $(RS_FILES)
