@@ -21,6 +21,7 @@ cov_report_*/
 
 # ignore the entire build/ folder
 build/
+synth/
 
 # synthesis files
 *.vg
