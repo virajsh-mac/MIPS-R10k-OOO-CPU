@@ -51,7 +51,7 @@ module testbench;
     );
 
     always begin
-        #40 clock = ~clock;  // Assume 10ns period, adjustable
+        #50 clock = ~clock;  // Assume 10ns period, adjustable
     end
 
     // Helper task to advance one cycle with inputs
@@ -70,7 +70,7 @@ module testbench;
         clear_idxs = c_i;
         mispredict = misp;
         @(posedge clock);
-        #20;  // Small delay to let combinational logic settle
+        #10;  // Small delay to let combinational logic settle
     endtask
 
     // Helper task to check free_count
@@ -284,7 +284,7 @@ module testbench;
         end
 
         $display("\nTest 3: Allocate multiple (3) entries");
-        reset = 1; #10; reset = 0;
+        reset = 1; #100; reset = 0;
         begin
             RS_ENTRY [`N-1:0] a_e;
             for (int i = 0; i < `N; i++) begin
@@ -332,7 +332,7 @@ module testbench;
         end
 
         $display("\nTest 5: Fill up the RS");
-        reset = 1; #10; reset = 0;
+        reset = 1; #100; reset = 0;
         begin
             RS_ENTRY [`N-1:0] a_e_base;
             for (int i = 0; i < `N; i++) begin
@@ -390,7 +390,7 @@ module testbench;
         end
 
         $display("\nTest 7: Wakeup single operand");
-        reset = 1; #10; reset = 0;
+        reset = 1; #100; reset = 0;
         begin
             RS_ENTRY [`N-1:0] a_e;
             CDB_PACKET cdb;
@@ -417,7 +417,7 @@ module testbench;
         end
 
         $display("\nTest 8: Wakeup multiple sources in one cycle");
-        reset = 1; #10; reset = 0;
+        reset = 1; #100; reset = 0;
         begin
             RS_ENTRY [`N-1:0] a_e;
             CDB_PACKET cdb;
@@ -455,7 +455,7 @@ module testbench;
         end
 
         $display("\nTest 9: Wakeup same tag for src1 and src2 in one entry");
-        reset = 1; #10; reset = 0;
+        reset = 1; #100; reset = 0;
         begin
             RS_ENTRY [`N-1:0] a_e;
             CDB_PACKET cdb;
@@ -500,7 +500,7 @@ module testbench;
         end
 
         $display("\nTest 11: Clear single entry");
-        reset = 1; #10; reset = 0;
+        reset = 1; #100; reset = 0;
         begin
             RS_ENTRY [`N-1:0] a_e;
             a_e[0] = empty_entry();
@@ -521,7 +521,7 @@ module testbench;
         check_free_count(3);
 
         $display("\nTest 12: Clear and allocate one entry in same cycle");
-        reset = 1; #10; reset = 0;
+        reset = 1; #100; reset = 0;
         begin
             RS_ENTRY [`N-1:0] a_e;
             a_e[0] = empty_entry();
@@ -551,7 +551,7 @@ module testbench;
         end
 
         $display("\nTest 13: Mispredict flush");
-        reset = 1; #10; reset = 0;
+        reset = 1; #100; reset = 0;
         begin
             RS_ENTRY [`N-1:0] a_e;
             for (int i = 0; i < `N; i++) begin
@@ -565,7 +565,7 @@ module testbench;
         check_free_count(`N);
 
         $display("\nTest 14: Mispredict with simultaneous alloc (should ignore alloc)");
-        reset = 1; #10; reset = 0;
+        reset = 1; #100; reset = 0;
         begin
             RS_ENTRY [`N-1:0] a_e;
             for (int i = 0; i < `N; i++) begin
@@ -578,7 +578,7 @@ module testbench;
         check_free_count(`N);
 
         $display("\nTest 15: Stress test - mixed operations over multiple cycles");
-        reset = 1; #10; reset = 0;
+        reset = 1; #100; reset = 0;
         begin
             RS_ENTRY [`N-1:0] a_e;
             // Cycle 1: Alloc 2 entries
@@ -611,7 +611,7 @@ module testbench;
         check_entries(all_empty());
 
         $display("\nTest 16: Allocate with non-consecutive alloc_valid (stress priority)");
-        reset = 1; #10; reset = 0;
+        reset = 1; #100; reset = 0;
         begin
             RS_ENTRY [`N-1:0] a_e;
             a_e[0] = empty_entry(); a_e[0].valid = 1;  // Will be skipped since alloc_valid[0]=0
@@ -628,7 +628,7 @@ module testbench;
 
         // Test 17: Become ready and clear in same cycle (wakeup then clear)
         $display("\nTest 17: Become ready and clear in same cycle (wakeup then clear)");
-        reset = 1; #10; reset = 0;
+        reset = 1; #100; reset = 0;
         begin
             RS_ENTRY [`N-1:0] a_e;
             a_e[0] = empty_entry();

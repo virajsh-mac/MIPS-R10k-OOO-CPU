@@ -40,7 +40,7 @@ module rs (
     RS_ENTRY [`RS_SZ-1:0] rs_array, rs_array_next;
 
     // Priority selector module that take turns dispatches to highest and lowest index entries in RS
-    logic [`N-1:0][`RS_SZ-1:0] available_entries;
+    logic [`N-1:0][`RS_SZ-1:0] granted_entries;
     logic [`RS_SZ-1:0] free_mask;
     psel_gen #(
         .WIDTH(`RS_SZ),
@@ -48,78 +48,70 @@ module rs (
     ) priority_selector (
         .req(free_mask),
         .gnt(), // will need for back propagation
-        .gnt_bus(available_entries),
+        .gnt_bus(granted_entries),
         .empty()
     );
 
-    // Combinational logic for updates: wakeup, clear, alloc, flush
+    // Free Mask logic, permitting freeing and allocating to the same entry
     always_comb begin
-        rs_array_next = rs_array;
         free_mask = `RS_SZ'b0;
 
-        // Compute free_mask
         for (int i = 0; i < `RS_SZ; i++) begin
             free_mask[i] = !rs_array[i].valid;  // 1 for free slots
         end
 
-        // Clear issued entries
         for (int i = 0; i < `N; i++) begin
             if (clear_valid[i]) begin
-                rs_array_next[clear_idxs[i]].valid = 1'b0;
                 free_mask[clear_idxs[i]] = 1'b1;
             end
         end
+    end
 
-        // Allocate new entries from dispatch
-        //
-        // For each available entry that is valid and has a allocated index
-        // assign the value to that index in the rs
+    // Allocating and Freeing RS entries
+    always_comb begin
+        rs_array_next = rs_array;
+
+        // Clear valid bits for entires that are being issued
         for (int i = 0; i < `N; i++) begin
-            if (alloc_valid[i]) begin
-                for (int j = 0; j < `RS_SZ; j++) begin
-                    if (available_entries[i][j]) begin
-                        rs_array_next[j] = alloc_entries[i];
-                    end
+            if (clear_valid[i]) begin
+                rs_array_next[clear_idxs[i]].valid = 1'b0;
+            end
+        end
+
+        // Allocating new RS entires from dispatch
+        for (int i = 0; i < `N; i++) begin
+            for (int j = 0; j < `RS_SZ; j++) begin
+                if (granted_entries[i][j] && alloc_valid[i]) begin
+                    rs_array_next[j] = alloc_entries[i];
                 end
             end
         end
 
         // Wakeup operands via CDB (associative tag match)
         for (int i = 0; i < `RS_SZ; i++) begin
-            if (rs_array_next[i].valid) begin
-                for (int j = 0; j < `CDB_SZ; j++) begin
-                    // Note that we theoretically don't care whether the existing
-                    // bit is zero because we will only broadcast one physical
-                    // register over the CDB that could ever correspond to a RS entry
-                    // over its lifetime.
-                    if (cdb_broadcast.valid[j] && rs_array_next[i].src1_tag == cdb_broadcast.tags[j]) begin
-                        rs_array_next[i].src1_ready = 1'b1;
-                    end
+            for (int j = 0; j < `CDB_SZ; j++) begin
+                if (rs_array_next[i].valid && cdb_broadcast.valid[j] && rs_array_next[i].src1_tag == cdb_broadcast.tags[j]) begin
+                    rs_array_next[i].src1_ready = 1'b1;
+                end
 
-                    if (cdb_broadcast.valid[j] && rs_array_next[i].src2_tag == cdb_broadcast.tags[j]) begin
-                        rs_array_next[i].src2_ready = 1'b1;
-                    end
+                if (rs_array_next[i].valid && cdb_broadcast.valid[j] && rs_array_next[i].src2_tag == cdb_broadcast.tags[j]) begin
+                    rs_array_next[i].src2_ready = 1'b1;
                 end
             end
         end
+
     end
 
+    // RS Output logic
     logic [$clog2(`RS_SZ+1)-1:0] effective_free, next_effective_free;
     assign next_effective_free = effective_free + $countones(clear_valid) - $countones(alloc_valid);
-
-    assign free_count = (effective_free > `N) ? `N : effective_free;  // Capped at N
-
-    // Assign output entries
+    assign free_count = (effective_free > `N) ? `N : effective_free;  // Capped at N to reduce interconnect
     assign entries = rs_array;
 
-    // Clocked update
     always_ff @(posedge clock) begin
         if (reset | mispredict) begin
             effective_free <=`RS_SZ;
-
-            for (int i = 0; i < `RS_SZ; i++) begin
-                rs_array[i].valid <= 1'b0;
-            end
+            rs_array <= '0;
         end else begin
             effective_free <=next_effective_free;
             rs_array <= rs_array_next;
