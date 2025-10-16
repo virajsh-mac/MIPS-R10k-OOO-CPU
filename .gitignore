@@ -21,7 +21,7 @@ cov_report_*/
 
 # ignore the entire build/ folder
 build/
-synth/
+synth/cksum_dir/
 
 # synthesis files
 *.vg
