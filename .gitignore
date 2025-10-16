@@ -59,3 +59,4 @@ output/
 
 *.DS_Store
 *.vcd
+*/cksum_dir
