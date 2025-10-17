@@ -99,6 +99,10 @@ module rob_test;
   // -------------------------------------------------------------
   initial begin
     // -------------------------------
+    
+    automatic ROB_IDX expected_tail;
+    automatic int k;
+    
     // Initialization & Reset
     // -------------------------------
     clock = 0;
@@ -257,10 +261,258 @@ module rob_test;
     end else $display("PASS: Simultaneous retirement and dispatch successful.\n");
 
     // -------------------------------
-    // Test 5: WIP (check in order of retire/dispatch??)
+    // Test 5: OOO Complete and In Order Retire
     // -------------------------------
 
+    $display("\nTest 5: Out of Order Complete and In Order Retire...\n");
+    reset = 1;
+    @(negedge clock);
+    @(negedge clock);
+    reset = 0;
+    @(posedge clock);
 
+    // 1. Fill the ROB completely
+    alloc_valid = '1;
+    for (int i = 0; i < (`ROB_SZ / `N); i++) begin
+      fill_rob_packet(rob_entry_packet, pc_val + i * `N, arch_val + i * `N, phys_val + i * `N, data_val + i * `N);
+      @(posedge clock);
+    end
+    if (`ROB_SZ % `N != 0) begin
+        alloc_valid = '0; for (int i = 0; i < (`ROB_SZ % `N); i++) alloc_valid[i] = 1'b1;
+        @(posedge clock);
+    end
+    alloc_valid = '0;
+    @(posedge clock);
+
+    // 2. Complete several instructions out of order (but not the first few)
+    $display("Completing entries at indices 5, 2, 8 out of order...");
+    rob_update_packet.valid = '0;
+    rob_update_packet.valid[0] = 1'b1; rob_update_packet.idx[0] = 5;
+    rob_update_packet.valid[1] = 1'b1; rob_update_packet.idx[1] = 2;
+    rob_update_packet.valid[2] = 1'b1; rob_update_packet.idx[2] = 4;
+    @(posedge clock);
+    rob_update_packet.valid = '0;
+    
+    // 3. Verify that the head has NOT moved, because instruction 0 is not complete
+    repeat(3) @(posedge clock);
+    if (dut.head !== 0) begin
+      $display("FAIL: Head advanced on out-of-order complete. Head is %0d, should be 0.", dut.head);
+      failed = 1;
+    end else begin
+      $display("PASS: Head correctly stalled while waiting for in-order instruction.\n");
+    end
+
+    // 4. Now, complete the first block of instructions to fill the gap
+    $display("Completing first block of instructions (0, 1, 3, 4) to un-stall retirement...");
+    rob_update_packet.valid = '0;
+    rob_update_packet.valid[0] = 1'b1; rob_update_packet.idx[0] = 0;
+    rob_update_packet.valid[1] = 1'b1; rob_update_packet.idx[1] = 1;
+    rob_update_packet.valid[2] = 1'b1; rob_update_packet.idx[2] = 3;
+    @(posedge clock);
+    rob_update_packet.valid = '0;
+
+    // 5. Verify that the head has advanced past the entire contiguous completed block
+    repeat(3) @(posedge clock);
+    // Instructions 0, 1, 2, 3, 4, 5 are all now complete. Head should be at 6.
+    if (dut.head !== 6) begin
+      $display("FAIL: Head did not correctly batch-retire. Expected 6, got %0d", dut.head);
+      failed = 1;
+    end else begin
+      $display("PASS: Instructions correctly retired in-order after out-of-order completion.\n");
+    end
+
+    // -------------------------------
+    // Test 6: Partial Completions
+    // -------------------------------
+
+    $display("Test 6: Partial completions");
+    reset=1; @(negedge clock); @(negedge clock); reset=0; @(posedge clock);
+
+    // allocate 2*N entries
+    for (int i = 0; i < 2; i++) begin
+      alloc_valid='1; 
+      fill_rob_packet(rob_entry_packet, pc_val+i*`N, arch_val+i*`N, phys_val+i*`N, data_val+i*`N);
+      @(posedge clock);
+    end
+    alloc_valid='0; @(posedge clock);
+
+    // set first k complete, next one incomplete
+    k = (`N >= 3) ? (`N-1) : 1;
+    rob_update_packet.valid='0;
+    for (int i = 0; i < k; i++) begin
+      rob_update_packet.valid[i] = 1'b1; 
+      rob_update_packet.idx[i] = (dut.head + i) % `ROB_SZ;
+    end
+    @(posedge clock); 
+    rob_update_packet.valid='0; 
+    repeat(2) @(posedge clock);
+
+    // Expect head advanced by k, and exactly those k entries invalidated
+    if (dut.head != k % `ROB_SZ) begin 
+      $display("FAIL: Head advanced by %0d, expected %0d", dut.head, k%`ROB_SZ); 
+      failed=1; 
+    end
+    
+    for (int i = 0; i < k; i++) begin
+        if (dut.rob_array[i].valid) begin 
+            $display("FAIL: Retired entry %0d still valid", i); 
+            failed=1; 
+        end
+    end
+
+    if (!dut.rob_array[k].valid) begin 
+      $display("FAIL: Entry %0d (next after k) should still be valid", k); 
+      failed=1; 
+    end
+    if (!failed) $display("PASS: Partial block of %0d instructions retired correctly.\n", k);
+
+
+    // -------------------------------
+    // Test 7: Pointer Wrap-Around and Boundary Conditions
+    // -------------------------------
+    $display("\nTest 7: Pointer Wrap-Around and Boundary Conditions...\n");
+    // Reset and fill all but the last N slots
+    reset = 1; @(negedge clock); @(negedge clock); reset = 0; @(posedge clock);
+    alloc_valid = '1;
+    for (int i = 0; i < (`ROB_SZ / `N); i++) begin 
+      fill_rob_packet(rob_entry_packet, i*`N, i*`N, i*`N, i*`N); 
+      @(posedge clock); 
+    end
+    alloc_valid = '0; @(posedge clock);
+
+    // Complete and retire the first N*2 instructions to move the head up
+    for (int i = 0; i < (`N * 2); i++) begin
+      rob_update_packet.valid[i % `N] = 1'b1;
+      rob_update_packet.idx[i % `N]   = i;
+      if ((i % `N) == (`N - 1) || i == (`N*2 - 1) ) begin 
+        @(posedge clock); rob_update_packet.valid = '0; 
+      end
+    end
+    repeat (3) 
+    @(posedge clock); 
+    // Wait for retirement
+
+    // At this point, tail is at `ROB_SZ - N`.
+    $display("Allocating instructions to wrap tail pointer...");
+    alloc_valid = '1;
+    fill_rob_packet(rob_entry_packet, pc_val, arch_val, phys_val, data_val);
+    @(posedge clock); // Allocates N instructions, tail becomes (`ROB_SZ-N+N)%ROB_SZ = 0
+    fill_rob_packet(rob_entry_packet, pc_val, arch_val, phys_val, data_val);
+    @(posedge clock); // Allocates N more, tail becomes (0+N)%ROB_SZ = N
+    alloc_valid = '0;
+    @(posedge clock);
+
+    expected_tail = 4;
+    if (dut.tail !== expected_tail) begin
+      $display("FAIL: Tail did not wrap correctly. Expected %0d, got %0d", expected_tail, dut.tail);
+      failed = 1;
+    end else $display("PASS: Tail pointer wrapped around correctly.\n");
+
+    // -------------------------------
+    // Test 8: Partial Allocation and Retirement
+    // -------------------------------
+    $display("\nTest 8: Partial Allocation and Retirement...\n");
+    // -- 8.1: Partial Allocation
+    reset = 1; @(negedge clock); @(negedge clock); reset = 0; @(posedge clock); // Reset ROB
+    alloc_valid = '0;
+    alloc_valid[0] = 1'b1;
+    alloc_valid[2] = 1'b1;
+    fill_rob_packet(rob_entry_packet, pc_val, arch_val, phys_val, data_val);
+    @(posedge clock);
+    alloc_valid = '0;
+    @(posedge clock);
+
+    if (dut.tail !== 2) begin
+      $display("FAIL: Tail advanced incorrectly on partial alloc. Expected 2, got %0d", dut.tail);
+      failed = 1;
+    end else if (!dut.rob_array[0].valid || dut.rob_array[1].valid) begin
+      $display("FAIL: ROB entries written incorrectly on partial allocation.");
+      failed = 1;
+    end else $display("PASS: Partial allocation handled correctly.");
+
+    // -- 8.2: Partial Retirement
+    reset = 1; @(negedge clock); @(negedge clock); reset = 0; @(posedge clock);
+    alloc_valid = '1; // Refill ROB
+    for (int i = 0; i < (`ROB_SZ / `N); i++) begin fill_rob_packet(rob_entry_packet, i, i, i, i); @(posedge clock); end
+    if (`ROB_SZ % `N != 0) begin alloc_valid = '0; for (int i = 0; i < (`ROB_SZ % `N); i++) alloc_valid[i] = 1'b1; @(posedge clock); end
+    alloc_valid = '0; @(posedge clock);
+
+    rob_update_packet.valid[0] = 1'b1;
+    rob_update_packet.idx[0] = dut.head; // Complete only the instruction at the head
+    @(posedge clock);
+    rob_update_packet.valid = '0;
+    repeat(2) @(posedge clock);
+
+    if (dut.head !== 1) begin
+      $display("FAIL: Head did not advance by 1 on single retirement. Expected 1, got %0d", dut.head);
+      failed = 1;
+    end else $display("PASS: Partial retirement of one instruction successful.\n");
+
+
+    // -------------------------------
+    // Test 9: Retire 3 Instructions and Check head_entries
+    // -------------------------------
+    $display("Test 9: Retiring 3 instructions and checking head_entries...\n");
+
+    // Reset DUT again for a clean state
+    reset = 1;
+    @(negedge clock);   // change reset between clock edges
+    reset = 0;
+    @(posedge clock);   // allow one cycle for reset to propagate
+
+    // Step 1: Allocate 3 instructions
+    @(posedge clock);   // set inputs before next posedge
+    alloc_valid = '0;
+    for (int i = 0; i < 3; i++) begin
+      rob_entry_packet[i] = make_rob_entry(
+        pc_val + i,
+        `NOP,
+        arch_val + i,
+        phys_val + i,
+        phys_val + i - 1,
+        data_val + i
+      );
+      alloc_valid[i] = 1'b1;
+    end
+    @(posedge clock);   // DUT samples alloc_valid + packet
+    alloc_valid = '0;
+    @(posedge clock);
+    //alloc_valid = '0;   // clear after DUT sampled
+
+    // Step 2: Mark all 3 instructions as complete
+    @(negedge clock);   // set updates before next posedge
+    rob_update_packet = '{default:0};
+    for (int i = 0; i < 3; i++) begin
+      rob_update_packet.valid[i]  = 1'b1;
+      rob_update_packet.idx[i]    = i;
+      rob_update_packet.values[i] = data_val + i;
+    end
+    @(posedge clock);   // DUT sees completions
+    @(negedge clock);
+    rob_update_packet.valid = '0;
+
+    // Step 3: Wait one cycle for completion logic to execute
+    repeat (1) @(posedge clock);
+
+    // Step 4: Check head_entries (after DUT update)
+    for (int i = 0; i < 3; i++) begin
+      if (head_valids[i] !== 1'b1) begin
+        $display("FAIL: head_valids[%0d] = %b (expected 1)", i, head_valids[i]);
+        failed = 1;
+      end else if (head_entries[i].PC !== pc_val + i) begin
+        $display("FAIL: head_entries[%0d].PC = 0x%0h (expected 0x%0h)",
+                  i, head_entries[i].PC, pc_val + i);
+        failed = 1;
+      end else begin
+        $display("PASS: head_entries[%0d] retired instruction PC=0x%0h",
+                  i, head_entries[i].PC);
+      end
+    end
+
+    if (!failed)
+      $display("\033[1;32mPASS: All 3 retired instructions match expected head_entries.\033[0m\n");
+    else
+      $display("\033[1;31mFAIL: Retired instructions do not match expected head_entries.\033[0m\n");
 
     // -------------------------------
     // Test Summary
@@ -276,3 +528,17 @@ module rob_test;
   end
 
 endmodule
+
+/// Test cases:
+// 
+// 
+
+// input to check if it's ready to issue
+// all the inputs and output signals
+
+// stress test
+// one test case
+
+
+
+

@@ -86,26 +86,27 @@ module rob (
   end
 
   // Combinational: output head entries and valids
-  always_comb begin
-    retire_count = '0;
-    for (int i = 0; i < `N; i++) begin
-      idx1 = (head + i) % `ROB_SZ;
-      head_entries[i] = rob_array[idx1];
-      // Valid if within committed range and entry is valid
-      head_valids[i] = ((tail - head) % `ROB_SZ > i) && rob_array[idx1].valid;
-      retire_count = retire_count + rob_array[idx1].valid;
-    end
-  end
+  // always_comb begin
+  //   retire_count = '0;
+  //   for (int i = 0; i < `N; i++) begin
+  //     idx1 = (head + i) % `ROB_SZ;
+  //     head_entries[i] = rob_array[idx1];
+  //     // Valid if within committed range and entry is valid
+  //     head_valids[i] = ((tail - head) % `ROB_SZ > i) && rob_array[idx1].valid;
+  //     retire_count = retire_count + rob_array[idx1].valid;
+  //   end
+  // end
 
   // Next state logic (combinational)
   ROB_ENTRY [`ROB_SZ-1:0] rob_next;
   logic [(ALLOC_CNT_WIDTH-1):0] alloc_cnt;
-  logic [(ALLOC_CNT_WIDTH-1):0] retire_cnt;
+  // logic [(ALLOC_CNT_WIDTH-1):0] retire_cnt;
   always_comb begin
     // default vals
     rob_next  = rob_array;
     head_next = head;
     tail_next = tail;
+    head_valids = 0;
 
     // Priority: handle mispredict flush (WIP)
     if (mispredict) begin
@@ -114,19 +115,16 @@ module rob (
     end else begin
 
       // Retire: advance head, invalidate retired entries
-      retire_cnt = 0;
       for (int i = 0; i < `N; i++) begin
-        retire_cnt = retire_cnt + (rob_array[(head + i) % `ROB_SZ].complete && rob_array[(head + i) % `ROB_SZ].valid);
-      end
-      head_next = (head + retire_cnt) % `ROB_SZ;
-
-      for (int i = 0; i < retire_cnt; i++) begin
-        if (i < `N) begin
-          idx4 = (head + i) % `ROB_SZ;
-          rob_next[idx4].valid = 1'b0; // invalidate ROB entry (clears it)
+        if (rob_array[head_next].valid && rob_array[head_next].complete) begin
+          head_entries[i] = rob_array[head_next];
+          head_valids[i] = 1'b1;
+          rob_next[head_next].valid = 1'b0; // invalidate ROB entry (clears it)
+          head_next = (head_next + 1) % `ROB_SZ;
+        end else begin
+          break;
         end
       end
-
 
       // Updates from Complete: set complete, value, and branch info
       for (int i = 0; i < `N; i++) begin
@@ -177,7 +175,6 @@ module rob (
       tail <= tail_next;
       rob_array <= rob_next;
     end
-
   end
 
 endmodule  // rob
