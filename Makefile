@@ -190,7 +190,7 @@ GREP = grep -E --color=auto
 # ---- Modules to Test ---- #
 
 # TODO: add more modules here
-MODULES = cpu mult rob rs regfile stage_issue stage_complete
+MODULES = cpu mult rob rs regfile rename_tables stage_issue stage_complete
 
 # TODO: update this if you add more header files
 ALL_HEADERS = $(CPU_HEADERS)
@@ -219,6 +219,12 @@ REGFILE_FILES = verilog/sys_defs.svh verilog/ISA.svh
 build/regfile.simv: $(REGFILE_FILES)
 build/regfile.cov:  $(REGFILE_FILES)
 synth/regfile.vg:   $(REGFILE_FILES)
+
+RENAME_FILES =
+build/rename_tables.simv: $(RENAME_FILES)
+build/rename_tables.cov:  $(RENAME_FILES)
+synth/rename_tables.vg:   $(RENAME_FILES)
+
 
 # TODO: add any files required for stage_issue here (besides test/stage_issue_test.sv and verilog/stage_issue.sv)
 STAGE_ISSUE_FILES = verilog/sys_defs.svh verilog/allocator.sv verilog/psel_gen.sv
