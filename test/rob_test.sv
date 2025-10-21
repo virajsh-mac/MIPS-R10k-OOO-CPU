@@ -102,6 +102,15 @@ module rob_test;
     
     automatic ROB_IDX expected_tail;
     automatic int k;
+    automatic int retire_cnt;
+    automatic ROB_IDX idx;
+    automatic int actual_allocs;
+    automatic int ran_num_alloc;
+    automatic int ran_num_retire;
+    automatic int alloc_counter;
+    automatic int complete_counter;
+    logic do_alloc, do_complete;
+
     
     // Initialization & Reset
     // -------------------------------
@@ -119,8 +128,8 @@ module rob_test;
 
     // use below monitior statement for debugging
 
-    // $monitor("Time %0t | head=%0d tail=%0d free_slots=%0d valid=%0d",
-    //           $time, dut.head, dut.tail, dut.free_slots, dut.rob_array[0].valid);
+    $monitor("Time %0t | head=%0d tail=%0d free_slots=%0d valid=%0d",
+              $time, dut.head, dut.tail, dut.free_slots, dut.rob_array[0].valid);
 
     // -------------------------------
     // Test 1: Check Empty ROB after Reset
@@ -483,6 +492,7 @@ module rob_test;
     @(negedge clock);   // set updates before next posedge
     rob_update_packet = '{default:0};
     for (int i = 0; i < 3; i++) begin
+      
       rob_update_packet.valid[i]  = 1'b1;
       rob_update_packet.idx[i]    = i;
       rob_update_packet.values[i] = data_val + i;
@@ -513,6 +523,122 @@ module rob_test;
       $display("\033[1;32mPASS: All 3 retired instructions match expected head_entries.\033[0m\n");
     else
       $display("\033[1;31mFAIL: Retired instructions do not match expected head_entries.\033[0m\n");
+    
+begin
+      // -------------------------------
+      // Test #10 - Simplified Randomized Stress Test
+      // -------------------------------
+      $display("\nTest 10: Simplified Randomized Stress Test...\n");
+      begin
+        localparam int STRESS_CYCLES = 20;
+        // Use a fixed-size array and counter to track allocated instructions
+        ROB_IDX allocated_indices_arr[`ROB_SZ];
+        int num_allocated_not_completed = 0;
+        int ran_num_alloc, ran_num_complete;
+        ROB_IDX temp_idx;
+
+        // --- Phase 1: Stress the ROB with random allocations and completions ---
+        for (int i = 0; i < STRESS_CYCLES; i++) begin
+          // Default to no operations in this cycle
+          alloc_valid = '0;
+          rob_update_packet.valid = '0;
+
+
+          // Randomly decide whether to allocate, complete, both, or neither in this cycle
+          // Ensure the action is possible (e.g., free slots exist, or instructions are available to complete)
+          do_alloc = ($urandom_range(0, 1) == 1) && (dut.free_slots > 0);
+          do_complete = ($urandom_range(0, 1) == 1) && (num_allocated_not_completed >= 0);
+
+          // Prepare allocation packet if we are allocating this cycle
+          if (do_alloc) begin
+            ran_num_alloc = $urandom_range(1, `N);
+            if (ran_num_alloc > dut.free_slots) ran_num_alloc = dut.free_slots;
+
+            for (int j = 0; j < ran_num_alloc; j++) alloc_valid[j] = 1'b1;
+            fill_rob_packet(rob_entry_packet, pc_val, arch_val, phys_val, data_val);
+          end
+
+          $display("do_complete: %0d", do_complete);
+
+          // Prepare completion packet if we are completing this cycle
+          if (do_complete) begin
+            ran_num_complete = $urandom_range(1, `N);
+            if (ran_num_complete > num_allocated_not_completed) ran_num_complete = num_allocated_not_completed;
+
+            for (int j = 0; j < ran_num_complete; j++) begin
+              // Pick a random instruction from the array to complete (simulates out-of-order completion)
+              int arr_idx = $urandom_range(0, num_allocated_not_completed - 1);
+              temp_idx = allocated_indices_arr[arr_idx];
+
+              // Remove from array by swapping with the last element and decrementing the count
+              allocated_indices_arr[arr_idx] = allocated_indices_arr[num_allocated_not_completed - 1];
+              num_allocated_not_completed--;
+
+              rob_update_packet.valid[j] = 1'b1;
+              rob_update_packet.idx[j] = temp_idx;
+            end
+          end
+
+          // Advance simulation by one clock cycle
+          @(posedge clock);
+
+          // After the clock edge, capture the results of any allocation
+          if (do_alloc) begin
+            for (int j = 0; j < ran_num_alloc; j++) begin
+              allocated_indices_arr[num_allocated_not_completed] = dut.alloc_idxs[j];
+              num_allocated_not_completed++;
+            end
+            // Update base values to ensure unique instructions for the next allocation
+            pc_val += ran_num_alloc;
+            arch_val += ran_num_alloc;
+            phys_val += ran_num_alloc;
+          end
+        end
+
+        // --- Phase 2: Wind-down. Stop allocating and complete all remaining instructions ---
+        $display("Stress phase finished. Completing %0d remaining instructions...", num_allocated_not_completed);
+        alloc_valid = '0; // Stop new allocations
+
+
+        while (num_allocated_not_completed > 0) begin
+          ran_num_complete = $urandom_range(1, `N);
+          if (ran_num_complete > num_allocated_not_completed) ran_num_complete = num_allocated_not_completed;
+
+          rob_update_packet.valid = '0;
+          for (int j = 0; j < ran_num_complete; j++) begin
+            // Complete from the end of the array
+            num_allocated_not_completed--;
+            temp_idx = allocated_indices_arr[num_allocated_not_completed];
+            rob_update_packet.valid[j] = 1'b1;
+            rob_update_packet.idx[j] = temp_idx;
+          end
+          @(posedge clock);
+        end
+        rob_update_packet.valid = '0;
+
+        // --- Phase 3: Verification. Wait for the ROB to become empty through retirement ---
+        $display("Waiting for ROB to drain...");
+        // Wait for retirement to clear the ROB. Max wait time is ROB size / N instructions per cycle + buffer.
+        repeat (`ROB_SZ / `N + 20) @(posedge clock);
+
+        $display("Final check...");
+        if ((dut.head + `ROB_SZ - dut.tail) == dut.free_slots) begin
+          $display("PASS: ROB is empty after stress test.\n");
+        end else begin
+          $display("FAIL: ROB is not empty. free_slots=%0d, head=%0d, tail=%0d", dut.free_slots, dut.head, dut.tail);
+          failed = 1;
+        end
+      end
+    end
+
+    if (!failed)
+      $display("\033[1;32mAll tests passed.\033[0m\n");
+    else
+      $display("\033[1;31mOne or more tests failed.\033[0m\n");
+
+
+
+    
 
     // -------------------------------
     // Test Summary
