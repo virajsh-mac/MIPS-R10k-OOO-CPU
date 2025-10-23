@@ -39,6 +39,7 @@
 `define PHYS_TAG_BITS $clog2(`PHYS_REG_SZ_R10K)  // 6 bits for phys tag
 `define ROB_IDX_BITS $clog2(`ROB_SZ)            // 5 bits for ROB index
 `define RS_IDX_BITS $clog2(`RS_SZ)              // 4 bits for RS index
+`define NUM_CATS 5                              // Number of OP_CATEGORY values (0-4)
 
 // branch prediction
 `define BRANCH_PRED_SZ 512  // Branch predictor size

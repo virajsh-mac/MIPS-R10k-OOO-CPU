@@ -24,6 +24,9 @@ module stage_issue (
     output logic [`N-1:0] issue_valid,
     output RS_ENTRY [`N-1:0] issued_entries
 );
+    // Uses bit-vector presence maps indexed by age and population counts ($countones) for 
+    // oldest-first priority resolution in a two-phase process (per-category FU limiting 
+    // followed by global bandwidth limiting) known as a compacted age matrix scheduler.
 
     // Combinational logic for issue selection
     always_comb begin
@@ -35,34 +38,34 @@ module stage_issue (
         if (reset || mispredict) begin
             // No issue on reset or mispredict
         end else begin
-            // Compute readiness and age values in parallel
+            // Local variables for issue selection logic
             logic [`RS_SZ-1:0] ready;
-            logic [6:0] age[`RS_SZ-1:0];  // {rob_wrap, rob_idx}
+            logic [5:0] age[`RS_SZ-1:0];  // 6-bit age {rob_wrap, rob_idx}
             OP_CATEGORY cat[`RS_SZ-1:0];
             logic [3:0] num_fu[`RS_SZ-1:0];
 
-            // Pairwise comparison matrix
-            logic comp[`RS_SZ-1:0][`RS_SZ-1:0];  // comp[i][j] = (age_j < age_i)
+            // Bit-matrix presence vectors for fast priority encoding
+            logic [63:0] per_cat_presence[`NUM_CATS-1:0];  // Ready entries per category at each age (0-63)
+            logic [63:0] global_presence;  // Candidate entries at each age
 
-            // Phase 1: Per-category ranking
-            logic [3:0] per_cat_count[`RS_SZ-1:0];  // Number of older ready entries in same category
-            logic [`RS_SZ-1:0] cand;  // Candidates that pass per-category limits
-
-            // Phase 2: Global ranking among candidates
-            logic [3:0] global_count[`RS_SZ-1:0];  // Number of older candidates
+            // Ranking counts and decisions
+            logic [3:0] per_cat_count[`RS_SZ-1:0];  // Older ready entries in same category
+            logic [`RS_SZ-1:0] cand;  // Candidates after per-category filtering
+            logic [3:0] global_count[`RS_SZ-1:0];  // Older candidates globally
             logic [`RS_SZ-1:0] issue;  // Final issue decisions
 
-            // Output packing
+            // Loop variable and output packing
+            int i;
             int out_idx;
 
-            for (int i = 0; i < `RS_SZ; i++) begin
+            for (i = 0; i < `RS_SZ; i++) begin
                 ready[i] = entries[i].valid && entries[i].src1_ready && entries[i].src2_ready;
                 age[i]   = {entries[i].rob_wrap, entries[i].rob_idx};
                 cat[i]   = entries[i].op_type.category;
             end
 
             // Count available FUs per category
-            for (int i = 0; i < `RS_SZ; i++) begin
+            for (i = 0; i < `RS_SZ; i++) begin
                 case (cat[i])
                     CAT_ALU, CAT_CSR: num_fu[i] = $countones(alu_avail);
                     CAT_MULT:         num_fu[i] = $countones(mult_avail);
@@ -72,40 +75,41 @@ module stage_issue (
                 endcase
             end
 
-            // Generate all pairwise age comparisons: comp_ij = (age_j < age_i)
-            // Use signed comparison to handle wrap-around correctly
-            // NOTE: Assumes max age difference between any two RS entries < 32 (half of 6-bit age range).
-            // If an instruction lingers in RS >32 dispatch cycles before issue, age ordering may break.
-            // With RS_SZ=16, this is unlikely under normal operation.
+            // Build age presence vectors for per-category and global ranking
+            per_cat_presence = '{default: 64'd0};
             for (int i = 0; i < `RS_SZ; i++) begin
-                for (int j = 0; j < `RS_SZ; j++) begin
-                    comp[i][j] = (i != j) && ($signed(age[j] - age[i]) < 0);
+                if (ready[i]) begin
+                    per_cat_presence[cat[i]][age[i]] = 1'b1;
                 end
             end
 
             // Phase 1: Per-category ranking to respect FU limits
-            for (int i = 0; i < `RS_SZ; i++) begin
-                logic [`RS_SZ-1:0] older_in_cat;
-                for (int j = 0; j < `RS_SZ; j++) begin
-                    older_in_cat[j] = comp[i][j] && ready[j] && (cat[j] == cat[i]);
-                end
-                per_cat_count[i] = $countones(older_in_cat);
+            for (i = 0; i < `RS_SZ; i++) begin
+                logic [63:0] mask = (64'd1 << age[i]) - 64'd1;  // Lower bits: ages < age[i]
+                logic [63:0] older_bits = per_cat_presence[cat[i]] & mask;
+                per_cat_count[i] = $countones(older_bits);
                 cand[i] = ready[i] && (per_cat_count[i] < num_fu[i]);
             end
 
-            // Phase 2: Global ranking among candidates to respect total issue width
-            for (int i = 0; i < `RS_SZ; i++) begin
-                logic [`RS_SZ-1:0] older_cand;
-                for (int j = 0; j < `RS_SZ; j++) begin
-                    older_cand[j] = comp[i][j] && cand[j];
+            // Build global presence vector from candidates
+            global_presence = 64'd0;
+            for (i = 0; i < `RS_SZ; i++) begin
+                if (cand[i]) begin
+                    global_presence[age[i]] = 1'b1;
                 end
-                global_count[i] = $countones(older_cand);
+            end
+
+            // Phase 2: Global ranking among candidates to respect total issue width
+            for (i = 0; i < `RS_SZ; i++) begin
+                logic [63:0] mask = (64'd1 << age[i]) - 64'd1;
+                logic [63:0] older_bits = global_presence & mask;
+                global_count[i] = $countones(older_bits);
                 issue[i] = cand[i] && (global_count[i] < `N);
             end
 
             // Pack issued entries into output arrays (program order not required for correctness)
             out_idx = 0;
-            for (int i = 0; i < `RS_SZ && out_idx < `N; i++) begin
+            for (i = 0; i < `RS_SZ && out_idx < `N; i++) begin
                 if (issue[i]) begin
                     issue_valid[out_idx] = 1'b1;
                     issued_entries[out_idx] = entries[i];
