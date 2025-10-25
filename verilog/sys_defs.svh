@@ -39,7 +39,7 @@
 `define PHYS_TAG_BITS $clog2(`PHYS_REG_SZ_R10K)  // 6 bits for phys tag
 `define ROB_IDX_BITS $clog2(`ROB_SZ)            // 5 bits for ROB index
 `define RS_IDX_BITS $clog2(`RS_SZ)              // 4 bits for RS index
-`define NUM_CATS 5                              // Number of OP_CATEGORY values (0-4)
+`define NUM_CATS 4                              // Number of OP_CATEGORY values (0-4)
 
 // branch prediction
 `define BRANCH_PRED_SZ 512  // Branch predictor size
@@ -325,8 +325,7 @@ typedef enum logic [2:0] {
     CAT_ALU = 3'b000,
     CAT_MULT = 3'b001,
     CAT_MEM = 3'b010,
-    CAT_BRANCH = 3'b011,
-    CAT_CSR = 3'b100  // Control and Status Register operations
+    CAT_BRANCH = 3'b011
 } OP_CATEGORY;
 
 // Packed struct for OP_TYPE (total 7 bits)
@@ -387,9 +386,9 @@ const OP_TYPE OP_JAL = '{category: CAT_BRANCH, func: 4'h6};
 const OP_TYPE OP_JALR = '{category: CAT_BRANCH, func: 4'h7};
 
 // CSR operations
-const OP_TYPE OP_CSRRW = '{category: CAT_CSR, func: 4'h0};
-const OP_TYPE OP_CSRRS = '{category: CAT_CSR, func: 4'h1};
-const OP_TYPE OP_CSRRC = '{category: CAT_CSR, func: 4'h2};
+const OP_TYPE OP_CSRRW = '{category: CAT_ALU, func: 4'h0};
+const OP_TYPE OP_CSRRS = '{category: CAT_ALU, func: 4'h1};
+const OP_TYPE OP_CSRRC = '{category: CAT_ALU, func: 4'h2};
 
 // RS entry structure (extended for full control signals)
 typedef struct packed {
