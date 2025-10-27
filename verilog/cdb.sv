@@ -36,11 +36,7 @@ always_comb begin
     cdb_next = '0;
     for (int i = 0; i < `N; i++) begin
         for (int j = 0; j < `NUM_FU_TOTAL; j++) begin
-            if (gnt_bus_next[i][j]) begin
-                cdb_next[i].valid = 1'b1;
-                cdb_next[i].tags   = fu_outputs[j].tags;
-                cdb_next[i].data  = fu_outputs[j].data;
-            end
+            cdb_next |= ({$bits(CDB_ENTRY){gnt_bus_next[i][j]}} & fu_outputs[j]);
         end
     end
 end
