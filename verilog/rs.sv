@@ -21,7 +21,7 @@ module rs (
     input RS_ENTRY [`N-1:0] alloc_entries,  // N way allocating entries
 
     // From complete: CDB broadcasts for operand wakeup
-    input CDB_PACKET cdb_broadcast,
+    input CDB_EARLY_TAG_PACKET cdb_broadcast,
 
     // From issue: clear signals for issued entries
     input logic  [`N-1:0] clear_valid,  // Valid clears this cycle
@@ -36,7 +36,7 @@ module rs (
     output logic [$clog2(`RS_SZ+1)-1:0] free_count // Number of free entries (for dispatch stall)
 
     // ALU request to CDB aribiter for early tag broadcast
-    // needs to send requests when there are instructions that have 
+    // needs to send requests when there are instructions that have
     // destination register and are being issued in the next cycle
     output alu_requests
 );

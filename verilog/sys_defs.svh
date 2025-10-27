@@ -50,7 +50,6 @@
 `define NUM_FU_BRANCH 1   // Single branch resolver
 `define NUM_FU_MEM 1     // Single address calculator for mem ops
 `define NUM_FU_TOTAL (`NUM_FU_ALU + `NUM_FU_MULT + `NUM_FU_BRANCH + `NUM_FU_MEM)
-`define FU_IDX $clog2(`NUM_FU_TOTAL)
 
 // number of mult stages (2, 4) (you likely don't need 8)
 `define MULT_STAGES 4
@@ -158,25 +157,18 @@ typedef struct packed {
     logic                          valid;
 } ICACHE_TAG;
 
-// CDB packet
-typedef struct packed {
-    logic [`CDB_SZ-1:0] valid;  // Valid broadcasts this cycle
-    PHYS_TAG [`CDB_SZ-1:0] tags;  // Physical dest tags
-    DATA [`CDB_SZ-1:0] data;
-} CDB_PACKET;
-
 // CDB entry
 typedef struct packed {
     logic valid;
-    PHYS_TAG tags;
+    PHYS_TAG tag;
     DATA data;
 } CDB_ENTRY;
 
-// CDB request
+// CDB early tag entry (used to broadcast tags a cycle early)
 typedef struct packed {
-    logic valid;
-    PHYS_TAG tags;
-} CDB_REQUEST;
+    logic valid;  // Valid broadcasts this cycle
+    PHYS_TAG tag;  // Physical dest tags
+} CDB_EARLY_TAG_ENTRY;
 
 ///////////////////////////////
 // ---- Exception Codes ---- //
