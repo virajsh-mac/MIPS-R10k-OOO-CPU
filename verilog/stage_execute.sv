@@ -1,6 +1,9 @@
+`include "sys_defs.svh"
+
 module stage_execute (
     input clock,
     input reset,
+
     input logic mispredict,  // Flush pipelines on mispredict
 
     // Inputs from issue stage
@@ -8,7 +11,7 @@ module stage_execute (
     input RS_ENTRY [`N-1:0] issued_entries,
 
     // Input from CDB
-    input DATA cdb_forwarding,  
+    input DATA cdb_forwarding,
 
     // To PRF for operand reads (up to 2 per issued instruction)
     output logic [2*`N-1:0] prf_read_en,

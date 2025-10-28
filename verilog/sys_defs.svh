@@ -313,9 +313,9 @@ typedef enum logic [3:0] {
 typedef enum logic [3:0] {
     ADD,
     SUB,
+    AND,
     SLT,
     SLTU,
-    AND,
     OR,
     XOR,
     SLL,
@@ -375,9 +375,9 @@ typedef struct packed {
 // Constants for specific ops (assign struct values)
 const OP_TYPE OP_ALU_ADD = '{category: CAT_ALU, func: ADD};
 const OP_TYPE OP_ALU_SUB = '{category: CAT_ALU, func: SUB};
+const OP_TYPE OP_ALU_AND = '{category: CAT_ALU, func: AND};
 const OP_TYPE OP_ALU_SLT = '{category: CAT_ALU, func: SLT};
 const OP_TYPE OP_ALU_SLTU = '{category: CAT_ALU, func: SLTU};
-const OP_TYPE OP_ALU_AND = '{category: CAT_ALU, func: AND};
 const OP_TYPE OP_ALU_OR = '{category: CAT_ALU, func: OR};
 const OP_TYPE OP_ALU_XOR = '{category: CAT_ALU, func: XOR};
 const OP_TYPE OP_ALU_SLL = '{category: CAT_ALU, func: SLL};
