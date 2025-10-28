@@ -321,9 +321,6 @@ typedef enum logic [3:0] {
     SLL,
     SRL,
     SRA,
-    CSRRW,
-    CSRRS,
-    CSRRC
 } ALU_FUNC;
 
 // MULT funct3 code
@@ -383,11 +380,6 @@ const OP_TYPE OP_ALU_XOR = '{category: CAT_ALU, func: XOR};
 const OP_TYPE OP_ALU_SLL = '{category: CAT_ALU, func: SLL};
 const OP_TYPE OP_ALU_SRL = '{category: CAT_ALU, func: SRL};
 const OP_TYPE OP_ALU_SRA = '{category: CAT_ALU, func: SRA};
-
-// CSR operations
-const OP_TYPE OP_CSRRW = '{category: CAT_ALU, func: CSRRW};
-const OP_TYPE OP_CSRRS = '{category: CAT_ALU, func: CSRRS};
-const OP_TYPE OP_CSRRC = '{category: CAT_ALU, func: CSRRC};
 
 // Multiply operations
 const OP_TYPE OP_MULT_MUL = '{category: CAT_MULT, func: MUL};

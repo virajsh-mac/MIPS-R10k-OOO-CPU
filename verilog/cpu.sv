@@ -281,12 +281,8 @@ module cpu (
     //                                              //
     //////////////////////////////////////////////////
 
-    stage_ex stage_ex_0 (
-        // Input
-        .id_ex_reg (id_ex_reg),
+    stage_issue stage_issue_0 (
 
-        // Output
-        .ex_packet (ex_packet)
     );
 
     //////////////////////////////////////////////////
