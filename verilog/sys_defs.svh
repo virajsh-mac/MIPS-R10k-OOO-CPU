@@ -25,7 +25,7 @@
 // =========================================
 
 // superscalar width (3-way superscalar)
-`define N 3
+`define N 2
 `define CDB_SZ `N // This MUST match superscalar width
 `define MAX_RS_FREE_CNT 3 // max broadcasted free spots in RS
 
@@ -49,6 +49,8 @@
 `define NUM_FU_MULT 1     // Single pipelined multiplier
 `define NUM_FU_BRANCH 1   // Single branch resolver
 `define NUM_FU_MEM 1     // Single address calculator for mem ops
+`define NUM_FU_TOTAL (`NUM_FU_ALU + `NUM_FU_MULT + `NUM_FU_BRANCH + `NUM_FU_MEM)
+`define FU_IDX $clog2(`NUM_FU_TOTAL)
 
 // number of mult stages (2, 4) (you likely don't need 8)
 `define MULT_STAGES 4
@@ -156,11 +158,19 @@ typedef struct packed {
     logic                          valid;
 } ICACHE_TAG;
 
-// CDB packet (from complete, for wakeup)
+// CDB packet
 typedef struct packed {
     logic [`CDB_SZ-1:0] valid;  // Valid broadcasts this cycle
     PHYS_TAG [`CDB_SZ-1:0] tags;  // Physical dest tags
+    DATA [`CDB_SZ-1:0] data;
 } CDB_PACKET;
+
+// CDB entry
+typedef struct packed {
+    logic valid;
+    PHYS_TAG tags;
+    DATA data;
+} CDB_ENTRY;
 
 ///////////////////////////////
 // ---- Exception Codes ---- //

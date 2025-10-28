@@ -96,7 +96,7 @@
 # there should be no need to change anything for project 3
 
 # this is a global clock period variable used in the tcl script and referenced in testbenches
-export CLOCK_PERIOD = 8
+export CLOCK_PERIOD = 30.0
 
 # the Verilog Compiler command and arguments
 VCS = module load vcs/2023.12-SP2-1 && \
@@ -190,7 +190,7 @@ GREP = grep -E --color=auto
 # ---- Modules to Test ---- #
 
 # TODO: add more modules here
-MODULES = cpu mult rob rs regfile stage_issue
+MODULES = cpu mult rob rs regfile
 
 # TODO: update this if you add more header files
 ALL_HEADERS = $(CPU_HEADERS)
@@ -233,7 +233,7 @@ CPU_HEADERS = verilog/sys_defs.svh \
 # test/cpu_test.sv is implicit
 CPU_TESTBENCH = test/pipeline_print.c \
 			    test/decode_inst.c \
-                test/mem.sv 
+                test/mem.sv
 # NOTE: you CANNOT alter the given memory module
 
 # verilog/cpu.sv is implicit

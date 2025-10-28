@@ -9,10 +9,10 @@
 // - Oldest lane (0) has priority on allocation
 // ------------------------------------------------------------------
 module freelist #(
-  parameter int N            = `N,                 
-  parameter int PR_COUNT     = `PHYS_REG_SZ_R10K,  
-  parameter int ARCH_COUNT   = 32,                 
-  parameter bit EXCLUDE_ZERO = 1'b1                
+  parameter int N            = `N,
+  parameter int PR_COUNT     = `PHYS_REG_SZ_R10K,
+  parameter int ARCH_COUNT   = 32,
+  parameter bit EXCLUDE_ZERO = 1'b1
 )(
   input  logic                 clock,
   input  logic                 reset_n,
