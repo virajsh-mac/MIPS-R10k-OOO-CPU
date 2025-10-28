@@ -12,10 +12,10 @@ module cdb (
 
     // Arbiter outputs indicating which requests are going on the CDB
     // (the next cycle i.e. what are you allowed to issue to the issue register)
-    input logic [`NUM_FU_BRANCH-1:0] branch_grants, // 1 highest priority
-    input logic [`NUM_FU_ALU-1:0] alu_grants, // 3
-    input logic [`NUM_FU_MEM-1:0] mem_grants, // 4 lowest priority
-    input logic [`NUM_FU_MULT-1:0] mult_grants, // 2
+    output logic [`NUM_FU_BRANCH-1:0] branch_grants, // 1 highest priority
+    output logic [`NUM_FU_ALU-1:0] alu_grants, // 3
+    output logic [`NUM_FU_MEM-1:0] mem_grants, // 4 lowest priority
+    output logic [`NUM_FU_MULT-1:0] mult_grants, // 2
 
     // CDB inputs
     input CDB_ENTRY [`NUM_FU_TOTAL-1:0] fu_outputs, // ordered as above
