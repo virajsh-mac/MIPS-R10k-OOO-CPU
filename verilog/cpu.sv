@@ -53,40 +53,25 @@ module cpu (
     //////////////////////////////////////////////////
 
     // Pipeline register enables
-    logic if_id_enable, issue_execute_enable, ex_mem_enable, mem_wb_enable;
-
-    // From IF stage to memory
-    MEM_COMMAND Imem_command; // Command sent to memory
-
-    // Outputs from IF-Stage and IF/ID Pipeline Register
-    ADDR Imem_addr;
-    IF_ID_PACKET if_packet, if_id_reg;
+    logic issue_execute_enable;
 
     // Outputs from ID stage and ID/EX Pipeline Register
     ISSUE_EXECUTE_PACKET issue_execute_packet, issue_execute_register;
 
-    // Outputs from EX-Stage and EX/MEM Pipeline Register
-    EX_MEM_PACKET ex_packet, ex_mem_reg;
+    // CDB wires
+    logic [`NUM_FU_BRANCH-1:0] cdb_branch_requests;
+    logic [`NUM_FU_ALU-1:0]    cdb_alu_requests;
+    logic [`NUM_FU_MEM-1:0]    cdb_mem_requests;
+    logic [`NUM_FU_MULT-1:0]   cdb_mult_requests;
 
-    // Outputs from MEM-Stage and MEM/WB Pipeline Register
-    MEM_WB_PACKET mem_packet, mem_wb_reg;
+    logic [`NUM_FU_BRANCH-1:0] cdb_branch_grants;
+    logic [`NUM_FU_ALU-1:0]    cdb_alu_grants;
+    logic [`NUM_FU_MEM-1:0]    cdb_mem_grants;
+    logic [`NUM_FU_MULT-1:0]   cdb_mult_grants;
 
-    // Outputs from MEM-Stage to memory
-    ADDR        Dmem_addr;
-    MEM_BLOCK   Dmem_store_data;
-    MEM_COMMAND Dmem_command;
-    MEM_SIZE    Dmem_size;
-
-    // Outputs from WB-Stage (These loop back to the register file in ID)
-    COMMIT_PACKET wb_packet;
-
-    // Logic for stalling memory stage
-    logic       load_stall;
-    logic       new_load;
-    logic       mem_tag_match;
-    logic       rd_mem_q;       // previous load
-    MEM_TAG     outstanding_mem_tag;    // tag load is waiting in
-    MEM_COMMAND Dmem_command_filtered;  // removes redundant loads
+    CDB_ENTRY [`NUM_FU_TOTAL-1:0] cdb_fu_outputs;
+    CDB_EARLY_TAG_ENTRY [`N-1:0]  cdb_early_tags;
+    CDB_ENTRY [`N-1:0]             cdb_output;
 
     //////////////////////////////////////////////////
     //                                              //
@@ -291,11 +276,31 @@ module cpu (
     //                                              //
     //////////////////////////////////////////////////
 
+
     cdb cdb_0 (
         .clock (clock),
         .reset (reset),
 
+        // Arbiter inputs
+        .branch_requests (cdb_branch_requests),
+        .alu_requests    (cdb_alu_requests),
+        .mem_requests    (cdb_mem_requests),
+        .mult_requests   (cdb_mult_requests),
 
+        // Arbiter outputs indicating which requests are granted
+        .branch_grants (cdb_branch_grants),
+        .alu_grants    (cdb_alu_grants),
+        .mem_grants    (cdb_mem_grants),
+        .mult_grants   (cdb_mult_grants),
+
+        // CDB inputs from functional units
+        .fu_outputs (cdb_fu_outputs),
+
+        // CDB output indicating which tags should be awoken a cycle early
+        .early_tags (cdb_early_tags),
+
+        // CDB register outputs broadcasting to PRF, EX stage, and Map Table
+        .cdb_output (cdb_output)
     );
 
     //////////////////////////////////////////////////
