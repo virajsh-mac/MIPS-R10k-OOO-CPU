@@ -57,18 +57,12 @@ module rs (
         .empty()
     );
 
-    // Free Mask logic, permitting freeing and allocating to the same entry
+    // Free Mask (which entries are free for the next cycle)
     always_comb begin
         free_mask = `RS_SZ'b0;
 
         for (int i = 0; i < `RS_SZ; i++) begin
             free_mask[i] = !rs_array[i].valid;  // 1 for free slots
-        end
-
-        for (int i = 0; i < `N; i++) begin
-            if (clear_valid[i]) begin
-                free_mask[clear_idxs[i]] = 1'b1;
-            end
         end
     end
 
@@ -95,11 +89,15 @@ module rs (
         // Wakeup operands via CDB (associative tag match)
         for (int i = 0; i < `RS_SZ; i++) begin
             for (int j = 0; j < `CDB_SZ; j++) begin
-                if (rs_array_next[i].valid && cdb_broadcast.valid[j] && rs_array_next[i].src1_tag == cdb_broadcast.tags[j]) begin
+                if (rs_array_next[i].valid &&
+                    cdb_broadcast.valid[j] &&
+                    rs_array_next[i].src1_tag == cdb_broadcast.tags[j]) begin
                     rs_array_next[i].src1_ready = 1'b1;
                 end
 
-                if (rs_array_next[i].valid && cdb_broadcast.valid[j] && rs_array_next[i].src2_tag == cdb_broadcast.tags[j]) begin
+                if (rs_array_next[i].valid &&
+                    cdb_broadcast.valid[j] &&
+                    rs_array_next[i].src2_tag == cdb_broadcast.tags[j]) begin
                     rs_array_next[i].src2_ready = 1'b1;
                 end
             end
