@@ -119,7 +119,7 @@ module map_table #(
       end
     end
   end
-
+  // Build per cycle next state
   // next-state: first apply CDB to current state (stage N), then fold renames
   always_comb begin
     // start from current
