@@ -39,8 +39,7 @@ module stage_issue (
         .gnt_bus()
     );
 
-    // find all ready instructions
-    // using a mux map each ready instruction to its particular category
+    // find all ready instructions in your respective RS
     // using a parking lot at each area of the pipeline register allocate instructions
     // by category select which ones will go into the S/E register
     // based on the amount of availiable FU's the next cycle

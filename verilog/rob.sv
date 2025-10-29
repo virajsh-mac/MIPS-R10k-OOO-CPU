@@ -104,8 +104,8 @@ module rob (
   ROB_ENTRY [`ROB_SZ-1:0] rob_next;
   logic [(ALLOC_CNT_WIDTH-1):0] alloc_cnt;
   // logic [(ALLOC_CNT_WIDTH-1):0] retire_cnt;
-  
-  
+
+
   always_comb begin
     // default vals
     rob_next  = rob_array;
@@ -136,7 +136,7 @@ module rob (
         if (rob_update_packet.valid[i]) begin
           rob_complete_update_idx = rob_update_packet.idx[i];
           rob_next[rob_complete_update_idx].complete = 1'b1;
-          
+
           // for debug purposes
           // rob_next[idx].value = rob_update_packet.values[i];
 
