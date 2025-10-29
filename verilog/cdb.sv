@@ -27,7 +27,7 @@ module cdb (
     // Flatten fu_outputs in PRIORITY ORDER: BRANCH (highest), ALU, MEM, MULT (lowest)
     // This ordering MUST match the psel_gen request order for correct arbitration
     CDB_ENTRY [`NUM_FU_TOTAL-1:0] fu_outputs_flat;
-    assign fu_outputs_flat = {fu_outputs.mult, fu_outputs.mem, fu_outputs.alu, fu_outputs.branch};
+    assign fu_outputs_flat = '{fu_outputs.mult, fu_outputs.mem, fu_outputs.alu, fu_outputs.branch};
 
     psel_gen #(
         .WIDTH(`NUM_FU_TOTAL),   // 6
@@ -35,7 +35,7 @@ module cdb (
     ) cdb_arbiter (
         // CRITICAL: Priority order is BRANCH (highest), ALU, MEM, MULT (lowest)
         // This concatenation order determines arbitration priority
-        .req({requests.mult, requests.mem, requests.alu, requests.branch}),
+        .req('{requests.mult, requests.mem, requests.alu, requests.branch}),
         .gnt(grants_flat),
         .gnt_bus(gnt_bus_next)
     );
@@ -58,7 +58,7 @@ module cdb (
     end
 
     // Unflatten grants back to structured format, maintaining same order
-    assign {grants.mult, grants.mem, grants.alu, grants.branch} = grants_flat;
+    assign '{grants.mult, grants.mem, grants.alu, grants.branch} = grants_flat;
     assign cdb_output = cdb;
 
 always_ff @(posedge clock) begin
