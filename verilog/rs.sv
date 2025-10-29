@@ -38,49 +38,55 @@ module rs #(
 
     // Outputs to issue/dispatch
     output RS_ENTRY [RS_SIZE-1:0] entries,  // Full RS entries for issue selection
-    output logic [$clog2(RS_SIZE+1)-1:0] free_count // Number of free entries (for dispatch stall)
+    output logic [ALLOC_WIDTH-1:0][RS_SIZE-1:0] granted_entries // Granted RS slots for each allocation request
 );
 
     // Internal storage: array of RS entries
     RS_ENTRY [RS_SIZE-1:0] rs_array, rs_array_next;
 
-    // Priority selector module that take turns dispatches to highest and lowest index entries in RS
-    logic [ALLOC_WIDTH-1:0][RS_SIZE-1:0] granted_entries;
-    logic [RS_SIZE-1:0] free_mask;
-    psel_gen #(
-        .WIDTH(RS_SIZE),
-        .REQS(ALLOC_WIDTH)
-    ) priority_selector (
-        .req(free_mask),
-        .gnt(), // will need for back propagation
-        .gnt_bus(granted_entries),
-        .empty()
-    );
+    // Generic allocator for RS entries - handles allocation in parallel
+    logic [RS_SIZE-1:0] clear_mask;
 
-    // Free Mask (which entries are free for the next cycle)
+    // Convert clear signals to bit vector for allocator
     always_comb begin
-        free_mask = RS_SIZE'b0;
-
-        for (int i = 0; i < RS_SIZE; i++) begin
-            free_mask[i] = !rs_array[i].valid;  // 1 for free slots
+        clear_mask = '0;
+        for (int i = 0; i < CLEAR_WIDTH; i++) begin
+            if (clear_valid[i]) begin
+                clear_mask[clear_idxs[i]] = 1'b1;
+            end
         end
     end
+
+    allocator #(
+        .NUM_RESOURCES(RS_SIZE),
+        .NUM_REQUESTS(ALLOC_WIDTH)
+    ) rs_allocator (
+        .reset(reset | mispredict),
+        .clock(clock),
+        .req(alloc_valid),
+        .clear(clear_mask),
+        .grant(granted_entries)
+    );
 
     // Allocating and Freeing RS entries
     always_comb begin
         rs_array_next = rs_array;
 
-        // Clear valid bits for entires that are being issued
+        // Clear valid bits for entries that are being issued
+        // Note: Clearing happens here for the RS array state, while the allocator
+        // tracks resource availability separately via clear_mask
         for (int i = 0; i < CLEAR_WIDTH; i++) begin
             if (clear_valid[i]) begin
                 rs_array_next[clear_idxs[i]].valid = 1'b0;
             end
         end
 
-        // Allocating new RS entires from dispatch
+        // Allocate new RS entries from dispatch
+        // The allocator module has already determined which slots are available,
+        // so we just write to the granted slots
         for (int i = 0; i < ALLOC_WIDTH; i++) begin
             for (int j = 0; j < RS_SIZE; j++) begin
-                if (granted_entries[i][j] && alloc_valid[i]) begin
+                if (granted_entries[i][j]) begin
                     rs_array_next[j] = alloc_entries[i];
                 end
             end
@@ -105,18 +111,13 @@ module rs #(
 
     end
 
-    // RS Output logic
-    logic [$clog2(RS_SIZE+1)-1:0] effective_free, next_effective_free;
-    assign next_effective_free = effective_free + $countones(clear_valid) - $countones(alloc_valid);
-    assign free_count = (effective_free > ALLOC_WIDTH) ? ALLOC_WIDTH : effective_free;  // Capped at ALLOC_WIDTH to reduce interconnect
+    // RS Output: expose entries array for issue selection
     assign entries = rs_array;
 
     always_ff @(posedge clock) begin
         if (reset | mispredict) begin
-            effective_free <= RS_SIZE;
             rs_array <= '0;
         end else begin
-            effective_free <= next_effective_free;
             rs_array <= rs_array_next;
         end
     end
