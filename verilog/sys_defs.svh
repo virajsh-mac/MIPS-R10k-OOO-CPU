@@ -488,6 +488,44 @@ typedef struct packed {
     RS_ENTRY [`NUM_FU_MEM-1:0]    mem;
 } ISSUE_ENTRIES;
 
+// FU request signals grouped by functional unit type (for CDB arbitration)
+typedef struct packed {
+    logic [`NUM_FU_ALU-1:0]    alu;
+    logic [`NUM_FU_MULT-1:0]   mult;
+    logic [`NUM_FU_BRANCH-1:0] branch;
+    logic [`NUM_FU_MEM-1:0]    mem;
+} FU_REQUESTS;
+
+// RS allocation signals for a single dispatch width
+typedef struct packed {
+    logic [`N-1:0]    valid;
+    RS_ENTRY [`N-1:0] entries;
+} RS_ALLOC;
+
+// RS allocation signals grouped by functional unit type
+typedef struct packed {
+    RS_ALLOC alu;
+    RS_ALLOC mult;
+    RS_ALLOC branch;
+    RS_ALLOC mem;
+} RS_ALLOC_BANKS;
+
+// RS granted entries (free slot indicators) grouped by functional unit type
+typedef struct packed {
+    logic [`N-1:0][`RS_ALU_SZ-1:0]    alu;
+    logic [`N-1:0][`RS_MULT_SZ-1:0]   mult;
+    logic [`N-1:0][`RS_BRANCH_SZ-1:0] branch;
+    logic [`N-1:0][`RS_MEM_SZ-1:0]    mem;
+} RS_GRANTED_BANKS;
+
+// CDB outputs from functional units grouped by type
+typedef struct packed {
+    CDB_ENTRY [`NUM_FU_ALU-1:0]    alu;
+    CDB_ENTRY [`NUM_FU_MULT-1:0]   mult;
+    CDB_ENTRY [`NUM_FU_BRANCH-1:0] branch;
+    CDB_ENTRY [`NUM_FU_MEM-1:0]    mem;
+} CDB_FU_OUTPUTS;
+
 // ROB entry structure
 typedef struct packed {
     logic          valid;          // Entry occupied

@@ -61,53 +61,42 @@ module cpu (
     // Outputs from ID stage and ID/EX Pipeline Register
     ISSUE_EXECUTE_PACKET issue_execute_packet, issue_execute_register;
 
-    // RS wires - separate for each functional unit category
-    // From dispatch to RS (ALU)
-    logic [`N-1:0]          rs_alu_alloc_valid;
-    RS_ENTRY [`N-1:0]       rs_alu_alloc_entries;
+    // RS wires - structured by functional unit category
+    RS_ALLOC_BANKS rs_alloc;
+    RS_GRANTED_BANKS rs_granted;
+    RS_BANKS rs_banks;
+    ISSUE_CLEAR issue_clear;
+
+    // TODO: Connect rs_alloc to dispatch/ID stage outputs when dispatch is implemented
+    assign rs_alloc = '0;
+
+    // Individual RS clear signals (extracted from issue_clear)
     logic [`NUM_FU_ALU-1:0] rs_alu_clear_valid;
     RS_IDX [`NUM_FU_ALU-1:0] rs_alu_clear_idxs;
-    RS_ENTRY [`RS_ALU_SZ-1:0] rs_alu_entries;
-    logic [`N-1:0][`RS_ALU_SZ-1:0] rs_alu_granted_entries;
-
-    // From dispatch to RS (MULT)
-    logic [`N-1:0]          rs_mult_alloc_valid;
-    RS_ENTRY [`N-1:0]       rs_mult_alloc_entries;
     logic [`NUM_FU_MULT-1:0] rs_mult_clear_valid;
     RS_IDX [`NUM_FU_MULT-1:0] rs_mult_clear_idxs;
-    RS_ENTRY [`RS_MULT_SZ-1:0] rs_mult_entries;
-    logic [`N-1:0][`RS_MULT_SZ-1:0] rs_mult_granted_entries;
-
-    // From dispatch to RS (BRANCH)
-    logic [`N-1:0]          rs_branch_alloc_valid;
-    RS_ENTRY [`N-1:0]       rs_branch_alloc_entries;
     logic [`NUM_FU_BRANCH-1:0] rs_branch_clear_valid;
     RS_IDX [`NUM_FU_BRANCH-1:0] rs_branch_clear_idxs;
-    RS_ENTRY [`RS_BRANCH_SZ-1:0] rs_branch_entries;
-    logic [`N-1:0][`RS_BRANCH_SZ-1:0] rs_branch_granted_entries;
-
-    // From dispatch to RS (MEM)
-    logic [`N-1:0]          rs_mem_alloc_valid;
-    RS_ENTRY [`N-1:0]       rs_mem_alloc_entries;
     logic [`NUM_FU_MEM-1:0] rs_mem_clear_valid;
     RS_IDX [`NUM_FU_MEM-1:0] rs_mem_clear_idxs;
+
+    // Individual RS entries outputs (needed for rs_banks)
+    RS_ENTRY [`RS_ALU_SZ-1:0] rs_alu_entries;
+    RS_ENTRY [`RS_MULT_SZ-1:0] rs_mult_entries;
+    RS_ENTRY [`RS_BRANCH_SZ-1:0] rs_branch_entries;
     RS_ENTRY [`RS_MEM_SZ-1:0] rs_mem_entries;
-    logic [`N-1:0][`RS_MEM_SZ-1:0] rs_mem_granted_entries;
 
-    // CDB wires
-    logic [`NUM_FU_BRANCH-1:0] cdb_branch_requests;
-    logic [`NUM_FU_ALU-1:0]    cdb_alu_requests;
-    logic [`NUM_FU_MEM-1:0]    cdb_mem_requests;
-    logic [`NUM_FU_MULT-1:0]   cdb_mult_requests;
-
-    logic [`NUM_FU_BRANCH-1:0] cdb_branch_grants;
-    logic [`NUM_FU_ALU-1:0]    cdb_alu_grants;
-    logic [`NUM_FU_MEM-1:0]    cdb_mem_grants;
-    logic [`NUM_FU_MULT-1:0]   cdb_mult_grants;
-
-    CDB_ENTRY [`NUM_FU_TOTAL-1:0] cdb_fu_outputs;
+    // CDB wires (structured)
+    FU_REQUESTS cdb_requests;
+    FU_GRANTS cdb_grants;
+    CDB_FU_OUTPUTS cdb_fu_outputs;
     CDB_EARLY_TAG_ENTRY [`N-1:0] early_tag_broadcast;
-    CDB_ENTRY [`N-1:0]             cdb_output;
+    CDB_ENTRY [`N-1:0] cdb_output;
+
+    // TODO: Connect these to actual functional unit outputs when FUs are implemented
+    // Placeholder assignments for now
+    assign cdb_requests = '0;
+    assign cdb_fu_outputs = '0;
 
     //////////////////////////////////////////////////
     //                                              //
@@ -267,9 +256,9 @@ module cpu (
         .clock (clock),
         .reset (reset),
 
-        // From dispatch: allocation signals
-        .alloc_valid  (rs_alu_alloc_valid),
-        .alloc_entries(rs_alu_alloc_entries),
+        // From dispatch: allocation signals (structured)
+        .alloc_valid  (rs_alloc.alu.valid),
+        .alloc_entries(rs_alloc.alu.entries),
 
         // From complete: CDB broadcasts for operand wakeup
         .early_tag_broadcast(early_tag_broadcast),
@@ -283,7 +272,7 @@ module cpu (
 
         // Outputs to issue/dispatch
         .entries        (rs_alu_entries),
-        .granted_entries(rs_alu_granted_entries)
+        .granted_entries(rs_granted.alu)
     );
 
     // RS for MULT operations (2 entries, 1 clear port)
@@ -297,9 +286,9 @@ module cpu (
         .clock (clock),
         .reset (reset),
 
-        // From dispatch: allocation signals
-        .alloc_valid  (rs_mult_alloc_valid),
-        .alloc_entries(rs_mult_alloc_entries),
+        // From dispatch: allocation signals (structured)
+        .alloc_valid  (rs_alloc.mult.valid),
+        .alloc_entries(rs_alloc.mult.entries),
 
         // From complete: CDB broadcasts for operand wakeup
         .early_tag_broadcast(early_tag_broadcast),
@@ -313,7 +302,7 @@ module cpu (
 
         // Outputs to issue/dispatch
         .entries        (rs_mult_entries),
-        .granted_entries(rs_mult_granted_entries)
+        .granted_entries(rs_granted.mult)
     );
 
     // RS for BRANCH operations (2 entries, 1 clear port)
@@ -327,9 +316,9 @@ module cpu (
         .clock (clock),
         .reset (reset),
 
-        // From dispatch: allocation signals
-        .alloc_valid  (rs_branch_alloc_valid),
-        .alloc_entries(rs_branch_alloc_entries),
+        // From dispatch: allocation signals (structured)
+        .alloc_valid  (rs_alloc.branch.valid),
+        .alloc_entries(rs_alloc.branch.entries),
 
         // From complete: CDB broadcasts for operand wakeup
         .early_tag_broadcast(early_tag_broadcast),
@@ -343,7 +332,7 @@ module cpu (
 
         // Outputs to issue/dispatch
         .entries        (rs_branch_entries),
-        .granted_entries(rs_branch_granted_entries)
+        .granted_entries(rs_granted.branch)
     );
 
     // RS for MEM operations (2 entries, 1 clear port)
@@ -357,9 +346,9 @@ module cpu (
         .clock (clock),
         .reset (reset),
 
-        // From dispatch: allocation signals
-        .alloc_valid  (rs_mem_alloc_valid),
-        .alloc_entries(rs_mem_alloc_entries),
+        // From dispatch: allocation signals (structured)
+        .alloc_valid  (rs_alloc.mem.valid),
+        .alloc_entries(rs_alloc.mem.entries),
 
         // From complete: CDB broadcasts for operand wakeup
         .early_tag_broadcast(early_tag_broadcast),
@@ -373,7 +362,7 @@ module cpu (
 
         // Outputs to issue/dispatch
         .entries        (rs_mem_entries),
-        .granted_entries(rs_mem_granted_entries)
+        .granted_entries(rs_granted.mem)
     );
 
     //////////////////////////////////////////////////
@@ -401,18 +390,10 @@ module cpu (
     ISSUE_CLEAR issue_clear;
 
     // Create structured RS banks from individual RS module outputs
-    RS_BANKS rs_banks;
     assign rs_banks.alu    = rs_alu_entries;
     assign rs_banks.mult   = rs_mult_entries;
     assign rs_banks.branch = rs_branch_entries;
     assign rs_banks.mem    = rs_mem_entries;
-
-    // Create structured FU grants from CDB outputs
-    FU_GRANTS fu_grants;
-    assign fu_grants.alu    = cdb_alu_grants;
-    assign fu_grants.mult   = cdb_mult_grants;
-    assign fu_grants.branch = cdb_branch_grants;
-    assign fu_grants.mem    = cdb_mem_grants;
 
     stage_issue stage_issue_0 (
         .clock(clock),
@@ -422,8 +403,8 @@ module cpu (
         // RS entries (structured)
         .rs_banks(rs_banks),
 
-        // FU availability grants (structured)
-        .fu_grants(fu_grants),
+        // FU availability grants (structured) - comes from CDB
+        .fu_grants(cdb_grants),
 
         // Clear signals (structured)
         .issue_clear(issue_clear),
@@ -459,23 +440,17 @@ module cpu (
         .clock (clock),
         .reset (reset),
 
-        // Arbiter inputs
-        .branch_requests (cdb_branch_requests),
-        .alu_requests    (cdb_alu_requests),
-        .mem_requests    (cdb_mem_requests),
-        .mult_requests   (cdb_mult_requests),
+        // Arbiter inputs (structured)
+        .requests (cdb_requests),
 
-        // Arbiter outputs indicating which requests are granted
-        .branch_grants (cdb_branch_grants),
-        .alu_grants    (cdb_alu_grants),
-        .mem_grants    (cdb_mem_grants),
-        .mult_grants   (cdb_mult_grants),
+        // Arbiter outputs indicating which requests are granted (structured)
+        .grants (cdb_grants),
 
-        // CDB inputs from functional units
+        // CDB inputs from functional units (structured)
         .fu_outputs (cdb_fu_outputs),
 
         // CDB output indicating which tags should be awoken a cycle early
-        .early_tags (cdb_early_tags),
+        .early_tags (early_tag_broadcast),
 
         // CDB register outputs broadcasting to PRF, EX stage, and Map Table
         .cdb_output (cdb_output)
