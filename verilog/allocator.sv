@@ -26,12 +26,12 @@
 
 module allocator #(
     parameter NUM_RESOURCES = 64,
-    parameter NUM_REQUESTS = 3
+    parameter NUM_REQUESTS  = 3
 ) (
-    input                                       reset,
-    input                                       clock,
-    input  logic [NUM_REQUESTS-1:0]             req,
-    input  logic [NUM_RESOURCES-1:0]            clear,
+    input                           reset,
+    input                           clock,
+    input logic [ NUM_REQUESTS-1:0] req,
+    input logic [NUM_RESOURCES-1:0] clear,
 
     output logic [NUM_REQUESTS-1:0][NUM_RESOURCES-1:0] grant
 );
@@ -59,22 +59,22 @@ module allocator #(
     // Priority selector for resource allocation: grants available resources
     // to incoming requests based on priority (alternating MSB/LSB priority scheme)
     psel_gen #(
-         .WIDTH(NUM_RESOURCES),
-         .REQS(NUM_REQUESTS)
+        .WIDTH(NUM_RESOURCES),
+        .REQS (NUM_REQUESTS)
     ) resource_psel (
-         .req(resource_status),
-         .gnt_bus(resource_gnt_bus)
+        .req(resource_status),
+        .gnt_bus(resource_gnt_bus)
     );
 
 
     // Priority selector for request prioritization: determines which requests
     // are processed when multiple requests arrive simultaneously
     psel_gen #(
-         .WIDTH(NUM_REQUESTS),
-         .REQS(NUM_REQUESTS)
+        .WIDTH(NUM_REQUESTS),
+        .REQS (NUM_REQUESTS)
     ) request_psel (
-         .req(req),
-         .gnt_bus(request_gnt_bus)
+        .req(req),
+        .gnt_bus(request_gnt_bus)
     );
 
 
@@ -83,8 +83,8 @@ module allocator #(
     always_comb begin
         grant = '0;
 
-        for(int i = 0; i < NUM_REQUESTS; i++) begin
-            for(int j = 0; j < NUM_REQUESTS; j++) begin
+        for (int i = 0; i < NUM_REQUESTS; i++) begin
+            for (int j = 0; j < NUM_REQUESTS; j++) begin
                 if (request_gnt_bus[i][j]) begin
                     // Assign the next highest priority resource to the current requester
                     // skip any requester that has no priority (i.e. no incoming request)
@@ -99,7 +99,7 @@ module allocator #(
     always_comb begin
         resource_allocated = '0;
 
-        for(int i = 0; i < NUM_REQUESTS; i++) begin
+        for (int i = 0; i < NUM_REQUESTS; i++) begin
             resource_allocated |= grant[i];
         end
     end
