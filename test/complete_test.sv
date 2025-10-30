@@ -2,25 +2,11 @@
 `timescale 1ns/1ps
 `include "verilog/sys_defs.svh"
 
-// Mirror of EX_COMP_PACKAGE (kept identical to complete.sv)
-`ifndef HAS_EX_COMP_PACKAGE
-typedef struct packed {
-  ROB_IDX     rob_idx;
-  logic       branch_valid;
-  logic       mispredict;     // ignored by complete.sv
-  logic       branch_taken;
-  ADDR        branch_target;
-  PHYS_TAG    dest_pr;        // unused here
-  DATA        result;         // unused here
-} EX_COMP_PACKAGE;
-`define HAS_EX_COMP_PACKAGE
-`endif
-
 module complete_test;
 
   localparam int  N   = `N;
   localparam time TCK = 10ns;
-  localparam int  EXW = $bits(EX_COMP_PACKAGE); // width of one EX_COMP_PACKAGE
+  localparam int  EXW = $bits(EX_COMPLETE_ENTRY); // width of one EX_COMPLETE_ENTRY
 
   // Clock/reset
   logic clock, reset;
@@ -29,7 +15,7 @@ module complete_test;
 
   // DUT I/O (TB-native forms)
   logic            ex_valid [N-1:0];
-  EX_COMP_PACKAGE  ex_comp  [N-1:0];
+  EX_COMPLETE_ENTRY  ex_comp  [N-1:0];
   ROB_UPDATE_PACKET rob_update_packet;
 
   // ---------------------------
@@ -40,7 +26,7 @@ module complete_test;
   logic [N-1:0]     ex_valid_p;
   logic [EXW*N-1:0] ex_comp_bus;
 
-  function automatic [EXW*N-1:0] pack_ex_arr(input EX_COMP_PACKAGE a [N-1:0]);
+  function automatic [EXW*N-1:0] pack_ex_arr(input EX_COMPLETE_ENTRY a [N-1:0]);
     automatic logic [EXW*N-1:0] b; b = '0;
     for (int k=0; k<N; k++) b[k*EXW +: EXW] = a[k];
     return b;
@@ -93,11 +79,11 @@ module complete_test;
     end
   endtask
 
-  function automatic EX_COMP_PACKAGE mk_ex(input int ridx,
+  function automatic EX_COMPLETE_ENTRY mk_ex(input int ridx,
                                            input bit br_valid,
                                            input bit br_taken,
                                            input int br_tgt);
-    EX_COMP_PACKAGE p;
+    EX_COMPLETE_ENTRY p;
     p.rob_idx       = ROB_IDX'(ridx);
     p.branch_valid  = br_valid;
     p.mispredict    = 1'b1;                 // intentionally set; DUT must ignore
@@ -115,7 +101,7 @@ module complete_test;
   // Temps (avoid mid-block decls)
   int ridx2;
   int ridx0;
-  EX_COMP_PACKAGE tmp;
+  EX_COMPLETE_ENTRY tmp;
 
   // ---------------------------
   // The tests

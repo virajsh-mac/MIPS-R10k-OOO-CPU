@@ -190,7 +190,7 @@ GREP = grep -E --color=auto
 # ---- Modules to Test ---- #
 
 # TODO: add more modules here
-MODULES = cpu mult rob rs regfile stage_issue complete
+MODULES = cpu mult rob rs regfile stage_issue stage_complete
 
 # TODO: update this if you add more header files
 ALL_HEADERS = $(CPU_HEADERS)
@@ -227,10 +227,10 @@ build/stage_issue.cov: $(STAGE_ISSUE_FILES)
 synth/stage_issue.vg: $(STAGE_ISSUE_FILES)
 
 # TODO: add any files required for the ROB here (besides test/rob_test.sv and verilog/rob.sv)
-COMPLETE_FILES = verilog/sys_defs.svh
-build/complete.simv: $(COMPLETE_FILES)
-build/complete.cov: $(COMPLETE_FILES)
-synth/complete.vg: $(COMPLETE_FILES)
+STAGE_COMPLETE_FILES = verilog/sys_defs.svh
+build/stage_complete.simv: $(STAGE_COMPLETE_FILES)
+build/stage_complete.cov: $(STAGE_COMPLETE_FILES)
+synth/stage_complete.vg: $(STAGE_COMPLETE_FILES)
 
 #################################
 # ---- Main CPU Definition ---- #

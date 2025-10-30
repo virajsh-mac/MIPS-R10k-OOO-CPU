@@ -25,7 +25,7 @@
 // =========================================
 
 // superscalar width (3-way superscalar)
-`define N 2
+`define N 3
 `define CDB_SZ `N // This MUST match superscalar width
 `define MAX_RS_FREE_CNT 3 // max broadcasted free spots in RS
 
@@ -545,5 +545,16 @@ typedef struct packed {
     logic          halt;           // Is this a halt?
     logic          illegal;        // Is this illegal?
 } ROB_ENTRY;
+
+// EX to Complete stage entry
+typedef struct packed {
+    ROB_IDX  rob_idx;        // ROB index of this instruction
+    logic    branch_valid;   // Is this a branch instruction?
+    logic    mispredict;     // Branch misprediction detected
+    logic    branch_taken;   // Branch resolution: taken or not taken
+    ADDR     branch_target;  // Resolved branch target address
+    PHYS_TAG dest_pr;        // Destination physical register
+    DATA     result;         // Computed result value
+} EX_COMPLETE_ENTRY;
 
 `endif  // __SYS_DEFS_SVH__
