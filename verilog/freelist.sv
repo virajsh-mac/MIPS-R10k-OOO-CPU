@@ -1,24 +1,38 @@
-`timescale 1ns/100ps
 `include "sys_defs.svh"
 
-// ------------------------------------------------------------------
-// N-way freelist (no branch recovery)
-// - Holds free physical registers in a circular buffer
-// - Up to N allocs and N returns per cycle
-// - Reset seeds the queue with tags [START_TAG .. PR_COUNT-1]
-// - Oldest lane (0) has priority on allocation
-// ------------------------------------------------------------------
 module freelist #(
-  parameter int N            = `N,
-  parameter int PR_COUNT     = `PHYS_REG_SZ_R10K,
-  parameter int ARCH_COUNT   = 32,
-  parameter bit EXCLUDE_ZERO = 1'b1
-)(
-  input  logic                 clock,
-  input  logic                 reset_n,
-  input  logic   [N-1:0]       DispatchEN,
-  input  logic   [N-1:0]       RetireEN,
-  input  PHYS_TAG [N-1:0]      RetireReg,
-  output PHYS_TAG [N-1:0]      FreeReg,       // valid when FreeRegValid[i] = 1
-  output logic   [N-1:0]       FreeRegValid
+    parameter int ALLOC_WIDTH = `N,                // Number of allocation requests per cycle
+    parameter int PR_COUNT    = `PHYS_REG_SZ_R10K
+) (
+    input clock,  // system clock
+    input reset,  // system reset
+
+    // From dispatch: allocation requests
+    input logic [ALLOC_WIDTH-1:0] alloc_req,  // Request allocation for each dispatch lane
+
+    // From retire: deallocation requests
+    input logic [PR_COUNT-1:0] free_mask,  // Bit mask of registers being freed
+
+    // Outputs to dispatch
+    output logic [ALLOC_WIDTH-1:0][PR_COUNT-1:0] granted_regs  // Granted physical registers for each allocation request
 );
+
+    // Grant matrix from allocator: grants[requester][resource]
+    logic [ALLOC_WIDTH-1:0][PR_COUNT-1:0] grants;
+
+    // Allocator instance for physical register allocation
+    allocator #(
+        .NUM_RESOURCES(PR_COUNT),
+        .NUM_REQUESTS (ALLOC_WIDTH)
+    ) reg_allocator (
+        .reset(reset),
+        .clock(clock),
+        .req  (alloc_req),  // Allocation requests
+        .clear(free_mask),  // Registers being freed
+        .grant(grants)      // Grant matrix
+    );
+
+    // Output grant matrix directly
+    assign granted_regs = grants;
+
+endmodule
