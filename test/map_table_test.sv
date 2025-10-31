@@ -1,0 +1,302 @@
+`include "sys_defs.svh"
+
+// Basic testbench for map_table module
+// Tests basic functionality for synthesis verification
+
+module testbench;
+
+    logic clock, reset;
+    logic failed;
+
+    // Inputs to map_table
+    logic [`N-1:0] write_enables;
+    REG_IDX [`N-1:0] write_addrs;
+    PHYS_TAG [`N-1:0] write_phys_regs;
+    REG_IDX [`N-1:0] read_addrs;
+    CDB_ENTRY [`N-1:0] cdb_broadcasts;
+
+    // Outputs from map_table
+    MAP_ENTRY [`N-1:0] read_entries;
+
+    map_table dut (
+        .clock(clock),
+        .reset(reset),
+        .write_enables(write_enables),
+        .write_addrs(write_addrs),
+        .write_phys_regs(write_phys_regs),
+        .read_addrs(read_addrs),
+        .read_entries(read_entries),
+        .cdb_broadcasts(cdb_broadcasts)
+    );
+
+    // always @(read_entries) begin
+    //     for (int i = 0; i < `N; i++) begin
+    //         if (read_entries[i].phys_reg != 0 || read_entries[i].ready != 0) begin
+    //             $display("[@%0t] READ_ENTRY[%0d] CHANGED: phys_reg=%0d, ready=%b", $time, i, read_entries[i].phys_reg,
+    //                      read_entries[i].ready);
+    //         end
+    //     end
+    // end
+
+    always begin
+        #50 clock = ~clock;  // 100ns period
+    end
+
+    // Helper to reset and wait for proper timing
+    task reset_dut;
+        reset = 1;
+        repeat (2) @(posedge clock);  // Hold reset over two posedges
+        reset = 0;
+        @(posedge clock);  // One more cycle for stability
+    endtask
+
+    // Helper to set read addresses for all ports
+    task set_read_addrs;
+        for (int i = 0; i < `N; i++) begin
+            read_addrs[i] = i;  // Read architectural reg i on port i
+        end
+    endtask
+
+    // Helper to clear all inputs
+    task clear_inputs;
+        write_enables = '0;
+        write_addrs = '0;
+        write_phys_regs = '0;
+        cdb_broadcasts = '0;
+        set_read_addrs();
+    endtask
+
+    // Helper to create a CDB broadcast entry
+    function CDB_ENTRY cdb_entry(input logic valid, input PHYS_TAG tag, input DATA data = 0);
+        cdb_entry.valid = valid;
+        cdb_entry.tag   = tag;
+        cdb_entry.data  = data;
+    endfunction
+
+    // Helper to check if a read entry matches expected values
+    function logic check_entry(input int port, input PHYS_TAG expected_phys, input logic expected_ready);
+        return (read_entries[port].phys_reg == expected_phys && read_entries[port].ready == expected_ready);
+    endfunction
+
+    initial begin
+        int test_num = 1;
+        clock  = 0;
+        reset  = 1;
+        failed = 0;
+
+        // Initialize inputs
+        clear_inputs();
+
+        reset_dut();
+
+        // Test 1: Initial identity mapping after reset
+        $display("\nTest %0d: Initial identity mapping after reset", test_num++);
+        reset_dut();
+        begin
+            logic all_correct = 1;
+
+            @(posedge clock);
+            #10;
+
+            // Check that first few registers have identity mapping and are ready
+            for (int i = 0; i < `N && i < 8; i++) begin  // Check first 8 or N registers
+                if (!check_entry(i, PHYS_TAG'(i), 1'b1)) begin
+                    $display("  FAIL: Reg %0d should map to phys %0d and be ready, got phys=%0d ready=%b", i, i,
+                             read_entries[i].phys_reg, read_entries[i].ready);
+                    all_correct = 0;
+                end
+            end
+
+            if (all_correct) begin
+                $display("  PASS: Initial identity mapping correct");
+            end else begin
+                failed = 1;
+            end
+        end
+
+        // Test 2: CDB broadcast updates ready bits
+        $display("\nTest %0d: CDB broadcast updates ready bits", test_num++);
+        reset_dut();
+        clear_inputs();
+        begin
+            logic cdb_updated = 0;
+
+            // Set up some mappings that are initially not ready
+            write_enables[0] = 1'b1;
+            write_addrs[0] = 5'd5;
+            write_phys_regs[0] = 6'd40;  // Map arch 5 to phys 40
+
+            write_enables[1] = 1'b1;
+            write_addrs[1] = 5'd10;
+            write_phys_regs[1] = 6'd45;  // Map arch 10 to phys 45
+
+            // Set read addresses to match written arch regs
+            read_addrs[0] = 5'd5;
+            read_addrs[1] = 5'd10;
+
+            @(posedge clock);
+            #10;
+
+            // Verify mappings are set but not ready
+            if (!check_entry(0, 6'd40, 1'b0) || !check_entry(1, 6'd45, 1'b0)) begin
+                $display("  FAIL: Initial mappings should not be ready");
+                failed = 1;
+            end
+
+            // Clear writes and send CDB broadcasts
+            write_enables = '0;
+            cdb_broadcasts[0] = cdb_entry(1'b1, 6'd40, 32'h1234);  // Make phys 40 ready
+            cdb_broadcasts[1] = cdb_entry(1'b1, 6'd45, 32'h5678);  // Make phys 45 ready
+
+            @(posedge clock);
+            #10;
+
+            // Check that ready bits were updated
+            if (check_entry(0, 6'd40, 1'b1) && check_entry(1, 6'd45, 1'b1)) begin
+                $display("  PASS: CDB broadcasts updated ready bits");
+            end else begin
+                $display("  FAIL: CDB broadcasts should update ready bits (port0: phys=%0d ready=%b, port1: phys=%0d ready=%b)",
+                         read_entries[0].phys_reg, read_entries[0].ready, read_entries[1].phys_reg, read_entries[1].ready);
+                failed = 1;
+            end
+        end
+
+        // Test 3: Dispatch writes override CDB updates
+        $display("\nTest %0d: Dispatch writes override CDB updates", test_num++);
+        reset_dut();
+        clear_inputs();
+        begin
+            // Set up initial mapping
+            write_enables[0] = 1'b1;
+            write_addrs[0] = 5'd3;
+            write_phys_regs[0] = 6'd50;  // Map arch 3 to phys 50
+
+            // Set read address to match written arch reg
+            read_addrs[0] = 5'd3;
+
+            @(posedge clock);
+            #10;
+
+            // Send CDB broadcast for phys 50 AND a new write to arch 3 in same cycle
+            cdb_broadcasts[0] = cdb_entry(1'b1, 6'd50, 32'h9999);
+            write_enables[0] = 1'b1;
+            write_addrs[0] = 5'd3;
+            write_phys_regs[0] = 6'd60;  // Change mapping to phys 60
+
+            @(posedge clock);
+            #10;
+
+            // Write should override CDB, so phys 60 should not be ready
+            if (check_entry(0, 6'd60, 1'b0)) begin
+                $display("  PASS: Dispatch write overrode CDB broadcast (new mapping not ready)");
+            end else begin
+                $display("  FAIL: Dispatch write should override CDB (expected phys=60 ready=0, got phys=%0d ready=%b)",
+                         read_entries[0].phys_reg, read_entries[0].ready);
+                failed = 1;
+            end
+        end
+
+        // Test 4: Multiple simultaneous writes
+        $display("\nTest %0d: Multiple simultaneous writes", test_num++);
+        reset_dut();
+        clear_inputs();
+        begin
+            logic all_correct = 1;
+
+            // Write to multiple registers simultaneously
+            for (int i = 0; i < `N; i++) begin
+                write_enables[i] = 1'b1;
+                write_addrs[i] = i;
+                write_phys_regs[i] = 32 + i;  // Map to phys registers 32-32+N-1
+            end
+
+            @(posedge clock);
+            #10;
+
+            // Check all mappings
+            for (int i = 0; i < `N; i++) begin
+                if (!check_entry(i, 32 + i, 1'b0)) begin
+                    $display("  FAIL: Reg %0d should map to phys %0d and not be ready, got phys=%0d ready=%b", i, 32 + i,
+                             read_entries[i].phys_reg, read_entries[i].ready);
+                    all_correct = 0;
+                end
+            end
+
+            if (all_correct) begin
+                $display("  PASS: Multiple simultaneous writes correct");
+            end else begin
+                failed = 1;
+            end
+        end
+
+        // Test 5: Reset clears all mappings
+        $display("\nTest %0d: Reset clears all mappings to identity", test_num++);
+        clear_inputs();
+        reset_dut();
+        begin
+            logic all_correct = 1;
+
+            @(posedge clock);
+            #10;
+
+            // Check that registers are back to identity mapping
+            for (int i = 0; i < `N && i < 8; i++) begin
+                if (!check_entry(i, PHYS_TAG'(i), 1'b1)) begin
+                    $display("  FAIL: After reset, reg %0d should map to phys %0d and be ready, got phys=%0d ready=%b", i, i,
+                             read_entries[i].phys_reg, read_entries[i].ready);
+                    all_correct = 0;
+                end
+            end
+
+            if (all_correct) begin
+                $display("  PASS: Reset restored identity mapping");
+            end else begin
+                failed = 1;
+            end
+        end
+
+        // Test 6: Read ports work independently
+        $display("\nTest %0d: Read ports work independently", test_num++);
+        reset_dut();
+        clear_inputs();
+        begin
+            // Set up some test mappings
+            write_enables[0] = 1'b1;
+            write_addrs[0] = 5'd1;
+            write_phys_regs[0] = 6'd35;
+
+            write_enables[1] = 1'b1;
+            write_addrs[1] = 5'd5;
+            write_phys_regs[1] = 6'd40;
+
+            @(posedge clock);
+            #10;
+
+            // Read different registers on different ports
+            read_addrs[0] = 5'd1;  // Should read arch 1
+            read_addrs[1] = 5'd5;  // Should read arch 5
+
+            @(posedge clock);
+            #10;
+
+            // Check independent reads
+            if (check_entry(0, 6'd35, 1'b0) && check_entry(1, 6'd40, 1'b0)) begin
+                $display("  PASS: Read ports work independently");
+            end else begin
+                $display("  FAIL: Independent reads failed (port0: phys=%0d ready=%b, port1: phys=%0d ready=%b)",
+                         read_entries[0].phys_reg, read_entries[0].ready, read_entries[1].phys_reg, read_entries[1].ready);
+                failed = 1;
+            end
+        end
+
+        $display("\n");
+        if (failed) begin
+            $display("@@@ FAILED");
+        end else begin
+            $display("@@@ PASSED");
+        end
+
+        $finish;
+    end
+
+endmodule

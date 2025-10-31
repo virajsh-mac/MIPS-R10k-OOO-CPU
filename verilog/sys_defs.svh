@@ -32,7 +32,7 @@
 // structure sizes
 `define ROB_SZ 32 // ROB Size
 `define RS_SZ 16 // Reservation Station Size
-`define PHYS_REG_SZ_P6 32 // 32 Physical Register Size for P6
+`define ARCH_REG_SZ 32 // 32 Architecural Registers in RISCV
 `define PHYS_REG_SZ_R10K (32 + `ROB_SZ)  // 64 physical registers for R10K
 
 // physical register and index bit widths
@@ -95,7 +95,7 @@
 // word and register sizes
 typedef logic [31:0] ADDR;
 typedef logic [31:0] DATA;
-typedef logic [4:0] REG_IDX;
+typedef logic [$clog2(`ARCH_REG_SZ)-1:0] REG_IDX;
 
 // =========================================
 // R10K Typedefs (used across all stages)
@@ -182,6 +182,12 @@ typedef struct packed {
     logic valid;  // Valid broadcasts this cycle
     PHYS_TAG tag;  // Physical dest tags
 } CDB_EARLY_TAG_ENTRY;
+
+// Map table entry structure
+typedef struct packed {
+    PHYS_TAG phys_reg;  // Physical register mapping
+    logic    ready;     // Whether this mapping has valid data
+} MAP_ENTRY;
 
 ///////////////////////////////
 // ---- Exception Codes ---- //

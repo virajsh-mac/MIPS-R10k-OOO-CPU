@@ -15,6 +15,7 @@
     Parameters:
     - NUM_RESOURCES: Number of allocatable resources (e.g., physical registers, queue slots)
     - NUM_REQUESTS: Number of simultaneous requesters (e.g., issue ports, decode width)
+    - INITIAL_AVAIL_MASK: Bit vector indicating which resources are initially available on reset (default: all available)
 
     Interface:
     - req: Incoming requests from NUM_REQUESTS requesters
@@ -26,7 +27,8 @@
 
 module allocator #(
     parameter NUM_RESOURCES = 64,
-    parameter NUM_REQUESTS  = 3
+    parameter NUM_REQUESTS = 3,
+    parameter logic [NUM_RESOURCES-1:0] INITIAL_AVAIL_MASK = '1
 ) (
     input                           reset,
     input                           clock,
@@ -108,8 +110,8 @@ module allocator #(
     // Sequential logic: update resource status based on allocations and releases
     always_ff @(posedge clock) begin
         if (reset) begin
-            // On reset, mark all resources as free/available (1)
-            resource_status <= '1;
+            // On reset, set resources to initial availability mask
+            resource_status <= INITIAL_AVAIL_MASK;
         end else begin
             // Update resource status:
             // - OR with clear: resources being cleared become available (1)

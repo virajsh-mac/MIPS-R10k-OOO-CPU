@@ -20,10 +20,15 @@ module freelist #(
     // Grant matrix from allocator: grants[requester][resource]
     logic [ALLOC_WIDTH-1:0][PR_COUNT-1:0] grants;
 
+    // Create initial availability mask: first ARCH_REG_SZ registers are occupied (0),
+    // remaining registers are available (1), resolved at compile time
+    localparam logic [PR_COUNT-1:0] INITIAL_AVAIL_MASK = {{PR_COUNT - `ARCH_REG_SZ{1'b1}}, {`ARCH_REG_SZ{1'b0}}};
+
     // Allocator instance for physical register allocation
     allocator #(
         .NUM_RESOURCES(PR_COUNT),
-        .NUM_REQUESTS (ALLOC_WIDTH)
+        .NUM_REQUESTS(ALLOC_WIDTH),
+        .INITIAL_AVAIL_MASK(INITIAL_AVAIL_MASK)
     ) reg_allocator (
         .reset(reset),
         .clock(clock),
