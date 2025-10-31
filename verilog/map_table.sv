@@ -89,14 +89,16 @@ module map_table #(
 
 endmodule
 
-module arch_map_table (
+module arch_map_table #(
+    parameter int NUM_WRITE_PORTS = `N
+) (
     input clock,
     input reset,
 
-    // From retire: update architected register mappings (single write port)
-    input logic write_enable,
-    input REG_IDX write_addr,
-    input PHYS_TAG write_phys_reg,
+    // From retire: update architected register mappings (parameterized write ports)
+    input logic [NUM_WRITE_PORTS-1:0] write_enables,
+    input REG_IDX [NUM_WRITE_PORTS-1:0] write_addrs,
+    input PHYS_TAG [NUM_WRITE_PORTS-1:0] write_phys_regs,
 
     // Read ports for selective access (always ready)
     input  REG_IDX        [(`N)-1:0] read_addrs,
@@ -115,9 +117,11 @@ module arch_map_table (
     always_comb begin
         arch_map_table_next = arch_map_table_reg;
 
-        // Apply new mappings from retire write port
-        if (write_enable) begin
-            arch_map_table_next[write_addr].phys_reg = write_phys_reg;
+        // Apply new mappings from retire write ports
+        for (int i = 0; i < NUM_WRITE_PORTS; i++) begin
+            if (write_enables[i]) begin
+                arch_map_table_next[write_addrs[i]].phys_reg = write_phys_regs[i];
+            end
         end
     end
 
