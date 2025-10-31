@@ -2,7 +2,7 @@
 
 module stage_retire #(
     parameter  int N          = `N,
-    parameter  int ARCH_COUNT = 32,
+    parameter  int ARCH_COUNT = `ARCH_REG_SZ,
     parameter  int PHYS_REGS  = `PHYS_REG_SZ_R10K,
     localparam int PRW        = (PHYS_REGS <= 2) ? 1 : $clog2(PHYS_REGS)
 ) (
