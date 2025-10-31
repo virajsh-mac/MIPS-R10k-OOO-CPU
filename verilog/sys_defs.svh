@@ -189,6 +189,11 @@ typedef struct packed {
     logic    ready;     // Whether this mapping has valid data
 } MAP_ENTRY;
 
+// Architected map table entry structure (no ready bit needed)
+typedef struct packed {
+    PHYS_TAG phys_reg;  // Physical register mapping (always ready)
+} ARCH_MAP_ENTRY;
+
 ///////////////////////////////
 // ---- Exception Codes ---- //
 ///////////////////////////////

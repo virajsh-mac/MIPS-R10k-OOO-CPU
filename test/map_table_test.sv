@@ -15,8 +15,13 @@ module testbench;
     REG_IDX [`N-1:0] read_addrs;
     CDB_ENTRY [`N-1:0] cdb_broadcasts;
 
+    // Mispredict recovery I/O
+    MAP_ENTRY [`ARCH_REG_SZ-1:0] table_restore;
+    logic table_restore_en;
+
     // Outputs from map_table
     MAP_ENTRY [`N-1:0] read_entries;
+    MAP_ENTRY [`ARCH_REG_SZ-1:0] table_snapshot;
 
     map_table dut (
         .clock(clock),
@@ -26,7 +31,10 @@ module testbench;
         .write_phys_regs(write_phys_regs),
         .read_addrs(read_addrs),
         .read_entries(read_entries),
-        .cdb_broadcasts(cdb_broadcasts)
+        .cdb_broadcasts(cdb_broadcasts),
+        .table_snapshot(table_snapshot),
+        .table_restore(table_restore),
+        .table_restore_en(table_restore_en)
     );
 
     // always @(read_entries) begin
@@ -63,6 +71,8 @@ module testbench;
         write_addrs = '0;
         write_phys_regs = '0;
         cdb_broadcasts = '0;
+        table_restore = '0;
+        table_restore_en = 1'b0;
         set_read_addrs();
     endtask
 
@@ -286,6 +296,95 @@ module testbench;
                 $display("  FAIL: Independent reads failed (port0: phys=%0d ready=%b, port1: phys=%0d ready=%b)",
                          read_entries[0].phys_reg, read_entries[0].ready, read_entries[1].phys_reg, read_entries[1].ready);
                 failed = 1;
+            end
+        end
+
+        // Test 7: Mispredict recovery functionality
+        $display("\nTest %0d: Mispredict recovery functionality", test_num++);
+        reset_dut();
+        clear_inputs();
+        begin
+            MAP_ENTRY [`ARCH_REG_SZ-1:0] saved_snapshot;
+            logic recovery_successful = 1;
+
+            // Phase 1: Set up initial mappings (architected state)
+            write_enables[0] = 1'b1;
+            write_addrs[0] = 5'd2;
+            write_phys_regs[0] = 6'd32;  // Map arch 2 to phys 32
+
+            write_enables[1] = 1'b1;
+            write_addrs[1] = 5'd7;
+            write_phys_regs[1] = 6'd37;  // Map arch 7 to phys 37
+
+            @(posedge clock);
+            #10;
+
+            // Capture the table snapshot (architected state)
+            saved_snapshot = table_snapshot;
+            $display("  Captured architected state: arch2->phys%0d, arch7->phys%0d", saved_snapshot[2].phys_reg,
+                     saved_snapshot[7].phys_reg);
+
+            // Phase 2: Perform speculative mappings (simulate branch speculation)
+            clear_inputs();
+            write_enables[0] = 1'b1;
+            write_addrs[0] = 5'd2;
+            write_phys_regs[0] = 6'd50;  // Speculative: map arch 2 to phys 50
+
+            write_enables[1] = 1'b1;
+            write_addrs[1] = 5'd7;
+            write_phys_regs[1] = 6'd55;  // Speculative: map arch 7 to phys 55
+
+            @(posedge clock);
+            #10;
+
+            // Verify speculative mappings are in place
+            read_addrs[0] = 5'd2;
+            read_addrs[1] = 5'd7;
+            @(posedge clock);
+            #10;
+
+            if (!check_entry(0, 6'd50, 1'b0) || !check_entry(1, 6'd55, 1'b0)) begin
+                $display("  FAIL: Speculative mappings not correctly set (expected arch2:50, arch7:55)");
+                failed = 1;
+                recovery_successful = 0;
+            end
+
+            // Phase 3: Simulate mispredict - restore from saved architected state
+            clear_inputs();
+            table_restore = saved_snapshot;
+            table_restore_en = 1'b1;
+
+            @(posedge clock);
+            #10;
+
+            // Clear restore enable for next cycle
+            table_restore_en = 1'b0;
+
+            // Phase 4: Verify recovery - table should be restored to architected state
+            read_addrs[0] = 5'd2;
+            read_addrs[1] = 5'd7;
+            @(posedge clock);
+            #10;
+
+            if (check_entry(0, 6'd32, 1'b0) && check_entry(1, 6'd37, 1'b0)) begin
+                $display("  PASS: Mispredict recovery successful - table restored to architected state");
+            end else begin
+                $display(
+                    "  FAIL: Mispredict recovery failed (expected arch2:32, arch7:37, got arch2:%0d ready:%b, arch7:%0d ready:%b)",
+                    read_entries[0].phys_reg, read_entries[0].ready, read_entries[1].phys_reg, read_entries[1].ready);
+                failed = 1;
+                recovery_successful = 0;
+            end
+
+            // Phase 5: Verify table_snapshot reflects restored state
+            if (recovery_successful) begin
+                if (table_snapshot[2].phys_reg == 6'd32 && table_snapshot[7].phys_reg == 6'd37) begin
+                    $display("  PASS: table_snapshot correctly reflects restored state");
+                end else begin
+                    $display("  FAIL: table_snapshot doesn't match restored state (arch2:%0d, arch7:%0d)",
+                             table_snapshot[2].phys_reg, table_snapshot[7].phys_reg);
+                    failed = 1;
+                end
             end
         end
 

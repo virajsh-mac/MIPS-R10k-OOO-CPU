@@ -17,7 +17,12 @@ module map_table #(
     output MAP_ENTRY [NUM_READ_PORTS-1:0] read_entries,
 
     // From CDB: broadcasts that update ready bits
-    input CDB_ENTRY [`N-1:0] cdb_broadcasts
+    input CDB_ENTRY [`N-1:0] cdb_broadcasts,
+
+    // Mispredict recovery: output entire table and accept table overwrite
+    output MAP_ENTRY [`ARCH_REG_SZ-1:0] table_snapshot,   // For copying to arch table
+    input  MAP_ENTRY [`ARCH_REG_SZ-1:0] table_restore,    // For restoring from arch table
+    input  logic                        table_restore_en  // Enable table restore on mispredict
 );
 
     // Internal map table state (ARCH_REG_SZ architectural registers)
@@ -61,6 +66,9 @@ module map_table #(
         end
     end
 
+    // Output entire table for mispredict recovery
+    assign table_snapshot = map_table_reg;
+
     // Sequential logic: Update state on clock edge
     always_ff @(posedge clock) begin
         if (reset) begin
@@ -71,8 +79,72 @@ module map_table #(
                 map_table_reg[i].phys_reg <= PHYS_TAG'(i);  // Identity mapping initially
                 map_table_reg[i].ready    <= 1'b1;  // All initially ready
             end
+        end else if (table_restore_en) begin
+            // Mispredict recovery: restore entire table from architected state
+            map_table_reg <= table_restore;
         end else begin
             map_table_reg <= map_table_next;
+        end
+    end
+
+endmodule
+
+module arch_map_table (
+    input clock,
+    input reset,
+
+    // From retire: update architected register mappings (single write port)
+    input logic write_enable,
+    input REG_IDX write_addr,
+    input PHYS_TAG write_phys_reg,
+
+    // Read ports for selective access (always ready)
+    input  REG_IDX        [(`N)-1:0] read_addrs,
+    output ARCH_MAP_ENTRY [(`N)-1:0] read_entries,
+
+    // Mispredict recovery: output entire table and accept table overwrite
+    output ARCH_MAP_ENTRY [`ARCH_REG_SZ-1:0] table_snapshot,   // For copying from map_table
+    input  ARCH_MAP_ENTRY [`ARCH_REG_SZ-1:0] table_restore,    // For restoring from map_table
+    input  logic                             table_restore_en  // Enable table restore on mispredict
+);
+
+    // Internal architected map table state (ARCH_REG_SZ architectural registers)
+    ARCH_MAP_ENTRY [`ARCH_REG_SZ-1:0] arch_map_table_reg, arch_map_table_next;
+
+    // Combinational logic: Compute next state
+    always_comb begin
+        arch_map_table_next = arch_map_table_reg;
+
+        // Apply new mappings from retire write port
+        if (write_enable) begin
+            arch_map_table_next[write_addr].phys_reg = write_phys_reg;
+        end
+    end
+
+    // Output assignment: drive read ports from internal table
+    always_comb begin
+        for (int i = 0; i < `N; i++) begin
+            read_entries[i] = arch_map_table_reg[read_addrs[i]];
+        end
+    end
+
+    // Output entire table for mispredict recovery
+    assign table_snapshot = arch_map_table_reg;
+
+    // Sequential logic: Update state on clock edge
+    always_ff @(posedge clock) begin
+        if (reset) begin
+            // Initialize architected map table: identity mapping
+            arch_map_table_reg <= '0;
+
+            for (int i = 0; i < `ARCH_REG_SZ; i++) begin
+                arch_map_table_reg[i].phys_reg <= PHYS_TAG'(i);  // Identity mapping initially
+            end
+        end else if (table_restore_en) begin
+            // Mispredict recovery: restore entire table from speculative map_table
+            arch_map_table_reg <= table_restore;
+        end else begin
+            arch_map_table_reg <= arch_map_table_next;
         end
     end
 
