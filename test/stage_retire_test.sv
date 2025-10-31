@@ -360,29 +360,30 @@ module testbench;
             end
         end
 
-        // Test 9: Reset clears outputs
-        $display("\nTest %0d: Reset clears outputs", test_num++);
-        clear_inputs();
-        begin
-            // Set up some inputs
-            head_valids[`N-1] = 1'b1;
-            head_entries[`N-1] = completed_alu_entry(6, 11, 36, 15);
-            head_idxs[`N-1] = ROB_IDX'(6);
+        // // this test is invalid as retire is fully combinational
+        // // Test 9: Reset clears outputs
+        // $display("\nTest %0d: Reset clears outputs", test_num++);
+        // clear_inputs();
+        // begin
+        //     // Set up some inputs
+        //     head_valids[`N-1] = 1'b1;
+        //     head_entries[`N-1] = completed_alu_entry(6, 11, 36, 15);
+        //     head_idxs[`N-1] = ROB_IDX'(6);
 
-            @(negedge clock);
+        //     @(negedge clock);
 
-            // Apply reset
-            reset = 1;
-            @(negedge clock);
+        //     // Apply reset
+        //     reset = 1;
+        //     @(negedge clock);
 
-            // Check that outputs are cleared
-            if (check_no_retire()) begin
-                $display("  PASS: Reset clears all retire outputs");
-            end else begin
-                $display("  FAIL: Reset should clear all retire outputs");
-                failed = 1;
-            end
-        end
+        //     // Check that outputs are cleared
+        //     if (check_no_retire()) begin
+        //         $display("  PASS: Reset clears all retire outputs");
+        //     end else begin
+        //         $display("  FAIL: Reset should clear all retire outputs");
+        //         failed = 1;
+        //     end
+        // end
 
         // Test 10: Invalid entries are ignored
         $display("\nTest %0d: Invalid entries are ignored", test_num++);

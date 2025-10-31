@@ -31,12 +31,10 @@ module stage_retire #(
 );
 
     always_comb begin
-        // Locals
         ROB_ENTRY head_entry;
         ROB_ENTRY entry;
         logic recover, mispred_dir, mispred_tgt, mispred;
 
-        // ---- Synth-friendly defaults ----
         {rob_mispredict, rob_mispred_idx, bp_recover_en, free_mask} = '0;
         arch_write_enables = '0;
         arch_write_addrs = '0;
