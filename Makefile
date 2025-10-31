@@ -96,7 +96,7 @@
 # there should be no need to change anything for project 3
 
 # this is a global clock period variable used in the tcl script and referenced in testbenches
-export CLOCK_PERIOD = 5.0
+export CLOCK_PERIOD = 3.0
 
 # the Verilog Compiler command and arguments
 VCS = module load vcs/2023.12-SP2-1 && \
@@ -190,7 +190,7 @@ GREP = grep -E --color=auto
 # ---- Modules to Test ---- #
 
 # TODO: add more modules here
-MODULES = cpu mult rob rs regfile map_table stage_issue stage_complete
+MODULES = cpu mult rob rs regfile map_table stage_issue stage_complete stage_retire
 
 # TODO: update this if you add more header files
 ALL_HEADERS = $(CPU_HEADERS)
@@ -232,6 +232,11 @@ STAGE_COMPLETE_FILES = verilog/sys_defs.svh
 build/stage_complete.simv: $(STAGE_COMPLETE_FILES)
 build/stage_complete.cov: $(STAGE_COMPLETE_FILES)
 synth/stage_complete.vg: $(STAGE_COMPLETE_FILES)
+
+STAGE_RETIRE_FILES = verilog/sys_defs.svh
+build/stage_retire.simv: $(STAGE_RETIRE_FILES)
+build/stage_retire.cov:  $(STAGE_RETIRE_FILES)
+synth/stage_retire.vg:   $(STAGE_RETIRE_FILES)
 
 #################################
 # ---- Main CPU Definition ---- #

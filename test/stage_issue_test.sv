@@ -27,20 +27,21 @@ module testbench;
         .issue_entries(issue_entries)
     );
 
-    always @(issue_entries) begin
-        if (issue_entries.alu[0].valid || issue_entries.alu[1].valid || issue_entries.alu[2].valid ||
-            issue_entries.mult[0].valid || issue_entries.branch[0].valid || issue_entries.mem[0].valid) begin
-            $display(
-                "[@%0t] ISSUE_ENTRIES CHANGED: alu[0].valid=%b (rob=%0d), alu[1].valid=%b (rob=%0d), alu[2].valid=%b (rob=%0d), mult[0].valid=%b (rob=%0d), branch[0].valid=%b (rob=%0d), mem[0].valid=%b (rob=%0d)",
-                $time, issue_entries.alu[0].valid, issue_entries.alu[0].rob_idx, issue_entries.alu[1].valid,
-                issue_entries.alu[1].rob_idx, issue_entries.alu[2].valid, issue_entries.alu[2].rob_idx,
-                issue_entries.mult[0].valid, issue_entries.mult[0].rob_idx, issue_entries.branch[0].valid,
-                issue_entries.branch[0].rob_idx, issue_entries.mem[0].valid, issue_entries.mem[0].rob_idx);
-        end
-    end
+    // always @(issue_entries) begin
+    //     if (issue_entries.alu[0].valid || issue_entries.alu[1].valid || issue_entries.alu[2].valid ||
+    //         issue_entries.mult[0].valid || issue_entries.branch[0].valid || issue_entries.mem[0].valid) begin
+    //         $display(
+    //             "[@%0t] ISSUE_ENTRIES CHANGED: alu[0].valid=%b (rob=%0d), alu[1].valid=%b (rob=%0d), alu[2].valid=%b (rob=%0d), mult[0].valid=%b (rob=%0d), branch[0].valid=%b (rob=%0d), mem[0].valid=%b (rob=%0d)",
+    //             $time, issue_entries.alu[0].valid, issue_entries.alu[0].rob_idx, issue_entries.alu[1].valid,
+    //             issue_entries.alu[1].rob_idx, issue_entries.alu[2].valid, issue_entries.alu[2].rob_idx,
+    //             issue_entries.mult[0].valid, issue_entries.mult[0].rob_idx, issue_entries.branch[0].valid,
+    //             issue_entries.branch[0].rob_idx, issue_entries.mem[0].valid, issue_entries.mem[0].rob_idx);
+    //     end
+    // end
 
     always begin
-        #50 clock = ~clock;  // 100ns period
+        #(`CLOCK_PERIOD / 2.0);
+        clock = ~clock;
     end
 
     // Helper function to create a default empty entry
@@ -164,8 +165,7 @@ module testbench;
             fu_avails.alu = {`NUM_FU_ALU{1'b1}};
 
             // Wait for allocator to stabilize (may need a cycle)
-            @(posedge clock);
-            #10;
+            @(negedge clock);
 
             // Check that an ALU entry was issued
             any_alu_clear = |issue_clear.valid_alu;
@@ -187,10 +187,8 @@ module testbench;
             fu_avails = '0;
             fu_avails.mult = {`NUM_FU_MULT{1'b1}};
 
-            @(posedge clock);
-            #10;
-            @(posedge clock);
-            #10;
+            @(negedge clock);
+            @(negedge clock);
 
             any_mult_clear = |issue_clear.valid_mult;
             if (any_mult_clear) begin
@@ -211,10 +209,8 @@ module testbench;
             fu_avails = '0;
             fu_avails.branch = {`NUM_FU_BRANCH{1'b1}};
 
-            @(posedge clock);
-            #10;
-            @(posedge clock);
-            #10;
+            @(negedge clock);
+            @(negedge clock);
 
             any_branch_clear = |issue_clear.valid_branch;
             if (any_branch_clear) begin
@@ -235,10 +231,8 @@ module testbench;
             fu_avails = '0;
             fu_avails.mem = {`NUM_FU_MEM{1'b1}};
 
-            @(posedge clock);
-            #10;
-            @(posedge clock);
-            #10;
+            @(negedge clock);
+            @(negedge clock);
 
             any_mem_clear = |issue_clear.valid_mem;
             if (any_mem_clear) begin
@@ -265,8 +259,7 @@ module testbench;
             fu_avails.branch = {`NUM_FU_BRANCH{1'b1}};
             fu_avails.mem = {`NUM_FU_MEM{1'b1}};
 
-            @(posedge clock);
-            #25;
+            @(negedge clock);
             // @(posedge clock);
             // #10;
 
@@ -296,10 +289,8 @@ module testbench;
             fu_avails = '0;
             fu_avails.alu = {`NUM_FU_ALU{1'b1}};
 
-            @(posedge clock);
-            #10;
-            @(posedge clock);
-            #10;
+            @(negedge clock);
+            @(negedge clock);
 
             any_alu_clear = |issue_clear.valid_alu;
             if (!any_alu_clear) begin
@@ -320,10 +311,8 @@ module testbench;
             fu_avails = '0;
             fu_avails.alu = {`NUM_FU_ALU{1'b1}};
 
-            @(posedge clock);
-            #10;
-            @(posedge clock);
-            #10;
+            @(negedge clock);
+            @(negedge clock);
 
             any_alu_clear = |issue_clear.valid_alu;
             if (!any_alu_clear) begin
@@ -369,13 +358,11 @@ module testbench;
             fu_avails = '0;
             fu_avails.alu = {`NUM_FU_ALU{1'b1}};
 
-            @(posedge clock);
-            #10;
+            @(negedge clock);
 
             // Apply reset
             reset = 1;
-            @(posedge clock);
-            #10;
+            @(negedge clock);
 
             // Check that issue register is cleared
             if (issue_entries.alu[0].valid == 0) begin
@@ -395,13 +382,11 @@ module testbench;
             fu_avails = '0;
             fu_avails.alu = {`NUM_FU_ALU{1'b1}};
 
-            @(posedge clock);
-            #10;
+            @(negedge clock);
 
             // Apply mispredict
             mispredict = 1;
-            @(posedge clock);
-            #10;
+            @(negedge clock);
 
             // Check that issue register is cleared
             if (issue_entries.alu[0].valid == 0) begin
@@ -425,10 +410,8 @@ module testbench;
             fu_avails = '0;
             fu_avails.alu = {`NUM_FU_ALU{1'b1}};
 
-            @(posedge clock);
-            #10;
-            @(posedge clock);
-            #10;
+            @(negedge clock);
+            @(negedge clock);
 
             // Check that multiple entries can be issued
             count = 0;
