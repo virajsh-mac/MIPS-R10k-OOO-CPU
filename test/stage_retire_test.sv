@@ -1,472 +1,428 @@
-`timescale 1ns/1ps
-`ifndef __RETIRE_TEST_SV__
-`define __RETIRE_TEST_SV__
-
 `include "sys_defs.svh"
 
-// Small helper to convert int->logic width safely
-function automatic logic [$clog2(`ROB_SZ)-1:0] to_robidx(int i);
-  return logic'((i % `ROB_SZ));
-endfunction
+module testbench;
 
-module retire_test;
+    logic clock, reset;
+    logic                             failed;
 
-  localparam int N          = `N;
-  localparam int ARCH_COUNT = 32;
-  localparam int PHYS_REGS  = `PHYS_REG_SZ_R10K;
-  localparam int PRW        = (PHYS_REGS <= 2) ? 1 : $clog2(PHYS_REGS);
-  localparam time TCK       = 10ns;
+    // Inputs to stage_retire
+    ROB_ENTRY [               `N-1:0] headEntries;
+    logic     [               `N-1:0] headValids;
+    ROB_IDX   [               `N-1:0] headIdxs;
 
-  // ----------------
-  // Clock / Reset
-  // ----------------
-  logic clock, reset;
-  initial clock = 1'b0;
-  always  #(TCK/2) clock = ~clock;
+    // Outputs from stage_retire
+    logic                             robMispredict;
+    ROB_IDX                           robMispredIdx;
+    logic                             bpRecoverEn;
+    logic     [`PHYS_REG_SZ_R10K-1:0] freeMask;
+    logic     [               `N-1:0] archWriteEnables;
+    REG_IDX   [               `N-1:0] archWriteAddrs;
+    PHYS_TAG  [               `N-1:0] archWritePhysRegs;
 
-  task automatic do_reset;
-    reset = 1'b1; repeat (2) @(posedge clock);
-    reset = 1'b0; @(posedge clock);
-  endtask
+    stage_retire dut (
+        .clock(clock),
+        .reset(reset),
+        .headEntries(headEntries),
+        .headValids(headValids),
+        .headIdxs(headIdxs),
+        .robMispredict(robMispredict),
+        .robMispredIdx(robMispredIdx),
+        .bpRecoverEn(bpRecoverEn),
+        .freeMask(freeMask),
+        .archWriteEnables(archWriteEnables),
+        .archWriteAddrs(archWriteAddrs),
+        .archWritePhysRegs(archWritePhysRegs)
+    );
 
-  // ----------------
-  // DUT instances
-  // ----------------
-
-  // ROB <-> Retire signals
-  logic        [N-1:0]  alloc_valid;
-  ROB_ENTRY    [N-1:0]  rob_entry_packet;
-  ROB_IDX      [N-1:0]  alloc_idxs;
-  logic [$clog2(`ROB_SZ+1)-1:0] rob_free_slots;
-
-  ROB_UPDATE_PACKET      rob_update_packet;
-  ROB_ENTRY    [N-1:0]   head_entries;
-  logic        [N-1:0]   head_valids;
-
-  logic                  rob_mispredict;
-  ROB_IDX                rob_mispred_idx;
-
-  // Retire -> Map / Freelist
-  logic                  BPRecoverEN;
-  logic        [N-1:0]   Arch_Retire_EN;
-  logic [N-1:0][PRW-1:0] Arch_Tnew_in;
-  logic [N-1:0][$clog2(ARCH_COUNT)-1:0] Arch_Retire_AR;
-
-  logic        [N-1:0]   FL_RetireEN;
-  logic [N-1:0][PRW-1:0] FL_RetireReg;
-
-  // Precise map
-  logic [ARCH_COUNT-1:0][PRW-1:0] archi_maptable_img;
-
-  // Map-table side (CDB disabled in this test)
-  logic [N-1:0]                 cdb_valid;
-  logic [N-1:0][PRW-1:0]        cdb_tag;
-  logic [N-1:0][PRW-1:0]        reg1_tag, reg2_tag;
-  logic [N-1:0]                 reg1_ready, reg2_ready;
-  logic [N-1:0][PRW-1:0]        Told_out;
-
-  // Freelist side
-  logic [N-1:0]                 AllocReqMask;
-  PHYS_TAG [N-1:0]              FreeReg;
-  logic [$clog2(PHYS_REGS+1)-1:0] free_count;
-  logic [$clog2(N+1)-1:0]       FreeSlotsForN;
-
-  // ================== INSTANCES ==================
-
-  // ROB
-  rob u_rob (
-    .clock,
-    .reset,
-    .alloc_valid,
-    .rob_entry_packet,
-    .alloc_idxs,
-    .free_slots(rob_free_slots),
-
-    .rob_update_packet,
-
-    .head_entries,
-    .head_valids,
-
-    .mispredict   (rob_mispredict),   // driven by retire
-    .mispred_idx  (rob_mispred_idx)
-  );
-
-  `ifndef SYNTH
-  retire #(.N(N), .ARCH_COUNT(ARCH_COUNT), .PHYS_REGS(PHYS_REGS)) u_retire (
-`else
-  retire u_retire (
-`endif
-    .clock, .reset,
-    .head_entries, .head_valids,
-    .rob_mispredict, .rob_mispred_idx,
-    .BPRecoverEN,
-    .Arch_Retire_EN, .Arch_Tnew_in, .Arch_Retire_AR,
-    .FL_RetireEN, .FL_RetireReg,
-    .archi_maptable(archi_maptable_img)
-  );
-
-
-  // Retire
-  // retire #(.N(N), .ARCH_COUNT(ARCH_COUNT), .PHYS_REGS(PHYS_REGS)) u_retire (
-  //   .clock,
-  //   .reset,
-
-  //   .head_entries,
-  //   .head_valids,
-
-  //   .rob_mispredict,
-  //   .rob_mispred_idx,
-
-  //   .BPRecoverEN,
-
-  //   .Arch_Retire_EN,
-  //   .Arch_Tnew_in,
-  //   .Arch_Retire_AR,
-
-  //   .FL_RetireEN,
-  //   .FL_RetireReg,
-
-  //   .archi_maptable(archi_maptable_img)
-  // );
-
-  // Precise architectural map (commit-time)
-
-  `ifndef SYNTH
-  arch_maptable #(.ARCH_COUNT(ARCH_COUNT), .PHYS_REGS(PHYS_REGS), .N(N)) u_arch (
-`else
-  arch_maptable u_arch (
-`endif
-    .clock, .reset,
-    .Retire_EN(Arch_Retire_EN), .Tnew_in(Arch_Tnew_in), .Retire_AR(Arch_Retire_AR),
-    .archi_maptable(archi_maptable_img)
-  );
-
-  // arch_maptable #(.ARCH_COUNT(ARCH_COUNT), .PHYS_REGS(PHYS_REGS), .N(N)) u_arch (
-  //   .clock,
-  //   .reset,
-  //   .Retire_EN (Arch_Retire_EN),
-  //   .Tnew_in   (Arch_Tnew_in),
-  //   .Retire_AR (Arch_Retire_AR),
-  //   .archi_maptable(archi_maptable_img)
-  // );
-
-  // Speculative map (rename-time). We only need it to listen to BPRecoverEN and to
-  // reflect the precise image; CDB/operand lookups unused here.
-
-  `ifndef SYNTH
-  map_table #(.ARCH_COUNT(ARCH_COUNT), .PHYS_REGS(PHYS_REGS), .N(N)) u_map (
-`else
-  map_table u_map (
-`endif
-    .clock, .reset,
-    .archi_maptable(archi_maptable_img), .BPRecoverEN,
-    .cdb_valid('0), .cdb_tag('0),
-    .maptable_new_pr('0), .maptable_new_ar('0),
-    .reg1_ar('0), .reg2_ar('0),
-    .reg1_tag, .reg2_tag, .reg1_ready, .reg2_ready,
-    .Told_out
-  );
-
-  // map_table #(.ARCH_COUNT(ARCH_COUNT), .PHYS_REGS(PHYS_REGS), .N(N)) u_map (
-  //   .clock,
-  //   .reset,
-  //   .archi_maptable(archi_maptable_img),
-  //   .BPRecoverEN,
-
-  //   .cdb_valid('0),
-  //   .cdb_tag  ('0),
-
-  //   .maptable_new_pr('0),
-  //   .maptable_new_ar('0),
-
-  //   .reg1_ar('0),
-  //   .reg2_ar('0),
-
-  //   .reg1_tag,
-  //   .reg2_tag,
-  //   .reg1_ready,
-  //   .reg2_ready,
-
-  //   .Told_out
-  // );
-
-  // Freelist (Dispatch-driven)
-
-  `ifndef SYNTH
-  freelist #(.N(N), .PR_COUNT(PHYS_REGS), .ARCH_COUNT(ARCH_COUNT), .EXCLUDE_ZERO(1'b1)) u_fl (
-`else
-  freelist u_fl (
-`endif
-    .clock, .reset_n(~reset),
-    .AllocReqMask(AllocReqMask), .FreeReg(FreeReg),
-    .free_count, .FreeSlotsForN,
-    .RetireEN(FL_RetireEN), .RetireReg(FL_RetireReg),
-    .BPRecoverEN(BPRecoverEN), .archi_maptable(archi_maptable_img)
-  );
-
-  // freelist #(.N(N), .PR_COUNT(PHYS_REGS), .ARCH_COUNT(ARCH_COUNT), .EXCLUDE_ZERO(1'b1)) u_fl (
-  //   .clock,
-  //   .reset_n(~reset),
-
-  //   .AllocReqMask (AllocReqMask),
-  //   .FreeReg (FreeReg),
-  //   .free_count,
-  //   .FreeSlotsForN,
-
-  //   .RetireEN (FL_RetireEN),
-  //   .RetireReg(FL_RetireReg),
-
-  //   .BPRecoverEN  (BPRecoverEN),
-  //   .archi_maptable (archi_maptable_img)
-  // );
-
-  // ----------------
-  // Test utilities
-  // ----------------
-  task automatic expect_ok(input bit cond, input string msg);
-    if (!cond) begin
-      $display("[%0t] FAIL: %s", $time, msg);
-      $display("@@@ Failed");
-      $fatal(1);
+    always begin
+        #(`CLOCK_PERIOD / 2.0);
+        clock = ~clock;
     end
-  endtask
 
-  // init a ROB entry struct quickly
+    // Helper function to create a default empty ROB entry
+    function ROB_ENTRY empty_entry;
+        empty_entry = '{default: '0};
+        empty_entry.valid = 1'b0;
+        empty_entry.complete = 1'b0;
+        empty_entry.exception = NO_ERROR;
+    endfunction
 
-  function automatic ROB_ENTRY mk_entry(
-    input int ridx,
-    input bit is_branch,
-    input bit pred_taken, input logic [31:0] pred_tgt,
-    input bit has_dest,  input int dest_ar,
-    input int Tnew,      input int Told);
-  ROB_ENTRY e;
-    e.valid    = 1'b1;
-    e.complete = 1'b0;
-    e.exception = NO_ERROR;
-    e.rob_idx  = to_robidx(ridx);
+    // Helper function to create a completed ALU entry with destination
+    function ROB_ENTRY completed_alu_entry(input int rob_idx, input int arch_reg, input int phys_reg, input int prev_phys_reg);
+        completed_alu_entry = empty_entry();
+        completed_alu_entry.valid = 1'b1;
+        completed_alu_entry.complete = 1'b1;
+        completed_alu_entry.arch_rd = REG_IDX'(arch_reg);
+        completed_alu_entry.phys_rd = PHYS_TAG'(phys_reg);
+        completed_alu_entry.prev_phys_rd = PHYS_TAG'(prev_phys_reg);
+        completed_alu_entry.branch = 1'b0;
+    endfunction
 
-    e.branch        = is_branch;
-    e.pred_taken    = pred_taken;
-    e.pred_target   = pred_tgt;
-    e.branch_taken  = 1'b0;
-    e.branch_target = '0;
+    // Helper function to create a completed branch entry
+    function ROB_ENTRY completed_branch_entry(input int rob_idx, input bit pred_taken, input int pred_target,
+                                              input bit resolved_taken, input int resolved_target);
+        completed_branch_entry = empty_entry();
+        completed_branch_entry.valid = 1'b1;
+        completed_branch_entry.complete = 1'b1;
+        completed_branch_entry.branch = 1'b1;
+        completed_branch_entry.pred_taken = pred_taken;
+        completed_branch_entry.pred_target = ADDR'(pred_target);
+        completed_branch_entry.branch_taken = resolved_taken;
+        completed_branch_entry.branch_target = ADDR'(resolved_target);
+    endfunction
 
-    e.arch_rd      = has_dest ? REG_IDX'(dest_ar[4:0]) : '0;
-    e.phys_rd      = PHYS_TAG'(Tnew);       // (≙ Tnew)
-    e.prev_phys_rd = PHYS_TAG'(Told);       // (≙ Told)
-    
-    e.PC   = '0;
-    e.inst = '0;
-    e.value = '0;
-    e.halt = 1'b0;
-    e.illegal = 1'b0;
-    return e;
-  endfunction
+    // Helper function to create an incomplete entry
+    function ROB_ENTRY incomplete_entry(input int rob_idx, input int arch_reg, input int phys_reg, input int prev_phys_reg);
+        incomplete_entry = completed_alu_entry(rob_idx, arch_reg, phys_reg, prev_phys_reg);
+        incomplete_entry.complete = 1'b0;
+    endfunction
 
-// Capture the slot the ROB assigned to a given lane on the *last* alloc edge
-  function automatic ROB_IDX last_alloc_slot(input int lane);
-    // Using the alloc_idxs that ROB drives after the alloc posedge
-    return alloc_idxs[lane];
-  endfunction
+    // Helper to reset and wait for proper timing
+    task reset_dut;
+        reset = 1;
+        repeat (2) @(negedge clock);  // Hold reset over two negedges
+        reset = 0;
+        @(negedge clock);  // One more cycle for stability
+    endtask
 
-  // clear ROB update packet
-  task automatic clear_rob_update();
-    rob_update_packet.valid          = '0;
-    rob_update_packet.idx            = '0;
-    rob_update_packet.values         = '0;
-    rob_update_packet.branch_taken   = '0;
-    rob_update_packet.branch_targets = '0;
-  endtask
+    // Helper to clear all inputs
+    task clear_inputs;
+        headEntries = '{default: '0};
+        headValids = '0;
+        headIdxs = '0;
+    endtask
 
-  // mark one lane complete (and optionally set branch resolution)
-  task automatic rob_complete_lane(
-      input int lane, input int ridx, input bit br_valid, input bit br_taken, input int br_tgt);
-    rob_update_packet.valid[lane]          = 1'b1;
-    rob_update_packet.idx  [lane]          = to_robidx(ridx);
-    if (br_valid) begin
-      rob_update_packet.branch_taken  [lane] = br_taken;
-      rob_update_packet.branch_targets[lane] = ADDR'(br_tgt);
-    end
-  endtask
+    // Helper to check retire outputs
+    function logic check_no_retire();
+        return (robMispredict == 0 && bpRecoverEn == 0 && archWriteEnables == 0 && freeMask == 0);
+    endfunction
 
+    initial begin
+        int test_num = 1;
+        clock  = 0;
+        reset  = 1;
+        failed = 0;
 
-  // ----------------
-  // The test
-  // ----------------
-  int ridx_base;
-  int cA;
-  int cF; 
-  int cA2; 
-  int cF2;
-  logic saw5;
-  logic saw6;
-  ROB_IDX s0;
-  ROB_IDX s1;
-  ROB_IDX sB_head;
-  ROB_IDX sB_slot;
-  ROB_IDX sel_slot;
-
-  initial begin
-    // defaults
-    alloc_valid       = '0;
-    rob_entry_packet  = '{default:'0};
-    clear_rob_update();
-
-    cdb_valid         = '0; cdb_tag = '0;
-    AllocReqMask      = '0;
-
-    do_reset();
-
-    // Make a little room in freelist so later returns don't overflow the fixed-depth queue
-    // Pop N tags for a couple cycles
-    repeat (3) begin
-      @(negedge clock);
-      AllocReqMask = {N{1'b1}};
-      @(posedge clock);
-    end
-    @(negedge clock) AllocReqMask = '0; @(posedge clock);
-
-    // =========================
-    // SCENARIO 1: normal commit
-    // =========================
-    // Allocate 2 ALU uops with dests:
-    //   E0: dest x5,  Tnew=40, Told=5
-    //   E1: dest x6,  Tnew=41, Told=6
-    ridx_base = 10;
-
-    @(negedge clock);
-      alloc_valid = '0;
-      rob_entry_packet = '{default:'0};
-
-      alloc_valid[0] = 1'b1;
-      rob_entry_packet[0] = mk_entry(ridx_base+0, /*branch*/0, 0, 32'h0,
-                                     /*has_dest*/1, /*dest_ar*/5, /*Tnew*/40, /*Told*/5);
-
-      alloc_valid[1] = 1'b1;
-      rob_entry_packet[1] = mk_entry(ridx_base+1, 0, 0, 32'h0,
-                                     1, 6, 41, 6);
-    @(posedge clock);
-
-    // Capture the actual ROB slots assigned for each lane (this cycle's grants)
-    s0 = last_alloc_slot(0);
-    s1 = last_alloc_slot(1);
-
-
-    // IMPORTANT: drop alloc_valid before issuing completes to avoid any new grants
-    @(negedge clock) alloc_valid = '0;
-
-    // Mark both complete (same cycle)
-    @(negedge clock);
-      clear_rob_update();
-      rob_complete_lane(1, s1, /*br_valid*/0, 0, 0);
-      rob_complete_lane(0, s0, /*br_valid*/0, 0, 0);
-    @(posedge clock);
-
-    // Let retire consume head entries
-    @(negedge clock) begin
-      cA = 0; cF = 0;
-      saw5=0; saw6=0;
-      for (int i=0;i<N;i++) begin cA += Arch_Retire_EN[i]; cF += FL_RetireEN[i]; end
-      expect_ok(cA==2, "Scenario1: expected 2 precise-map commits");
-      expect_ok(cF==2, "Scenario1: expected 2 freelist returns");
-
-      // Spot-check contents: the returned Told must be {5,6} in some lanes.
-      for (int i=0;i<N;i++) begin
-        if (FL_RetireEN[i]) begin
-          if (FL_RetireReg[i]==PHYS_TAG'(5)) saw5=1;
-          if (FL_RetireReg[i]==PHYS_TAG'(6)) saw6=1;
+        // Validate N is large enough for our tests
+        if (`N < 3) begin
+            $display("ERROR: N must be at least 3 for this testbench to work properly");
+            $finish;
         end
-      end
-      expect_ok(saw5 && saw6, "Scenario1: freelist did not see Told={5,6}");
-      $display("[%0t] PASS: Scenario 1 (normal commit) — precise map updated for x5,x6 and Told={5,6} returned", $time);
-      $display("=== SCENARIO 1 PASSED ===");
+
+        // Initialize inputs
+        clear_inputs();
+
+        reset_dut();
+
+        // Test 1: No valid entries should produce no retire activity
+        $display("\nTest %0d: No valid entries", test_num++);
+        reset_dut();
+        clear_inputs();
+        begin
+            @(negedge clock);
+            if (check_no_retire()) begin
+                $display("  PASS: No retire activity with no valid entries");
+            end else begin
+                $display("  FAIL: Unexpected retire activity with no valid entries");
+                failed = 1;
+            end
+        end
+
+        // Test 2: Single completed ALU instruction with destination
+        $display("\nTest %0d: Single completed ALU instruction with destination", test_num++);
+        reset_dut();
+        clear_inputs();
+        begin
+            // Set up a completed ALU instruction at oldest position (`N-1)
+            headValids[`N-1] = 1'b1;
+            headEntries[`N-1] = completed_alu_entry(5, 10, 40, 15);  // rob_idx=5, arch_reg=10, phys=40, prev_phys=15
+            headIdxs[`N-1] = ROB_IDX'(5);
+
+            @(negedge clock);
+
+            // Check that instruction was retired
+            if (archWriteEnables[`N-1] && archWriteAddrs[`N-1] == 10 && archWritePhysRegs[`N-1] == 40) begin
+                $display("  PASS: ALU instruction committed to architectural map");
+            end else begin
+                $display("  FAIL: ALU instruction not properly committed (en=%b, addr=%0d, phys=%0d)", archWriteEnables[`N-1],
+                         archWriteAddrs[`N-1], archWritePhysRegs[`N-1]);
+                failed = 1;
+            end
+
+            // Check that previous physical register was freed
+            if (freeMask[15]) begin
+                $display("  PASS: Previous physical register freed");
+            end else begin
+                $display("  FAIL: Previous physical register not freed");
+                failed = 1;
+            end
+
+            // Check no mispredict
+            if (!robMispredict && !bpRecoverEn) begin
+                $display("  PASS: No mispredict detected");
+            end else begin
+                $display("  FAIL: Unexpected mispredict signals");
+                failed = 1;
+            end
+        end
+
+        // Test 3: Multiple completed instructions (in-order retire)
+        $display("\nTest %0d: Multiple completed instructions (%0d instructions)", test_num++, `N);
+        reset_dut();
+        clear_inputs();
+        begin
+            int   expected_commits = 0;
+            int   actual_commits = 0;
+            logic all_freed = 1;
+
+            // Set up multiple completed instructions
+            for (int i = 0; i < `N; i++) begin
+                headValids[i] = 1'b1;
+                headEntries[i] = completed_alu_entry(i + 10, 20 + i, 50 + i, 5 + i);
+                headIdxs[i] = ROB_IDX'(i + 10);
+                expected_commits++;
+            end
+
+            @(negedge clock);
+
+            // All should commit since all are complete
+            for (int i = 0; i < `N; i++) begin
+                if (archWriteEnables[i]) actual_commits++;
+            end
+
+            if (actual_commits == expected_commits) begin
+                $display("  PASS: All %0d instructions committed", expected_commits);
+            end else begin
+                $display("  FAIL: Expected %0d commits, got %0d", expected_commits, actual_commits);
+                failed = 1;
+            end
+
+            // Check that all previous registers were freed
+            for (int i = 0; i < `N; i++) begin
+                if (!freeMask[5+i]) all_freed = 0;
+            end
+            if (all_freed) begin
+                $display("  PASS: All previous physical registers freed");
+            end else begin
+                $display("  FAIL: Not all previous physical registers freed");
+                failed = 1;
+            end
+        end
+
+        // Test 4: Stop at first incomplete instruction
+        $display("\nTest %0d: Stop at first incomplete instruction (%0d complete + 1 incomplete)", test_num++, `N - 1);
+        reset_dut();
+        clear_inputs();
+        begin
+            int expected_commits = `N - 1;  // Should retire all but the last position
+            int actual_commits = 0;
+
+            // Set up N-1 complete instructions followed by one incomplete
+            for (int i = 0; i < `N - 1; i++) begin
+                headValids[`N-1-i] = 1'b1;  // Start from oldest (N-1) down to youngest available
+                headEntries[`N-1-i] = completed_alu_entry(i + 1, 5 + i, 30 + i, 10 + i);
+                headIdxs[`N-1-i] = ROB_IDX'(i + 1);
+            end
+
+            // Make the youngest position incomplete (should stop here)
+            headValids[0] = 1'b1;
+            headEntries[0] = incomplete_entry(`N, 5 + `N - 1, 30 + `N - 1, 10 + `N - 1);
+            headIdxs[0] = ROB_IDX'(`N);
+
+            @(negedge clock);
+
+            // Should commit all complete instructions, but stop at the incomplete one
+            for (int i = 0; i < `N; i++) begin
+                if (archWriteEnables[i]) actual_commits++;
+            end
+
+            if (actual_commits == expected_commits) begin
+                $display("  PASS: Retired %0d instructions, stopped at incomplete", expected_commits);
+            end else begin
+                $display("  FAIL: Expected %0d commits, got %0d", expected_commits, actual_commits);
+                failed = 1;
+            end
+        end
+
+        // Test 5: Branch mispredict detection (direction mispredict)
+        $display("\nTest %0d: Branch mispredict detection (direction)", test_num++);
+        reset_dut();
+        clear_inputs();
+        begin
+            // Set up a completed branch with direction mispredict
+            headValids[`N-1] = 1'b1;
+            headEntries[`N-1] = completed_branch_entry(1, 0, 100, 1, 200);  // pred not taken, resolved taken
+            headIdxs[`N-1] = ROB_IDX'(1);
+
+            @(negedge clock);
+
+            // Should detect mispredict
+            if (robMispredict && bpRecoverEn && robMispredIdx == 1) begin
+                $display("  PASS: Direction mispredict detected");
+            end else begin
+                $display("  FAIL: Direction mispredict not detected (mispred=%b, recover=%b, idx=%0d)", robMispredict,
+                         bpRecoverEn, robMispredIdx);
+                failed = 1;
+            end
+
+            // Should not commit any instructions during recovery
+            if (archWriteEnables == 0 && freeMask == 0) begin
+                $display("  PASS: No commits during recovery cycle");
+            end else begin
+                $display("  FAIL: Unexpected commits during recovery");
+                failed = 1;
+            end
+        end
+
+        // Test 6: Branch mispredict detection (target mispredict)
+        $display("\nTest %0d: Branch mispredict detection (target)", test_num++);
+        reset_dut();
+        clear_inputs();
+        begin
+            // Set up a completed branch with target mispredict
+            headValids[`N-1] = 1'b1;
+            headEntries[`N-1] = completed_branch_entry(2, 1, 300, 1, 400);  // both taken, different targets
+            headIdxs[`N-1] = ROB_IDX'(2);
+
+            @(negedge clock);
+
+            // Should detect mispredict
+            if (robMispredict && bpRecoverEn && robMispredIdx == 2) begin
+                $display("  PASS: Target mispredict detected");
+            end else begin
+                $display("  FAIL: Target mispredict not detected (mispred=%b, recover=%b, idx=%0d)", robMispredict, bpRecoverEn,
+                         robMispredIdx);
+                failed = 1;
+            end
+        end
+
+        // Test 7: Correct branch prediction should not trigger mispredict
+        $display("\nTest %0d: Correct branch prediction", test_num++);
+        reset_dut();
+        clear_inputs();
+        begin
+            // Set up a completed branch with correct prediction
+            headValids[`N-1] = 1'b1;
+            headEntries[`N-1] = completed_branch_entry(3, 1, 500, 1, 500);  // both taken, same target
+            headIdxs[`N-1] = ROB_IDX'(3);
+
+            // Also set up a regular instruction to commit
+            headValids[`N-2] = 1'b1;
+            headEntries[`N-2] = completed_alu_entry(4, 9, 35, 14);
+            headIdxs[`N-2] = ROB_IDX'(4);
+
+            @(negedge clock);
+
+            // Should not detect mispredict
+            if (!robMispredict && !bpRecoverEn) begin
+                $display("  PASS: No mispredict for correct branch prediction");
+            end else begin
+                $display("  FAIL: Unexpected mispredict for correct prediction");
+                failed = 1;
+            end
+
+            // Should commit the ALU instruction
+            if (archWriteEnables[`N-2] && archWriteAddrs[`N-2] == 9 && archWritePhysRegs[`N-2] == 35) begin
+                $display("  PASS: ALU instruction committed alongside correct branch");
+            end else begin
+                $display("  FAIL: ALU instruction not committed");
+                failed = 1;
+            end
+        end
+
+        // Test 8: Branch without destination doesn't write to arch map
+        $display("\nTest %0d: Branch without destination", test_num++);
+        reset_dut();
+        clear_inputs();
+        begin
+            // Set up a completed branch without destination
+            headValids[`N-1] = 1'b1;
+            headEntries[`N-1] = completed_branch_entry(5, 1, 600, 1, 600);
+            headEntries[`N-1].arch_rd = '0;  // No destination
+            headIdxs[`N-1] = ROB_IDX'(5);
+
+            @(negedge clock);
+
+            // Should not write to architectural map
+            if (archWriteEnables == 0) begin
+                $display("  PASS: Branch without destination doesn't write to arch map");
+            end else begin
+                $display("  FAIL: Unexpected arch map write for branch without destination");
+                failed = 1;
+            end
+
+            // Should not free any registers (no prev_phys_rd to free)
+            if (freeMask == 0) begin
+                $display("  PASS: No registers freed for branch without destination");
+            end else begin
+                $display("  FAIL: Unexpected register freeing for branch without destination");
+                failed = 1;
+            end
+        end
+
+        // Test 9: Reset clears outputs
+        $display("\nTest %0d: Reset clears outputs", test_num++);
+        clear_inputs();
+        begin
+            // Set up some inputs
+            headValids[`N-1] = 1'b1;
+            headEntries[`N-1] = completed_alu_entry(6, 11, 36, 15);
+            headIdxs[`N-1] = ROB_IDX'(6);
+
+            @(negedge clock);
+
+            // Apply reset
+            reset = 1;
+            @(negedge clock);
+
+            // Check that outputs are cleared
+            if (check_no_retire()) begin
+                $display("  PASS: Reset clears all retire outputs");
+            end else begin
+                $display("  FAIL: Reset should clear all retire outputs");
+                failed = 1;
+            end
+        end
+
+        // Test 10: Invalid entries are ignored
+        $display("\nTest %0d: Invalid entries are ignored", test_num++);
+        reset_dut();
+        clear_inputs();
+        begin
+            int commit_count = 0;
+
+            // Set up one valid and one invalid entry
+            headValids[`N-1] = 1'b1;
+            headEntries[`N-1] = completed_alu_entry(7, 12, 37, 16);
+            headIdxs[`N-1] = ROB_IDX'(7);
+
+            headValids[`N-2] = 1'b0;  // Invalid
+            headEntries[`N-2] = completed_alu_entry(8, 13, 38, 17);
+            headIdxs[`N-2] = ROB_IDX'(8);
+
+            @(negedge clock);
+
+            // Should only commit the valid entry
+            for (int i = 0; i < `N; i++) begin
+                if (archWriteEnables[i]) commit_count++;
+            end
+
+            if (commit_count == 1) begin
+                $display("  PASS: Only valid entries committed");
+            end else begin
+                $display("  FAIL: Expected 1 commit, got %0d", commit_count);
+                failed = 1;
+            end
+        end
+
+        $display("\n");
+        if (failed) begin
+            $display("@@@ FAILED");
+        end else begin
+            $display("@@@ PASSED");
+        end
+
+        $finish;
     end
-    @(posedge clock);
-
-    // ==============================
-    // SCENARIO 2: branch mispredict
-    // ==============================
-    ridx_base = 20;
-
-    @(negedge clock);
-      alloc_valid = '0;
-      rob_entry_packet = '{default:'0};
-      alloc_valid[0] = 1'b1;
-      rob_entry_packet[0] = mk_entry(
-        ridx_base+0, /*branch*/1, /*pred_taken*/0, /*pred_tgt*/32'h20,
-        /*has_dest*/0, /*dest_ar*/0, /*Tnew*/0, /*Told*/0
-      );
-    @(posedge clock);
-
-    // Freeze alloc so indices don't shift
-    @(negedge clock) alloc_valid = '0;
-
-    // Complete the PHYSICAL SLOT that holds the oldest entry
-// - In simulation we can peek u_rob.head
-// - Under synthesis we use the captured alloc slot (sel_slot)
-  `ifndef SYNTH
-    sB_slot = u_rob.head;
-  `else
-    sB_slot = sel_slot;
-  `endif
-
-
-    // Complete the PHYSICAL SLOT that holds the oldest entry: u_rob.head
-    //sB_slot = u_rob.head;
-
-    // ---- BEFORE COMPLETE ----
-    //dump_head("S2 BEFORE"); // shows oldest entry
-    $display("S2 BEFORE: selecting slot=%0d", sB_slot);
-
-    // Drive the COMPLETE packet **directly** (no helpers, no to_robidx)
-    @(negedge clock);
-      clear_rob_update();
-      rob_update_packet.valid = '0;
-      rob_update_packet.valid[0]          = 1'b1;
-      rob_update_packet.idx  [0]          = sB_slot;      // PHYSICAL SLOT
-      rob_update_packet.branch_taken[0]   = 1'b1;         // resolved taken
-      rob_update_packet.branch_targets[0] = 32'h00000100; // resolved target
-      //dump_complete_pkt("S2 PACKET DRIVEN (pre-pos)");
-    @(posedge clock); // ROB samples here
-    sel_slot = alloc_idxs[0];
-
-    // ---- AFTER COMPLETE (state visible to retire) ----
-    @(negedge clock);
-    `ifndef SYNTH
-      // Sim-only: safe to peek internals for richer debug
-      //dump_head("S2 AFTER"); // oldest.complete should now be 1
-      $display("S2 AFTER: slot=%0d -> complete=%0b br_tkn=%0b br_tgt=%h",
-              sB_slot,
-              u_rob.rob_array[sB_slot].complete,
-              u_rob.rob_array[sB_slot].branch_taken,
-              u_rob.rob_array[sB_slot].branch_target);
-    `else
-      // Synth-safe: don’t XMR into u_rob.* — print retire-facing signals instead
-      $display("S2 AFTER (synth): will check retire signals; slot=%0d", sB_slot);
-    `endif
-
-      // Now retire should see mispredict at oldest head
-      cA2 = 0;
-      cF2 = 0;
-      for (int i=0;i<`N;i++) begin
-        cA2 += Arch_Retire_EN[i];
-        cF2 += FL_RetireEN[i];
-      end
-      $display("S2 RETIRE VIEW: mispred=%0b BPRecoverEN=%0b mispred_idx=%0d ArchEN_sum=%0d FLen_sum=%0d",
-              rob_mispredict, BPRecoverEN, rob_mispred_idx, cA2, cF2);
-
-      expect_ok(rob_mispredict==1'b1, "Scenario2: expected rob_mispredict=1");
-      expect_ok(cA2==0 && cF2==0,      "Scenario2: no Arch/FL on recovery cycle");
-      expect_ok(BPRecoverEN==1'b1,     "Scenario2: expected BPRecoverEN=1");
-    @(posedge clock);
-
-
-
-    $display("=== PASS: retire full-stack basic scenarios OK ===");
-    $display("@@@ Passed");
-    $finish;
-  end
-
 
 endmodule
-`endif

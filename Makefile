@@ -233,10 +233,7 @@ build/stage_complete.simv: $(STAGE_COMPLETE_FILES)
 build/stage_complete.cov: $(STAGE_COMPLETE_FILES)
 synth/stage_complete.vg: $(STAGE_COMPLETE_FILES)
 
-STAGE_RETIRE_FILES = verilog/sys_defs.svh \
-                      verilog/rob.sv \
-                      verilog/map_table.sv \
-                      verilog/freelist.sv
+STAGE_RETIRE_FILES = verilog/sys_defs.svh
 build/stage_retire.simv: $(STAGE_RETIRE_FILES)
 build/stage_retire.cov:  $(STAGE_RETIRE_FILES)
 synth/stage_retire.vg:   $(STAGE_RETIRE_FILES)
