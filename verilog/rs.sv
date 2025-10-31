@@ -1,6 +1,6 @@
 /////////////////////////////////////////////////////////////////////////
 //                                                                     //
-//   Modulename :  rs.sv                                               //
+//  Modulename :  rs.sv                                                //
 //                                                                     //
 //  Description :  Reservation Station module; holds up to RS_SZ       //
 //                 instructions waiting for operands to become ready.  //
