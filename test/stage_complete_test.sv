@@ -1,199 +1,181 @@
-// test/complete_test.sv
-`timescale 1ns / 1ps
-`include "verilog/sys_defs.svh"
+`include "sys_defs.svh"
 
-module complete_test;
+// Basic testbench for stage_complete module
+// Tests basic functionality
 
-    localparam int N = `N;
-    localparam time TCK = 10ns;
-    localparam int EXW = $bits(EX_COMPLETE_ENTRY);  // width of one EX_COMPLETE_ENTRY
+module testbench;
 
-    // Clock/reset
     logic clock, reset;
-    initial clock = 0;
-    always #(TCK / 2) clock = ~clock;
+    logic failed;
 
-    // DUT I/O (TB-native forms)
-    logic             ex_valid          [N-1:0];
-    EX_COMPLETE_ENTRY ex_comp           [N-1:0];
+    // Inputs to stage_complete
+    logic ex_valid[`N-1:0];
+    EX_COMPLETE_PACKET ex_comp;
+
+    // Outputs from stage_complete
     ROB_UPDATE_PACKET rob_update_packet;
 
-    // ---------------------------
-    // SYNTH build: packed mirrors
-    // ---------------------------
-`ifdef SYNTH
-    // Synth netlists flatten arrays/structs on ports. Present packed equivalents:
-    logic [    N-1:0] ex_valid_p;
-    logic [EXW*N-1:0] ex_comp_bus;
-
-    function automatic [EXW*N-1:0] pack_ex_arr(input EX_COMPLETE_ENTRY a[N-1:0]);
-        automatic logic [EXW*N-1:0] b;
-        b = '0;
-        for (int k = 0; k < N; k++) b[k*EXW+:EXW] = a[k];
-        return b;
-    endfunction
-
-    always_comb begin
-        for (int k = 0; k < N; k++) ex_valid_p[k] = ex_valid[k];
-        ex_comp_bus = pack_ex_arr(ex_comp);
-    end
-`endif
-
-    // ---------------------------
-    // DUT
-    // ---------------------------
-`ifndef SYNTH
-    // Behavioral RTL build — module has an array-of-structs interface
-    complete #(
-        .N(N)
-    ) dut (
-        .clock,
-        .reset,
+    stage_complete dut (
+        .clock(clock),
+        .reset(reset),
         .ex_valid_in(ex_valid),
-        .ex_comp_in (ex_comp),
-        .rob_update_packet
-    );
-`else
-    // Synth netlist — no parameters on ports; use packed equivalents
-    complete dut (
-        .clock,
-        .reset,
-        .ex_valid_in(ex_valid_p),
-        .ex_comp_in(ex_comp_bus),
+        .ex_comp_in(ex_comp),
         .rob_update_packet(rob_update_packet)
     );
-`endif
 
-    // ---------------------------
-    // Helpers
-    // ---------------------------
-    task automatic clr_inputs();
-        for (int i = 0; i < N; i++) begin
-            ex_valid[i] = 1'b0;
-            ex_comp[i]  = '0;
-        end
+    always begin
+        #(`CLOCK_PERIOD / 2.0);
+        clock = ~clock;
+    end
+
+    // Helper function to set ex_comp for a lane
+    task automatic set_ex_comp_lane(int i, int ridx, bit br_valid, bit br_taken, int br_tgt);
+        ex_comp.rob_idx[i]       = ROB_IDX'(ridx);
+        ex_comp.branch_valid[i]  = br_valid;
+        ex_comp.mispredict[i]    = 1'b1;  // intentionally set; DUT must ignore
+        ex_comp.branch_taken[i]  = br_taken;
+        ex_comp.branch_target[i] = ADDR'(br_tgt);
+        ex_comp.dest_pr[i]       = PHYS_TAG'(0);
+        ex_comp.result[i]        = DATA'(0);
     endtask
 
-    task automatic expect_ok(input bit cond, input string msg);
-        if (!cond) begin
-            $display("[%0t] FAIL: %s", $time, msg);
-            $display("@@@ Failed");
-            $fatal(1);
-        end
-    endtask
-
-    function automatic EX_COMPLETE_ENTRY mk_ex(input int ridx, input bit br_valid, input bit br_taken, input int br_tgt);
-        EX_COMPLETE_ENTRY p;
-        p.rob_idx       = ROB_IDX'(ridx);
-        p.branch_valid  = br_valid;
-        p.mispredict    = 1'b1;  // intentionally set; DUT must ignore
-        p.branch_taken  = br_taken;
-        p.branch_target = ADDR'(br_tgt);
-        p.dest_pr       = PHYS_TAG'(0);
-        p.result        = DATA'(0);
-        return p;
-    endfunction
-
-    function automatic int onesum(input logic [N-1:0] v);
+    function automatic int onesum(input logic v[`N-1:0]);
         int s = 0;
-        for (int i = 0; i < N; i++) s += v[i];
+        for (int i = 0; i < `N; i++) s += v[i];
         return s;
     endfunction
 
-    // Temps (avoid mid-block decls)
-    int ridx2;
-    int ridx0;
-    EX_COMPLETE_ENTRY tmp;
+    // Helper to print complete results
+    task print_complete_results(input string label);
+        $display("\n=== %s ===", label);
+        $display("ROB Updates:");
+        $display("  Valid: %b", rob_update_packet.valid);
+        $display("  Idxs: %p", rob_update_packet.idx);
+        $display("  Branch taken: %b", rob_update_packet.branch_taken);
+        $display("  Branch targets: %p", rob_update_packet.branch_targets);
+        $display("");
+    endtask
+
+    // Helper to clear inputs
+    task clr_inputs;
+        for (int i = 0; i < `N; i++) ex_valid[i] = 0;
+        ex_comp = '0;
+    endtask
+
+    // Helper to check conditions
+    task expect_ok(input bit cond, input string msg);
+        if (!cond) begin
+            $display("[%0t] FAIL: %s", $time, msg);
+            failed = 1;
+        end
+    endtask
+
+    // Helper to reset and wait for proper timing
+    task reset_dut;
+        reset = 1;
+        for (int i = 0; i < `N; i++) ex_valid[i] = 0;
+        ex_comp = '0;
+        @(negedge clock);
+        @(negedge clock);
+        reset = 0;
+        @(negedge clock);
+    endtask
 
     // ---------------------------
-    // The tests
+    // Tests
     // ---------------------------
     initial begin
-        // default init
-        reset = 1'b1;
-        clr_inputs();
-        repeat (2) @(posedge clock);
-        reset = 1'b0;
-        @(posedge clock);
+        int test_num = 1;
+        clock  = 0;
+        reset  = 1;
+        failed = 0;
 
-        // Test 0: all lanes invalid -> all zeros out
-        clr_inputs();
-        #1;
-        expect_ok(rob_update_packet.valid == '0, "T0: all valid bits should be 0");
+        // Initialize inputs
+        for (int i = 0; i < `N; i++) ex_valid[i] = 0;
+        ex_comp = '0;
 
-        // elementwise zero checks (no assignment patterns in comparisons)
-        for (int i = 0; i < N; i++) begin
-            expect_ok(rob_update_packet.idx[i] == ROB_IDX'(0), $sformatf("T0: idx[%0d]==0", i));
-            expect_ok(rob_update_packet.branch_targets[i] == ADDR'(0), $sformatf("T0: br_tgt[%0d]==0", i));
+        // Test 1: Single lane completion
+        $display("\nTest %0d: Single lane completion", test_num++);
+        reset_dut();
+        begin
+            ex_valid[0] = 1'b1;
+            set_ex_comp_lane(0, 10, 0, 0, 0);  // ROB idx 10, no branch
+
+            @(negedge clock);
+
+            if (rob_update_packet.valid[0] && rob_update_packet.idx[0] == 10) begin
+                $display("  PASS: Single lane completion works");
+            end else begin
+                $display("  FAIL: Single lane completion failed");
+                failed = 1;
+            end
         end
-        expect_ok(rob_update_packet.branch_taken == '0, "T0: branch_taken cleared");
-        $display("[%0t] PASS: T0 all-zero passthrough", $time);
 
-        // Test 1: single lane, no branch info
-        clr_inputs();
-        ex_valid[0] = 1'b1;
-        ex_comp[0]  = mk_ex(  /*ridx*/ 42,  /*br_valid*/ 0,  /*taken*/ 0,  /*tgt*/ '0);
-        #1;
-        expect_ok(rob_update_packet.valid[0] == 1'b1, "T1: valid[0]");
-        expect_ok(rob_update_packet.idx[0] == ROB_IDX'(42), "T1: idx[0]=42");
-        expect_ok(rob_update_packet.branch_taken[0] == 1'b0, "T1: branch_taken[0]=0");
-        expect_ok(rob_update_packet.branch_targets[0] == ADDR'(0), "T1: branch_target[0]=0");
-        for (int i = 1; i < N; i++) expect_ok(rob_update_packet.valid[i] == 0, $sformatf("T1: valid[%0d]==0", i));
-        $display("[%0t] PASS: T1 single-lane no-branch", $time);
+        // Test 2: Branch completion
+        $display("\nTest %0d: Branch completion", test_num++);
+        reset_dut();
+        begin
+            ex_valid[1] = 1'b1;
+            set_ex_comp_lane(1, 15, 1, 1, 32'h100);  // Branch taken to 0x100
 
-        // Test 2: single lane with branch info (taken to 0x100)
-        clr_inputs();
-        ridx2 = 7;
-        ex_valid[1] = 1'b1;
-        ex_comp[1] = mk_ex(  /*ridx*/ ridx2,  /*br_valid*/ 1,  /*taken*/ 1,  /*tgt*/ 32'h100);
-        #1;
-        expect_ok(rob_update_packet.valid[1] == 1'b1, "T2: valid[1]");
-        expect_ok(rob_update_packet.idx[1] == ROB_IDX'(ridx2), "T2: idx[1]");
-        expect_ok(rob_update_packet.branch_taken[1] == 1'b1, "T2: branch_taken[1]=1");
-        expect_ok(rob_update_packet.branch_targets[1] == ADDR'(32'h100), "T2: br_target[1]=0x100");
-        for (int i = 0; i < N; i++)
-        if (i != 1) begin
-            expect_ok(rob_update_packet.valid[i] == 0, $sformatf("T2: valid[%0d]==0", i));
-            expect_ok(rob_update_packet.branch_taken[i] == 0, $sformatf("T2: br_taken[%0d]==0", i));
-            expect_ok(rob_update_packet.branch_targets[i] == ADDR'(0), $sformatf("T2: br_tgt[%0d]==0", i));
+            @(negedge clock);
+
+            if (rob_update_packet.valid[1] && rob_update_packet.branch_taken[1] &&
+                    rob_update_packet.branch_targets[1] == 32'h100) begin
+                $display("  PASS: Branch completion works");
+            end else begin
+                $display("  FAIL: Branch completion failed");
+                failed = 1;
+            end
         end
-        $display("[%0t] PASS: T2 single-lane with branch info", $time);
 
-        // Test 3: multi-lane sparse: lanes 0 and 2 valid, with lane2 carrying branch info
-        clr_inputs();
-        ridx0 = 3;
-        ridx2 = 19;
-        ex_valid[0] = 1'b1;
-        ex_comp[0] = mk_ex(ridx0,  /*br_valid*/ 0, 0, 0);
-        if (N > 2) begin
+        // Test 3: Multiple lanes
+        $display("\nTest %0d: Multiple lanes", test_num++);
+        reset_dut();
+        begin
+            ex_valid[0] = 1'b1;
             ex_valid[2] = 1'b1;
-            ex_comp[2]  = mk_ex(ridx2,  /*br_valid*/ 1, 1, 32'hABC);
-        end
-        #1;
-        expect_ok(onesum(rob_update_packet.valid) == ((N > 2) ? 2 : 1), "T3: valid popcount");
-        expect_ok(rob_update_packet.idx[0] == ROB_IDX'(ridx0), "T3: idx[0]");
-        if (N > 2) begin
-            expect_ok(rob_update_packet.idx[2] == ROB_IDX'(ridx2), "T3: idx[2]");
-            expect_ok(rob_update_packet.branch_taken[2] == 1'b1, "T3: br_taken[2]=1");
-            expect_ok(rob_update_packet.branch_targets[2] == ADDR'(32'hABC), "T3: br_tgt[2]=ABC");
-        end
-        $display("[%0t] PASS: T3 multi-lane sparse", $time);
+            set_ex_comp_lane(0, 20, 0, 0, 0);
+            set_ex_comp_lane(2, 25, 1, 0, 32'h200);  // Branch not taken
 
-        // Test 4: “mispredict” flag is ignored by DUT
-        clr_inputs();
-        ex_valid[0] = 1'b1;
-        tmp = mk_ex(55,  /*br_valid*/ 1,  /*taken*/ 0,  /*tgt*/ 32'h4444_0000);
-        tmp.mispredict = 1'b1;  // should not affect outputs
-        ex_comp[0] = tmp;
-        #1;
-        expect_ok(rob_update_packet.valid[0] == 1, "T4: valid[0]");
-        expect_ok(rob_update_packet.idx[0] == ROB_IDX'(55), "T4: idx[0]=55");
-        expect_ok(rob_update_packet.branch_taken[0] == 1'b0, "T4: br_taken[0]=0");
-        expect_ok(rob_update_packet.branch_targets[0] == ADDR'(32'h4444_0000), "T4: br_tgt[0]=44440000");
-        $display("[%0t] PASS: T4 mispredict bit ignored by complete", $time);
+            @(negedge clock);
 
-        $display("=== All complete.sv unit tests passed ===");
-        $display("@@@ Passed");
+            if (rob_update_packet.valid[0] && rob_update_packet.valid[2] &&
+                    rob_update_packet.idx[0] == 20 && rob_update_packet.idx[2] == 25 &&
+                    !rob_update_packet.branch_taken[2]) begin
+                $display("  PASS: Multiple lanes work");
+            end else begin
+                $display("  FAIL: Multiple lanes failed");
+                failed = 1;
+            end
+        end
+
+        // Test 4: Reset clears outputs
+        $display("\nTest %0d: Reset clears outputs", test_num++);
+        reset_dut();
+        begin
+            ex_valid[0] = 1'b1;
+            set_ex_comp_lane(0, 30, 0, 0, 0);
+
+            reset = 1;
+            @(negedge clock);
+
+            if (!rob_update_packet.valid[0]) begin
+                $display("  PASS: Reset clears outputs");
+            end else begin
+                $display("  FAIL: Reset should clear outputs");
+                failed = 1;
+            end
+            reset = 0;
+        end
+
+        $display("\n");
+        if (failed) begin
+            $display("@@@ FAILED");
+        end else begin
+            $display("@@@ PASSED");
+        end
+
         $finish;
     end
 

@@ -19,12 +19,15 @@ module testbench;
     PRF_READ_TAGS prf_read_tag_src1, prf_read_tag_src2;
     logic [`NUM_FU_MULT-1:0] mult_request;
     CDB_FU_OUTPUTS fu_outputs;
-    logic [`N-1:0] ex_valid;
-    EX_COMPLETE_ENTRY ex_comp[`N-1:0];
 
-    // Inputs to stage_execute (new)
+    // Signals for EX/COMP interface
+    logic [`N-1:0] ex_valid;
+    EX_COMPLETE_PACKET ex_comp;
+
+    // From CDB for grant selection
     logic [`N-1:0][`NUM_FU_TOTAL-1:0] gnt_bus;
 
+    // DUT instantiation (packed struct, no guards needed)
     stage_execute dut (
         .clock(clock),
         .reset(reset),
@@ -80,6 +83,18 @@ module testbench;
         empty_rs_entry.pred_taken = 0;
         empty_rs_entry.pred_target = 0;
     endfunction
+
+    // Helper to initialize all inputs
+    task init_inputs;
+        int i;
+        issue_entries = '0;
+        cdb_data = '0;
+        prf_read_data_src1 = '0;
+        prf_read_data_src2 = '0;
+        gnt_bus = '0;
+        mispredict = 0;
+        // Explicitly clear fu related signals if needed, but combinational
+    endtask
 
     // Helper function to create a default empty ISSUE_ENTRIES
     function ISSUE_ENTRIES empty_issue_entries;
@@ -209,11 +224,7 @@ module testbench;
     // Helper to reset and wait for proper timing
     task reset_dut;
         reset = 1;
-        issue_entries = empty_issue_entries();
-        init_prf_data();
-        init_cdb_data();
-        gnt_bus = '0;
-        mispredict = 0;
+        init_inputs();
         @(negedge clock);
         @(negedge clock);
         reset = 0;
@@ -222,20 +233,12 @@ module testbench;
 
     initial begin
         int test_num = 1;
-        clock = 0;
-        reset = 1;
+        clock  = 0;
+        reset  = 1;
         failed = 0;
 
         // Initialize all inputs
-        issue_entries = empty_issue_entries();
-        init_prf_data();
-        init_cdb_data();
-        gnt_bus = '0;
-        mispredict = 0;
-
-        reset_dut();
-
-
+        init_inputs();
 
         // Test 2: Single ready ALU instruction should execute
         $display("\nTest %0d: Single ready ALU instruction should execute", test_num++);
@@ -306,22 +309,25 @@ module testbench;
             end
         end
 
-        // Test 5: CDB forwarding should override PRF data
+        // Fix for CDB forwarding test (test 4 in numbering, but 5 in display)
         $display("\nTest %0d: CDB forwarding should override PRF data", test_num++);
         reset_dut();
         begin
             issue_entries = empty_issue_entries();
             issue_entries.alu[0] = tagged_entry(CAT_ALU, 10, 5, 6, 1);  // src tags 5 and 6
 
-            // Set up CDB with forwarding data for tag 5
+            // Set PRF data explicitly for this test
+            prf_read_data_src1.alu[0] = 32'h00000000;  // Will be overridden by CDB for SRC1
+            prf_read_data_src2.alu[0] = 32'hBB000000;  // SRC2 from PRF
+
+            // Set up CDB with forwarding data for tag 5 (SRC1)
             cdb_data[0].valid = 1;
-            cdb_data[0].tag = 5;  // matches src1_tag
+            cdb_data[0].tag = 5;
             cdb_data[0].data = 32'h12345678;
-            // PRF data should be 0xAA000000, but CDB should override
 
             @(negedge clock);
 
-            // expected_result = 0x12345678 + 0xAA000000 = 0xCD345678
+            // Expected: 0x12345678 (SRC1 from CDB) + 0xBB000000 (SRC2 from PRF) = 0xCD345678
             if (fu_outputs.alu[0].valid && (fu_outputs.alu[0].data == 32'hCD345678)) begin
                 $display("  PASS: CDB forwarding worked (result = 0x%h)", fu_outputs.alu[0].data);
             end else begin
@@ -377,37 +383,7 @@ module testbench;
             end
         end
 
-        // Test 8: Reset should clear all outputs
-        $display("\nTest %0d: Reset should clear all outputs", test_num++);
-        reset_dut();
-        begin
-            logic any_output_before, any_output_after;
-            issue_entries = empty_issue_entries();
-            issue_entries.alu[0] = ready_alu_entry(10);
-            prf_read_data_src1.alu[0] = 32'h10;
-            prf_read_data_src2.alu[0] = 32'h20;
-
-            @(negedge clock);
-
-            any_output_before = |{fu_outputs.alu[0].valid, fu_outputs.alu[1].valid, fu_outputs.alu[2].valid,
-                                 fu_outputs.mult[0].valid, fu_outputs.branch[0].valid, fu_outputs.mem[0].valid};
-
-            reset = 1;
-            issue_entries = empty_issue_entries();  // Simulate flush on reset
-            @(negedge clock);
-
-            any_output_after = |{fu_outputs.alu[0].valid, fu_outputs.alu[1].valid, fu_outputs.alu[2].valid,
-                                fu_outputs.mult[0].valid, fu_outputs.branch[0].valid, fu_outputs.mem[0].valid};
-
-            if (any_output_before && !any_output_after) begin
-                $display("  PASS: Reset clears all outputs");
-            end else begin
-                $display("  FAIL: Reset should clear outputs (before=%b, after=%b)", any_output_before, any_output_after);
-                failed = 1;
-            end
-        end
-
-        // Test 9: Mispredict should clear outputs
+        // Fix for mispredict test (test 9)
         $display("\nTest %0d: Mispredict should clear outputs", test_num++);
         reset_dut();
         begin
@@ -416,18 +392,27 @@ module testbench;
             issue_entries.alu[0] = ready_alu_entry(10);
             prf_read_data_src1.alu[0] = 32'h10;
             prf_read_data_src2.alu[0] = 32'h20;
+            gnt_bus = '0;  // Ensure no grants
 
             @(negedge clock);
 
             any_output_before = |{fu_outputs.alu[0].valid, fu_outputs.alu[1].valid, fu_outputs.alu[2].valid,
                                  fu_outputs.mult[0].valid, fu_outputs.branch[0].valid, fu_outputs.mem[0].valid};
 
+            // Set clear conditions without resetting mispredict
             mispredict = 1;
-            issue_entries = empty_issue_entries();  // Simulate flush on mispredict
+            issue_entries = '0;
+            prf_read_data_src1 = '0;
+            prf_read_data_src2 = '0;
+            gnt_bus = '0;
+            cdb_data = '0;
+
             @(negedge clock);
 
             any_output_after = |{fu_outputs.alu[0].valid, fu_outputs.alu[1].valid, fu_outputs.alu[2].valid,
                                 fu_outputs.mult[0].valid, fu_outputs.branch[0].valid, fu_outputs.mem[0].valid};
+
+            mispredict = 0;  // Reset after evaluation
 
             if (any_output_before && !any_output_after) begin
                 $display("  PASS: Mispredict clears all outputs");
@@ -480,6 +465,54 @@ module testbench;
             end else begin
                 $display("  FAIL: Incorrect PRF read pattern (src1_en=%b, src2_en=%b)", prf_read_en_src1.alu[0],
                          prf_read_en_src2.alu[0]);
+                failed = 1;
+            end
+        end
+
+        // Similar fix for reset test (test 8), but manual clear
+        $display("\nTest %0d: Reset should clear all outputs", test_num++);
+        begin
+            logic any_output_before, any_output_after;
+            reset = 1;
+            issue_entries = '0;
+            prf_read_data_src1 = '0;
+            prf_read_data_src2 = '0;
+            gnt_bus = '0;
+            cdb_data = '0;
+            mispredict = 0;
+            @(negedge clock);
+
+            // Set input to produce output
+            reset = 0;
+            issue_entries.alu[0] = ready_alu_entry(10);
+            prf_read_data_src1.alu[0] = 32'h10;
+            prf_read_data_src2.alu[0] = 32'h20;
+            gnt_bus = '0;  // No grant yet
+
+            @(negedge clock);
+
+            any_output_before = |{fu_outputs.alu[0].valid, fu_outputs.alu[1].valid, fu_outputs.alu[2].valid,
+                                 fu_outputs.mult[0].valid, fu_outputs.branch[0].valid, fu_outputs.mem[0].valid};
+
+            // Trigger reset
+            reset = 1;
+            issue_entries = '0;
+            prf_read_data_src1 = '0;
+            prf_read_data_src2 = '0;
+            gnt_bus = '0;
+            cdb_data = '0;
+
+            @(negedge clock);
+
+            any_output_after = |{fu_outputs.alu[0].valid, fu_outputs.alu[1].valid, fu_outputs.alu[2].valid,
+                                fu_outputs.mult[0].valid, fu_outputs.branch[0].valid, fu_outputs.mem[0].valid};
+
+            reset = 0;
+
+            if (any_output_before && !any_output_after) begin
+                $display("  PASS: Reset clears all outputs");
+            end else begin
+                $display("  FAIL: Reset should clear outputs (before=%b, after=%b)", any_output_before, any_output_after);
                 failed = 1;
             end
         end

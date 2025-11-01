@@ -536,6 +536,14 @@ typedef struct packed {
     CDB_ENTRY [`NUM_FU_MEM-1:0]    mem;
 } CDB_FU_OUTPUTS;
 
+// FU results grouped by type (for internal use in execute stage)
+typedef struct packed {
+    DATA [`NUM_FU_ALU-1:0]    alu;
+    DATA [`NUM_FU_MULT-1:0]   mult;
+    DATA [`NUM_FU_BRANCH-1:0] branch;
+    DATA [`NUM_FU_MEM-1:0]    mem;
+} FU_RESULTS;
+
 // PRF read requests grouped by FU type
 typedef struct packed {
     logic [`NUM_FU_ALU-1:0]    alu;
@@ -578,15 +586,26 @@ typedef struct packed {
     logic          illegal;        // Is this illegal?
 } ROB_ENTRY;
 
-// EX to Complete stage entry
+// Individual entry for FU metadata (AoS - Array of Structs for internal use)
 typedef struct packed {
-    ROB_IDX  rob_idx;        // ROB index of this instruction
-    logic    branch_valid;   // Is this a branch instruction?
-    logic    mispredict;     // Branch misprediction detected
-    logic    branch_taken;   // Branch resolution: taken or not taken
-    ADDR     branch_target;  // Resolved branch target address
-    PHYS_TAG dest_pr;        // Destination physical register
-    DATA     result;         // Computed result value
+    ROB_IDX  rob_idx;        // ROB index
+    logic    branch_valid;   // Branch flag
+    logic    mispredict;     // Mispredict flag
+    logic    branch_taken;   // Taken flag
+    ADDR     branch_target;  // Branch target
+    PHYS_TAG dest_pr;        // Destination PR
+    DATA     result;         // Result
 } EX_COMPLETE_ENTRY;
+
+// Packed struct of arrays for EX/COMP interface (more idiomatic)
+typedef struct packed {
+    ROB_IDX [`N-1:0]  rob_idx;        // ROB indices
+    logic [`N-1:0]    branch_valid;   // Branch flags
+    logic [`N-1:0]    mispredict;     // Mispredict flags
+    logic [`N-1:0]    branch_taken;   // Taken flags
+    ADDR [`N-1:0]     branch_target;  // Branch targets
+    PHYS_TAG [`N-1:0] dest_pr;        // Destination PRs
+    DATA [`N-1:0]     result;         // Results
+} EX_COMPLETE_PACKET;
 
 `endif  // __SYS_DEFS_SVH__

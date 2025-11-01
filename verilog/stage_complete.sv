@@ -1,14 +1,14 @@
 `include "sys_defs.svh"
 
-module complete #(
+module stage_complete #(
     parameter int N = `N
 ) (
     input logic clock,
     input logic reset,
 
     // From EX/COMP pipe reg
-    input logic             ex_valid_in[N-1:0],
-    input EX_COMPLETE_ENTRY ex_comp_in [N-1:0],
+    input logic              ex_valid_in[N-1:0],
+    input EX_COMPLETE_PACKET ex_comp_in,
 
     // To ROB
     output ROB_UPDATE_PACKET rob_update_packet
@@ -16,18 +16,22 @@ module complete #(
 
     // ROB updates: mark complete
     always_comb begin
-        rob_update_packet = '0;  // Initialize all fields to 0
+        if (reset) begin
+            rob_update_packet = '0;
+        end else begin
+            rob_update_packet = '0;  // Initialize all fields to 0
 
-        for (int i = 0; i < N; i++) begin  // Per-lane fan-out (not a dependent loop)
-            if (ex_valid_in[i]) begin
-                rob_update_packet.valid[i] = 1'b1;
-                rob_update_packet.idx[i] = ex_comp_in[i].rob_idx;
-                rob_update_packet.mispredicts[i] = ex_comp_in[i].mispredict;
+            for (int i = 0; i < N; i++) begin  // Per-lane fan-out (not a dependent loop)
+                if (ex_valid_in[i]) begin
+                    rob_update_packet.valid[i] = 1'b1;
+                    rob_update_packet.idx[i] = ex_comp_in.rob_idx[i];
+                    rob_update_packet.mispredicts[i] = ex_comp_in.mispredict[i];
 
-                // Handle branch information if present
-                if (ex_comp_in[i].branch_valid) begin
-                    rob_update_packet.branch_taken[i]   = ex_comp_in[i].branch_taken;
-                    rob_update_packet.branch_targets[i] = ex_comp_in[i].branch_target;
+                    // Handle branch information if present
+                    if (ex_comp_in.branch_valid[i]) begin
+                        rob_update_packet.branch_taken[i]   = ex_comp_in.branch_taken[i];
+                        rob_update_packet.branch_targets[i] = ex_comp_in.branch_target[i];
+                    end
                 end
             end
         end
