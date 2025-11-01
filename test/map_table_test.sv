@@ -9,10 +9,8 @@ module testbench;
     logic failed;
 
     // Inputs to map_table
-    logic [`N-1:0] write_enables;
-    REG_IDX [`N-1:0] write_addrs;
-    PHYS_TAG [`N-1:0] write_phys_regs;
-    REG_IDX [`N-1:0] read_addrs;
+    MAP_TABLE_WRITE_REQUEST [`N-1:0] write_reqs;
+    MAP_TABLE_READ_REQUEST read_req;
     CDB_ENTRY [`N-1:0] cdb_broadcasts;
 
     // Mispredict recovery I/O
@@ -20,7 +18,7 @@ module testbench;
     logic table_restore_en;
 
     // Outputs from map_table
-    MAP_ENTRY [`N-1:0] read_entries;
+    MAP_TABLE_READ_RESPONSE read_resp;
     MAP_ENTRY [`ARCH_REG_SZ-1:0] table_snapshot;
 
     // Inputs to arch_map_table
@@ -40,11 +38,9 @@ module testbench;
     map_table dut (
         .clock(clock),
         .reset(reset),
-        .write_enables(write_enables),
-        .write_addrs(write_addrs),
-        .write_phys_regs(write_phys_regs),
-        .read_addrs(read_addrs),
-        .read_entries(read_entries),
+        .write_reqs(write_reqs),
+        .read_req(read_req),
+        .read_resp(read_resp),
         .cdb_broadcasts(cdb_broadcasts),
         .table_snapshot(table_snapshot),
         .table_restore(table_restore),
@@ -89,7 +85,9 @@ module testbench;
     // Helper to set read addresses for all ports
     task set_read_addrs;
         for (int i = 0; i < `N; i++) begin
-            read_addrs[i] = i;  // Read architectural reg i on port i
+            read_req.rs1_addrs[i]  = i;  // Read architectural reg i on port i for rs1
+            read_req.rs2_addrs[i]  = i;  // Same for rs2
+            read_req.told_addrs[i] = i;  // Same for told
         end
     endtask
 
@@ -102,9 +100,8 @@ module testbench;
 
     // Helper to clear all inputs
     task clear_inputs;
-        write_enables = '0;
-        write_addrs = '0;
-        write_phys_regs = '0;
+        write_reqs = '0;
+        read_req = '0;
         cdb_broadcasts = '0;
         table_restore = '0;
         table_restore_en = 1'b0;
@@ -126,7 +123,7 @@ module testbench;
 
     // Helper to check if a read entry matches expected values
     function logic check_entry(input int port, input PHYS_TAG expected_phys, input logic expected_ready);
-        return (read_entries[port].phys_reg == expected_phys && read_entries[port].ready == expected_ready);
+        return (read_resp.rs1_entries[port].phys_reg == expected_phys && read_resp.rs1_entries[port].ready == expected_ready);
     endfunction
 
     // Helper to check if an arch read entry matches expected values
@@ -157,7 +154,7 @@ module testbench;
             for (int i = 0; i < `N && i < 8; i++) begin  // Check first 8 or N registers
                 if (!check_entry(i, PHYS_TAG'(i), 1'b1)) begin
                     $display("  FAIL: Reg %0d should map to phys %0d and be ready, got phys=%0d ready=%b", i, i,
-                             read_entries[i].phys_reg, read_entries[i].ready);
+                             read_resp.rs1_entries[i].phys_reg, read_resp.rs1_entries[i].ready);
                     all_correct = 0;
                 end
             end
@@ -177,17 +174,21 @@ module testbench;
             logic cdb_updated = 0;
 
             // Set up some mappings that are initially not ready
-            write_enables[0] = 1'b1;
-            write_addrs[0] = 5'd5;
-            write_phys_regs[0] = 6'd40;  // Map arch 5 to phys 40
+            write_reqs[0].valid = 1'b1;
+            write_reqs[0].addr = 5'd5;
+            write_reqs[0].phys_reg = 6'd40;  // Map arch 5 to phys 40
 
-            write_enables[1] = 1'b1;
-            write_addrs[1] = 5'd10;
-            write_phys_regs[1] = 6'd45;  // Map arch 10 to phys 45
+            write_reqs[1].valid = 1'b1;
+            write_reqs[1].addr = 5'd10;
+            write_reqs[1].phys_reg = 6'd45;  // Map arch 10 to phys 45
 
             // Set read addresses to match written arch regs
-            read_addrs[0] = 5'd5;
-            read_addrs[1] = 5'd10;
+            read_req.rs1_addrs[0] = 5'd5;
+            read_req.rs2_addrs[0] = 5'd5;
+            read_req.told_addrs[0] = 5'd5;
+            read_req.rs1_addrs[1] = 5'd10;
+            read_req.rs2_addrs[1] = 5'd10;
+            read_req.told_addrs[1] = 5'd10;
 
             @(negedge clock);
 
@@ -198,7 +199,7 @@ module testbench;
             end
 
             // Clear writes and send CDB broadcasts
-            write_enables = '0;
+            write_reqs = '0;
             cdb_broadcasts[0] = cdb_entry(1'b1, 6'd40, 32'h1234);  // Make phys 40 ready
             cdb_broadcasts[1] = cdb_entry(1'b1, 6'd45, 32'h5678);  // Make phys 45 ready
 
@@ -209,7 +210,8 @@ module testbench;
                 $display("  PASS: CDB broadcasts updated ready bits");
             end else begin
                 $display("  FAIL: CDB broadcasts should update ready bits (port0: phys=%0d ready=%b, port1: phys=%0d ready=%b)",
-                         read_entries[0].phys_reg, read_entries[0].ready, read_entries[1].phys_reg, read_entries[1].ready);
+                         read_resp.rs1_entries[0].phys_reg, read_resp.rs1_entries[0].ready, read_resp.rs1_entries[1].phys_reg,
+                         read_resp.rs1_entries[1].ready);
                 failed = 1;
             end
         end
@@ -220,20 +222,22 @@ module testbench;
         clear_inputs();
         begin
             // Set up initial mapping
-            write_enables[0] = 1'b1;
-            write_addrs[0] = 5'd3;
-            write_phys_regs[0] = 6'd50;  // Map arch 3 to phys 50
+            write_reqs[0].valid = 1'b1;
+            write_reqs[0].addr = 5'd3;
+            write_reqs[0].phys_reg = 6'd50;  // Map arch 3 to phys 50
 
             // Set read address to match written arch reg
-            read_addrs[0] = 5'd3;
+            read_req.rs1_addrs[0] = 5'd3;
+            read_req.rs2_addrs[0] = 5'd3;
+            read_req.told_addrs[0] = 5'd3;
 
             @(negedge clock);
 
             // Send CDB broadcast for phys 50 AND a new write to arch 3 in same cycle
             cdb_broadcasts[0] = cdb_entry(1'b1, 6'd50, 32'h9999);
-            write_enables[0] = 1'b1;
-            write_addrs[0] = 5'd3;
-            write_phys_regs[0] = 6'd60;  // Change mapping to phys 60
+            write_reqs[0].valid = 1'b1;
+            write_reqs[0].addr = 5'd3;
+            write_reqs[0].phys_reg = 6'd60;  // Change mapping to phys 60
 
             @(negedge clock);
 
@@ -242,7 +246,7 @@ module testbench;
                 $display("  PASS: Dispatch write overrode CDB broadcast (new mapping not ready)");
             end else begin
                 $display("  FAIL: Dispatch write should override CDB (expected phys=60 ready=0, got phys=%0d ready=%b)",
-                         read_entries[0].phys_reg, read_entries[0].ready);
+                         read_resp.rs1_entries[0].phys_reg, read_resp.rs1_entries[0].ready);
                 failed = 1;
             end
         end
@@ -256,9 +260,9 @@ module testbench;
 
             // Write to multiple registers simultaneously
             for (int i = 0; i < `N; i++) begin
-                write_enables[i] = 1'b1;
-                write_addrs[i] = i;
-                write_phys_regs[i] = 32 + i;  // Map to phys registers 32-32+N-1
+                write_reqs[i].valid = 1'b1;
+                write_reqs[i].addr = i;
+                write_reqs[i].phys_reg = 32 + i;  // Map to phys registers 32-32+N-1
             end
 
             @(negedge clock);
@@ -267,7 +271,7 @@ module testbench;
             for (int i = 0; i < `N; i++) begin
                 if (!check_entry(i, 32 + i, 1'b0)) begin
                     $display("  FAIL: Reg %0d should map to phys %0d and not be ready, got phys=%0d ready=%b", i, 32 + i,
-                             read_entries[i].phys_reg, read_entries[i].ready);
+                             read_resp.rs1_entries[i].phys_reg, read_resp.rs1_entries[i].ready);
                     all_correct = 0;
                 end
             end
@@ -292,7 +296,7 @@ module testbench;
             for (int i = 0; i < `N && i < 8; i++) begin
                 if (!check_entry(i, PHYS_TAG'(i), 1'b1)) begin
                     $display("  FAIL: After reset, reg %0d should map to phys %0d and be ready, got phys=%0d ready=%b", i, i,
-                             read_entries[i].phys_reg, read_entries[i].ready);
+                             read_resp.rs1_entries[i].phys_reg, read_resp.rs1_entries[i].ready);
                     all_correct = 0;
                 end
             end
@@ -310,19 +314,23 @@ module testbench;
         clear_inputs();
         begin
             // Set up some test mappings
-            write_enables[0] = 1'b1;
-            write_addrs[0] = 5'd1;
-            write_phys_regs[0] = 6'd35;
+            write_reqs[0].valid = 1'b1;
+            write_reqs[0].addr = 5'd1;
+            write_reqs[0].phys_reg = 6'd35;
 
-            write_enables[1] = 1'b1;
-            write_addrs[1] = 5'd5;
-            write_phys_regs[1] = 6'd40;
+            write_reqs[1].valid = 1'b1;
+            write_reqs[1].addr = 5'd5;
+            write_reqs[1].phys_reg = 6'd40;
 
             @(negedge clock);
 
             // Read different registers on different ports
-            read_addrs[0] = 5'd1;  // Should read arch 1
-            read_addrs[1] = 5'd5;  // Should read arch 5
+            read_req.rs1_addrs[0]  = 5'd1;  // Should read arch 1
+            read_req.rs2_addrs[0]  = 5'd1;
+            read_req.told_addrs[0] = 5'd1;
+            read_req.rs1_addrs[1]  = 5'd5;  // Should read arch 5
+            read_req.rs2_addrs[1]  = 5'd5;
+            read_req.told_addrs[1] = 5'd5;
 
             @(negedge clock);
 
@@ -331,7 +339,8 @@ module testbench;
                 $display("  PASS: Read ports work independently");
             end else begin
                 $display("  FAIL: Independent reads failed (port0: phys=%0d ready=%b, port1: phys=%0d ready=%b)",
-                         read_entries[0].phys_reg, read_entries[0].ready, read_entries[1].phys_reg, read_entries[1].ready);
+                         read_resp.rs1_entries[0].phys_reg, read_resp.rs1_entries[0].ready, read_resp.rs1_entries[1].phys_reg,
+                         read_resp.rs1_entries[1].ready);
                 failed = 1;
             end
         end
@@ -345,13 +354,13 @@ module testbench;
             logic recovery_successful = 1;
 
             // Phase 1: Set up initial mappings (architected state)
-            write_enables[0] = 1'b1;
-            write_addrs[0] = 5'd2;
-            write_phys_regs[0] = 6'd32;  // Map arch 2 to phys 32
+            write_reqs[0].valid = 1'b1;
+            write_reqs[0].addr = 5'd2;
+            write_reqs[0].phys_reg = 6'd32;  // Map arch 2 to phys 32
 
-            write_enables[1] = 1'b1;
-            write_addrs[1] = 5'd7;
-            write_phys_regs[1] = 6'd37;  // Map arch 7 to phys 37
+            write_reqs[1].valid = 1'b1;
+            write_reqs[1].addr = 5'd7;
+            write_reqs[1].phys_reg = 6'd37;  // Map arch 7 to phys 37
 
             @(negedge clock);
 
@@ -362,19 +371,23 @@ module testbench;
 
             // Phase 2: Perform speculative mappings (simulate branch speculation)
             clear_inputs();
-            write_enables[0] = 1'b1;
-            write_addrs[0] = 5'd2;
-            write_phys_regs[0] = 6'd50;  // Speculative: map arch 2 to phys 50
+            write_reqs[0].valid = 1'b1;
+            write_reqs[0].addr = 5'd2;
+            write_reqs[0].phys_reg = 6'd50;  // Speculative: map arch 2 to phys 50
 
-            write_enables[1] = 1'b1;
-            write_addrs[1] = 5'd7;
-            write_phys_regs[1] = 6'd55;  // Speculative: map arch 7 to phys 55
+            write_reqs[1].valid = 1'b1;
+            write_reqs[1].addr = 5'd7;
+            write_reqs[1].phys_reg = 6'd55;  // Speculative: map arch 7 to phys 55
 
             @(negedge clock);
 
             // Verify speculative mappings are in place
-            read_addrs[0] = 5'd2;
-            read_addrs[1] = 5'd7;
+            read_req.rs1_addrs[0]  = 5'd2;
+            read_req.rs2_addrs[0]  = 5'd2;
+            read_req.told_addrs[0] = 5'd2;
+            read_req.rs1_addrs[1]  = 5'd7;
+            read_req.rs2_addrs[1]  = 5'd7;
+            read_req.told_addrs[1] = 5'd7;
             @(negedge clock);
 
             if (!check_entry(0, 6'd50, 1'b0) || !check_entry(1, 6'd55, 1'b0)) begin
@@ -394,8 +407,12 @@ module testbench;
             table_restore_en = 1'b0;
 
             // Phase 4: Verify recovery - table should be restored to architected state
-            read_addrs[0] = 5'd2;
-            read_addrs[1] = 5'd7;
+            read_req.rs1_addrs[0] = 5'd2;
+            read_req.rs2_addrs[0] = 5'd2;
+            read_req.told_addrs[0] = 5'd2;
+            read_req.rs1_addrs[1] = 5'd7;
+            read_req.rs2_addrs[1] = 5'd7;
+            read_req.told_addrs[1] = 5'd7;
             @(negedge clock);
 
             if (check_entry(0, 6'd32, 1'b0) && check_entry(1, 6'd37, 1'b0)) begin
@@ -403,7 +420,8 @@ module testbench;
             end else begin
                 $display(
                     "  FAIL: Mispredict recovery failed (expected arch2:32, arch7:37, got arch2:%0d ready:%b, arch7:%0d ready:%b)",
-                    read_entries[0].phys_reg, read_entries[0].ready, read_entries[1].phys_reg, read_entries[1].ready);
+                    read_resp.rs1_entries[0].phys_reg, read_resp.rs1_entries[0].ready, read_resp.rs1_entries[1].phys_reg,
+                    read_resp.rs1_entries[1].ready);
                 failed = 1;
                 recovery_successful = 0;
             end

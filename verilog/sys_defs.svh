@@ -470,13 +470,6 @@ typedef struct packed {
     RS_ENTRY [`RS_MEM_SZ-1:0]    mem;
 } RS_BANKS;
 
-// FU available signals grouped by functional unit type
-typedef struct packed {
-    logic [`NUM_FU_ALU-1:0]    alu;
-    logic [`NUM_FU_MULT-1:0]   mult;
-    logic [`NUM_FU_BRANCH-1:0] branch;
-    logic [`NUM_FU_MEM-1:0]    mem;
-} FU_AVAILS;
 
 // Issue clear signals grouped by functional unit type
 typedef struct packed {
@@ -505,6 +498,12 @@ typedef struct packed {
     logic [`NUM_FU_BRANCH-1:0] branch;
     logic [`NUM_FU_MEM-1:0]    mem;
 } FU_REQUESTS;
+
+// FU grant signals (same structure as requests)
+typedef FU_REQUESTS FU_GRANTS;
+
+// FU available signals (same structure as requests)
+typedef FU_REQUESTS FU_AVAILS;
 
 // RS allocation signals for a single dispatch width
 typedef struct packed {
@@ -608,5 +607,52 @@ typedef struct packed {
     PHYS_TAG [`N-1:0] dest_pr;        // Destination PRs
     DATA [`N-1:0]     result;         // Results
 } EX_COMPLETE_PACKET;
+
+// Fetch to Dispatch packet (superscalar bundle)
+typedef struct packed {
+    REG_IDX [`N-1:0]        rs1_idx;        // Source register 1 indices
+    REG_IDX [`N-1:0]        rs2_idx;        // Source register 2 indices
+    REG_IDX [`N-1:0]        rd_idx;         // Destination register indices
+    logic [`N-1:0]          uses_rd;        // Whether instruction writes to rd
+    OP_TYPE [`N-1:0]        op_type;        // Operation type (category + func)
+    ALU_OPA_SELECT [`N-1:0] opa_select;     // ALU operand A select
+    ALU_OPB_SELECT [`N-1:0] opb_select;     // ALU operand B select
+    DATA [`N-1:0]           rs2_immediate;  // Immediate value for src2
+    ADDR [`N-1:0]           PC;             // Program counters
+    INST [`N-1:0]           inst;           // Full instructions
+    logic [`N-1:0]          pred_taken;     // Branch prediction taken
+    ADDR [`N-1:0]           pred_target;    // Branch prediction target
+} FETCH_DISP_PACKET;
+
+// Map table communication packets
+typedef struct packed {
+    logic    valid;     // Write enable
+    REG_IDX  addr;      // Architectural register address
+    PHYS_TAG phys_reg;  // Physical register to map to
+} MAP_TABLE_WRITE_REQUEST;
+
+typedef struct packed {
+    REG_IDX [`N-1:0] rs1_addrs;   // RS1 read addresses
+    REG_IDX [`N-1:0] rs2_addrs;   // RS2 read addresses
+    REG_IDX [`N-1:0] told_addrs;  // TOLD read addresses (for rd old mapping)
+} MAP_TABLE_READ_REQUEST;
+
+typedef struct packed {
+    MAP_ENTRY [`N-1:0] rs1_entries;   // RS1 read results
+    MAP_ENTRY [`N-1:0] rs2_entries;   // RS2 read results
+    MAP_ENTRY [`N-1:0] told_entries;  // TOLD read results
+} MAP_TABLE_READ_RESPONSE;
+
+// RS clear signals (extracted from ISSUE_CLEAR)
+typedef struct packed {
+    logic [`NUM_FU_ALU-1:0]    valid_alu;
+    RS_IDX [`NUM_FU_ALU-1:0]   idxs_alu;
+    logic [`NUM_FU_MULT-1:0]   valid_mult;
+    RS_IDX [`NUM_FU_MULT-1:0]  idxs_mult;
+    logic [`NUM_FU_BRANCH-1:0] valid_branch;
+    RS_IDX [`NUM_FU_BRANCH-1:0] idxs_branch;
+    logic [`NUM_FU_MEM-1:0]    valid_mem;
+    RS_IDX [`NUM_FU_MEM-1:0]   idxs_mem;
+} RS_CLEAR_SIGNALS;
 
 `endif  // __SYS_DEFS_SVH__

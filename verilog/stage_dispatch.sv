@@ -1,0 +1,168 @@
+`include "sys_defs.svh"
+
+// Dispatch Stage: Register renaming and resource allocation
+module stage_dispatch (
+    input logic clock, reset,
+
+    // From decode: instruction bundle
+    input FETCH_DISP_PACKET fetch_packet,
+    input logic [`N-1:0]    fetch_valid,
+
+    // Structural hazard inputs
+    input logic [$clog2(`ROB_SZ+1)-1:0]     free_slots_rob,
+    input logic [$clog2(`PHYS_REG_SZ_R10K+1)-1:0] free_slots_freelst,
+    input ROB_IDX [`N-1:0]                 rob_alloc_idxs,
+
+    // RS allocation grants (unused in current impl)
+    input logic [`N-1:0][`RS_ALU_SZ-1:0]   rs_alu_granted,
+    input logic [`N-1:0][`RS_MULT_SZ-1:0]  rs_mult_granted,
+    input logic [`N-1:0][`RS_BRANCH_SZ-1:0] rs_branch_granted,
+    input logic [`N-1:0][`RS_MEM_SZ-1:0]   rs_mem_granted,
+
+    // To fetch: dispatch count (0 = stall)
+    output logic [$clog2(`N)-1:0]          dispatch_count,
+
+    // To ROB: allocation entries
+    output ROB_ENTRY [`N-1:0]              rob_entry_packet,
+
+    // To RS: allocation requests
+    output RS_ALLOC_BANKS                  rs_alloc,
+
+    // To freelist: allocation requests
+    output logic [`N-1:0]                  free_alloc_valid,
+    input PHYS_TAG [`N-1:0]                allocated_phys,
+
+    // To/from map table: register mapping
+    output MAP_TABLE_WRITE_REQUEST [`N-1:0] maptable_write_reqs,
+    output MAP_TABLE_READ_REQUEST           maptable_read_req,
+    input MAP_TABLE_READ_RESPONSE           maptable_read_resp
+);
+
+    // Dispatch control
+    logic [$clog2(`N+1)-1:0] num_to_dispatch;
+    int num_valid_from_fetch, num_rds_needed;
+
+    // RS allocation counters
+    int alu_count, mult_count, branch_count, mem_count;
+
+    // Map table read results
+    logic [`PHYS_TAG_BITS-1:0] local_reg1_tag[`N-1:0];
+    logic [`PHYS_TAG_BITS-1:0] local_reg2_tag[`N-1:0];
+    logic local_reg1_ready[`N-1:0];
+    logic local_reg2_ready[`N-1:0];
+    logic [`PHYS_TAG_BITS-1:0] local_Told[`N-1:0];
+
+    // Create RS entry from instruction and map table data
+    function RS_ENTRY create_rs_entry(int idx);
+        create_rs_entry.valid          = 1'b1;
+        create_rs_entry.opa_select     = fetch_packet.opa_select[idx];
+        create_rs_entry.opb_select     = fetch_packet.opb_select[idx];
+        create_rs_entry.op_type        = fetch_packet.op_type[idx];
+        create_rs_entry.src1_tag       = local_reg1_tag[idx];
+        create_rs_entry.src1_ready     = local_reg1_ready[idx];
+        create_rs_entry.src2_tag       = local_reg2_tag[idx];
+        create_rs_entry.src2_ready     = local_reg2_ready[idx];
+        create_rs_entry.src2_immediate = fetch_packet.rs2_immediate[idx];
+        create_rs_entry.dest_tag       = allocated_phys[idx];
+        create_rs_entry.rob_idx        = rob_alloc_idxs[idx];
+        create_rs_entry.PC             = fetch_packet.PC[idx];
+        create_rs_entry.pred_taken     = fetch_packet.pred_taken[idx];
+        create_rs_entry.pred_target    = fetch_packet.pred_target[idx];
+    endfunction
+
+    always_comb begin
+        // Count valid instructions and check resource constraints
+        num_valid_from_fetch = $countones(fetch_valid);
+        num_rds_needed = $countones(fetch_valid & fetch_packet.uses_rd);
+
+        num_to_dispatch = num_valid_from_fetch;
+        if (free_slots_rob < num_to_dispatch) num_to_dispatch = free_slots_rob;
+        if (free_slots_freelst < num_rds_needed) num_to_dispatch = free_slots_freelst;
+
+        // Set dispatch count (0 = stall)
+        dispatch_count = num_to_dispatch;
+
+        // Initialize outputs
+        rs_alloc = '0;
+        free_alloc_valid = '0;
+        rob_entry_packet = '0;
+
+        // Read register mappings from map table
+        for (int i = 0; i < `N; i++) begin
+            maptable_read_req.rs1_addrs[i]  = fetch_packet.rs1_idx[i];
+            maptable_read_req.rs2_addrs[i]  = fetch_packet.rs2_idx[i];
+            maptable_read_req.told_addrs[i] = fetch_packet.rd_idx[i];
+        end
+
+        // Store map table responses locally
+        for (int i = 0; i < `N; i++) begin
+            local_reg1_tag[i]   = maptable_read_resp.rs1_entries[i].phys_reg;
+            local_reg2_tag[i]   = maptable_read_resp.rs2_entries[i].phys_reg;
+            local_reg1_ready[i] = maptable_read_resp.rs1_entries[i].ready;
+            local_reg2_ready[i] = maptable_read_resp.rs2_entries[i].ready;
+            local_Told[i]       = maptable_read_resp.told_entries[i].phys_reg;
+        end
+
+        // Setup register remapping writes
+        for (int i = 0; i < `N; i++) begin
+            if (i < dispatch_count && fetch_valid[i] && fetch_packet.uses_rd[i]) begin
+                maptable_write_reqs[i].valid    = 1'b1;
+                maptable_write_reqs[i].addr     = fetch_packet.rd_idx[i];
+                maptable_write_reqs[i].phys_reg = allocated_phys[i];
+            end else begin
+                maptable_write_reqs[i] = '0;
+            end
+        end
+
+        // Build ROB and RS entries for dispatched instructions
+        alu_count = 0; mult_count = 0; branch_count = 0; mem_count = 0;
+
+        for (int i = 0; i < dispatch_count; i++) begin
+            if (fetch_valid[i]) begin
+                // ROB entry
+                rob_entry_packet[i] = '{
+                    valid:         1'b1,
+                    PC:            fetch_packet.PC[i],
+                    inst:          fetch_packet.inst[i],
+                    arch_rd:       fetch_packet.rd_idx[i],
+                    phys_rd:       allocated_phys[i],
+                    prev_phys_rd:  local_Told[i],
+                    complete:      1'b0,
+                    exception:     NO_ERROR,
+                    branch:        (fetch_packet.op_type[i].category == CAT_BRANCH),
+                    pred_target:   fetch_packet.pred_target[i],
+                    pred_taken:    fetch_packet.pred_taken[i],
+                    default:       '0
+                };
+
+                // Route to appropriate RS bank
+                case (fetch_packet.op_type[i].category)
+                    CAT_ALU: begin
+                        rs_alloc.alu.valid[alu_count]     = 1'b1;
+                        rs_alloc.alu.entries[alu_count]   = create_rs_entry(i);
+                        alu_count++;
+                    end
+                    CAT_MULT: begin
+                        rs_alloc.mult.valid[mult_count]   = 1'b1;
+                        rs_alloc.mult.entries[mult_count] = create_rs_entry(i);
+                        mult_count++;
+                    end
+                    CAT_BRANCH: begin
+                        rs_alloc.branch.valid[branch_count] = 1'b1;
+                        rs_alloc.branch.entries[branch_count] = create_rs_entry(i);
+                        branch_count++;
+                    end
+                    CAT_MEM: begin
+                        rs_alloc.mem.valid[mem_count]     = 1'b1;
+                        rs_alloc.mem.entries[mem_count]   = create_rs_entry(i);
+                        mem_count++;
+                    end
+                endcase
+
+                // Request physical register allocation
+                free_alloc_valid[i] = fetch_packet.uses_rd[i];
+            end
+        end
+    end
+
+endmodule
