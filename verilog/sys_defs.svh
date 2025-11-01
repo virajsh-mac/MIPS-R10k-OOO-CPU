@@ -582,6 +582,7 @@ typedef struct packed {
     logic          branch_taken;   // Resolved taken/not taken
     ADDR           pred_target;    // Predicted branch target
     logic          pred_taken;     // Predicted taken/not taken
+    logic          mispredict;     // Branch misprediction flag
     logic          halt;           // Is this a halt?
     logic          illegal;        // Is this illegal?
 } ROB_ENTRY;
