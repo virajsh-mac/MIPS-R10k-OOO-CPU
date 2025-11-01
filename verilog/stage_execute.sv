@@ -57,9 +57,12 @@ module stage_execute (
 
     // FU metadata computed on-the-fly in EX/COMP register fill (SoA approach)
 
-    // Dummy metadata for mult module (not used in SoA approach)
-    EX_COMPLETE_ENTRY mult_meta_dummy_in [`NUM_FU_MULT-1:0];
-    EX_COMPLETE_ENTRY mult_meta_dummy_out[`NUM_FU_MULT-1:0];
+    // Metadata for mult module (passed through pipeline)
+    EX_COMPLETE_ENTRY mult_meta_in[`NUM_FU_MULT-1:0];
+    EX_COMPLETE_ENTRY mult_meta_out[`NUM_FU_MULT-1:0];
+
+    // Pulse generation for mult start (mult expects start pulse, not held high)
+    logic [`NUM_FU_MULT-1:0] prev_mult_valid;
 
     // BRANCH signals
     DATA [`NUM_FU_BRANCH-1:0] branch_rs1, branch_rs2;
@@ -195,6 +198,46 @@ module stage_execute (
 
 
     // =========================================================================
+    // Mult start pulse generation
+    // =========================================================================
+
+    always_ff @(posedge clock) begin
+        if (reset | mispredict) begin
+            prev_mult_valid <= '0;
+        end else begin
+            for (int i = 0; i < `NUM_FU_MULT; i++) begin
+                prev_mult_valid[i] <= issue_entries.mult[i].valid;
+            end
+        end
+    end
+
+    always_comb begin
+        for (int i = 0; i < `NUM_FU_MULT; i++) begin
+            mult_start[i] = issue_entries.mult[i].valid & ~prev_mult_valid[i];
+        end
+    end
+
+    // =========================================================================
+    // Mult metadata input setup
+    // =========================================================================
+
+    always_comb begin
+        for (int i = 0; i < `NUM_FU_MULT; i++) begin
+            if (issue_entries.mult[i].valid) begin
+                mult_meta_in[i].rob_idx = issue_entries.mult[i].rob_idx;
+                mult_meta_in[i].branch_valid = 0;
+                mult_meta_in[i].mispredict = 0;
+                mult_meta_in[i].branch_taken = 0;
+                mult_meta_in[i].branch_target = 0;
+                mult_meta_in[i].dest_pr = issue_entries.mult[i].dest_tag;
+                mult_meta_in[i].result = 0;  // Will be set in mult module
+            end else begin
+                mult_meta_in[i] = '0;
+            end
+        end
+    end
+
+    // =========================================================================
     // ALU Functional Units (Combinational)
     // =========================================================================
 
@@ -248,10 +291,9 @@ module stage_execute (
 
     always_comb begin
         for (int i = 0; i < `NUM_FU_MULT; i++) begin
-            mult_rs1[i]   = resolved_src1.mult[i];
-            mult_rs2[i]   = resolved_src2.mult[i];
-            mult_func[i]  = issue_entries.mult[i].op_type.func;
-            mult_start[i] = issue_entries.mult[i].valid;
+            mult_rs1[i]  = resolved_src1.mult[i];
+            mult_rs2[i]  = resolved_src2.mult[i];
+            mult_func[i] = issue_entries.mult[i].op_type.func;
         end
     end
 
@@ -264,11 +306,11 @@ module stage_execute (
         .rs1(mult_rs1),
         .rs2(mult_rs2),
         .func(mult_func),
-        .meta_in(mult_meta_dummy_in),
+        .meta_in(mult_meta_in),
         .result(fu_results.mult),
         .request(mult_request),
         .done(mult_done),
-        .meta_out(mult_meta_dummy_out)
+        .meta_out(mult_meta_out)
     );
 
     // MULT outputs to CDB (only when done)
@@ -389,11 +431,15 @@ module stage_execute (
         // MULT grants
         for (int i = 0; i < `N; i++) begin
             for (int k = 0; k < `NUM_FU_MULT; k++) begin
-                if (gnt_mult[i][k]) begin
+                if (gnt_mult[i][k] && mult_done[k]) begin
                     ex_valid[i] = 1'b1;
-                    ex_comp.rob_idx[i] = mult_done[k] ? issue_entries.mult[k].rob_idx : '0;
-                    ex_comp.dest_pr[i] = issue_entries.mult[k].dest_tag;
-                    ex_comp.result[i] = fu_results.mult[k];
+                    ex_comp.rob_idx[i] = mult_meta_out[k].rob_idx;
+                    ex_comp.branch_valid[i] = mult_meta_out[k].branch_valid;
+                    ex_comp.mispredict[i] = mult_meta_out[k].mispredict;
+                    ex_comp.branch_taken[i] = mult_meta_out[k].branch_taken;
+                    ex_comp.branch_target[i] = mult_meta_out[k].branch_target;
+                    ex_comp.dest_pr[i] = mult_meta_out[k].dest_pr;
+                    ex_comp.result[i] = mult_meta_out[k].result;
                 end
             end
         end
