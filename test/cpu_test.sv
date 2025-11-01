@@ -40,55 +40,68 @@ module testbench;
     int out_fileno, cpi_fileno, wb_fileno;  // verilog uses integer file handles with $fopen and $fclose
 
     // variables used in the testbench
-    logic                   clock;
-    logic                   reset;
-    logic          [  31:0] clock_count;  // also used for terminating infinite loops
-    logic          [  31:0] instr_count;
+    logic                             clock;
+    logic                             reset;
+    logic          [            31:0] clock_count;  // also used for terminating infinite loops
+    logic          [            31:0] instr_count;
 
-    MEM_COMMAND             proc2mem_command;
-    ADDR                    proc2mem_addr;
-    MEM_BLOCK               proc2mem_data;
-    MEM_TAG                 mem2proc_transaction_tag;
-    MEM_BLOCK               mem2proc_data;
-    MEM_TAG                 mem2proc_data_tag;
-    MEM_SIZE                proc2mem_size;
+    // Disconnected: proc2mem/mem2proc portions (fake-fetch)
+    // MEM_COMMAND             proc2mem_command;
+    // ADDR                    proc2mem_addr;
+    // MEM_BLOCK               proc2mem_data;
+    // MEM_TAG                 mem2proc_transaction_tag;
+    // MEM_BLOCK               mem2proc_data;
+    // MEM_TAG                 mem2proc_data_tag;
+    // MEM_SIZE                proc2mem_size;
 
-    COMMIT_PACKET  [`N-1:0] committed_insts;
-    EXCEPTION_CODE          error_status = NO_ERROR;
+    COMMIT_PACKET  [          `N-1:0] committed_insts;
+    EXCEPTION_CODE                    error_status = NO_ERROR;
 
-    ADDR                    if_NPC_dbg;
-    DATA                    if_inst_dbg;
-    logic                   if_valid_dbg;
-    ADDR                    if_id_NPC_dbg;
-    DATA                    if_id_inst_dbg;
-    logic                   if_id_valid_dbg;
-    ADDR                    id_ex_NPC_dbg;
-    DATA                    id_ex_inst_dbg;
-    logic                   id_ex_valid_dbg;
-    ADDR                    ex_mem_NPC_dbg;
-    DATA                    ex_mem_inst_dbg;
-    logic                   ex_mem_valid_dbg;
-    ADDR                    mem_wb_NPC_dbg;
-    DATA                    mem_wb_inst_dbg;
-    logic                   mem_wb_valid_dbg;
+    ADDR                              if_NPC_dbg;
+    DATA                              if_inst_dbg;
+    logic                             if_valid_dbg;
+    ADDR                              if_id_NPC_dbg;
+    DATA                              if_id_inst_dbg;
+    logic                             if_id_valid_dbg;
+    ADDR                              id_ex_NPC_dbg;
+    DATA                              id_ex_inst_dbg;
+    logic                             id_ex_valid_dbg;
+    ADDR                              ex_mem_NPC_dbg;
+    DATA                              ex_mem_inst_dbg;
+    logic                             ex_mem_valid_dbg;
+    ADDR                              mem_wb_NPC_dbg;
+    DATA                              mem_wb_inst_dbg;
+    logic                             mem_wb_valid_dbg;
+
+    // ----------------------------------------------------------------
+    // Fake-Fetch wires (testbench <-> cpu)
+    // ----------------------------------------------------------------
+    ADDR                              fake_pc;
+    DATA                              fake_instr                                               [`N-1:0];
+    logic          [$clog2(`N+1)-1:0] fake_nvalid;
+    logic          [$clog2(`N+1)-1:0] fake_consumed;
+
+    logic                             ff_branch_taken;
+    ADDR                              ff_branch_target;
 
 
     // Instantiate the Pipeline
     cpu verisimpleV (
         // Inputs
-        .clock                   (clock),
-        .reset                   (reset),
-        .mem2proc_transaction_tag(mem2proc_transaction_tag),
-        .mem2proc_data           (mem2proc_data),
-        .mem2proc_data_tag       (mem2proc_data_tag),
+        .clock(clock),
+        .reset(reset),
+        // Disconnected: mem2proc portions (fake-fetch)
+        // .mem2proc_transaction_tag(mem2proc_transaction_tag),
+        // .mem2proc_data           (mem2proc_data),
+        // .mem2proc_data_tag       (mem2proc_data_tag),
 
-        // Outputs
-        .proc2mem_command(proc2mem_command),
-        .proc2mem_addr   (proc2mem_addr),
-        .proc2mem_data   (proc2mem_data),
-`ifndef CACHE_MODE
-        .proc2mem_size   (proc2mem_size),
-`endif
+        // Disconnected: proc2mem portions (fake-fetch)
+        // .proc2mem_command(proc2mem_command),
+        // .proc2mem_addr   (proc2mem_addr),
+        // .proc2mem_data   (proc2mem_data),
+        // `ifndef CACHE_MODE
+        // .proc2mem_size   (proc2mem_size),
+        // `endif
 
         .committed_insts(committed_insts),
 
@@ -106,25 +119,34 @@ module testbench;
         .ex_mem_valid_dbg(ex_mem_valid_dbg),
         .mem_wb_NPC_dbg  (mem_wb_NPC_dbg),
         .mem_wb_inst_dbg (mem_wb_inst_dbg),
-        .mem_wb_valid_dbg(mem_wb_valid_dbg)
+        .mem_wb_valid_dbg(mem_wb_valid_dbg),
+
+        // ---- Fake-Fetch interface ----
+        .ff_instr       (fake_instr),
+        .ff_pc          (fake_pc),
+        .ff_nvalid      (fake_nvalid),
+        .ff_consumed    (fake_consumed),
+        .branch_taken_o (ff_branch_taken),
+        .branch_target_o(ff_branch_target)
     );
 
 
-    // Instantiate the Data Memory
+    // Instruction Memory (for fake-fetch only - data operations disconnected)
     mem memory (
-        // Inputs
+        // Only connect clock for initialization
         .clock           (clock),
-        .proc2mem_command(proc2mem_command),
-        .proc2mem_addr   (proc2mem_addr),
-        .proc2mem_data   (proc2mem_data),
+        // Data operations disconnected
+        .proc2mem_command(MEM_NONE),
+        .proc2mem_addr   ('0),
+        .proc2mem_data   ('0),
 `ifndef CACHE_MODE
-        .proc2mem_size   (proc2mem_size),
+        .proc2mem_size   (DOUBLE),
 `endif
 
-        // Outputs
-        .mem2proc_transaction_tag(mem2proc_transaction_tag),
-        .mem2proc_data           (mem2proc_data),
-        .mem2proc_data_tag       (mem2proc_data_tag)
+        // Outputs not used for fake-fetch
+        .mem2proc_transaction_tag(),
+        .mem2proc_data           (),
+        .mem2proc_data_tag       ()
     );
 
 
@@ -134,9 +156,46 @@ module testbench;
         clock = ~clock;
     end
 
+    // ----------------------------------------------------------------
+    // Fake-Fetch: PC register
+    // ----------------------------------------------------------------
+    always_ff @(posedge clock) begin
+        if (reset) begin
+            fake_pc <= '0;
+        end else begin
+            if (ff_branch_taken) begin
+                fake_pc <= ff_branch_target;
+            end else begin
+                // Advance by 4*X where X = fake_consumed from CPU
+                fake_pc <= fake_pc + 32'(4 * fake_consumed);
+            end
+        end
+    end
+
+    // ----------------------------------------------------------------
+    // Read a 32b instruction from unified memory at byte address 'addr'
+    // ----------------------------------------------------------------
+    function DATA get_inst32(input ADDR addr);
+        MEM_BLOCK blk;
+        begin
+            blk = memory.unified_memory[addr[31:3]];  // 8B-aligned line
+            get_inst32 = blk.word_level[addr[2]];  // 0: low word, 1: high word
+        end
+    endfunction
+
+    // ----------------------------------------------------------------
+    // Build the N-wide bundle every cycle (sequential @ fake_pc + 4*i)
+    // ----------------------------------------------------------------
+    always_comb begin
+        for (int i = 0; i < `N; i++) begin
+            fake_instr[i] = get_inst32(fake_pc + 32'(4 * i));
+        end
+        fake_nvalid = `N;  // simple model: always provide N; CPU decides how many to take
+    end
+
 
     initial begin
-        $display("\n---- Starting CPU Testbench ----\n");
+        $display("\n---- Starting CPU Testbench (Fake-Fetch) ----\n");
 
         // set paramterized strings, see comment at start of module
         if ($value$plusargs("MEMORY=%s", program_memory_file)) begin
@@ -198,9 +257,11 @@ module testbench;
 
             clock_count = clock_count + 1;
 
-            if (clock_count % 10000 == 0) begin
-                $display("  %16t : %d cycles", $realtime, clock_count);
-            end
+            if ((clock_count % 10000) == 0) $display("  %16t : %0d cycles", $realtime, clock_count);
+
+            // Optional: peek at fake-fetch behavior
+            // $display("%0t [FF] pc=%h consumed=%0d br=%0d tgt=%h",
+            //          $time, fake_pc, fake_consumed, ff_branch_taken, ff_branch_target);
 
             // print the pipeline debug outputs via c code to the pipeline output file
             // print_cycles(clock_count - 1);
@@ -232,7 +293,7 @@ module testbench;
                 // output the final CPI
                 output_cpi_file();
 
-                $display("\n---- Finished CPU Testbench ----\n");
+                $display("\n---- Finished CPU Testbench (Fake-Fetch) ----\n");
 
                 #100 $finish;
             end

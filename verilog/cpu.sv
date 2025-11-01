@@ -14,6 +14,7 @@ module cpu (
     input clock,  // System clock
     input reset,  // System reset
 
+    // Memory interface (data only - instruction fetch is fake)
     input MEM_TAG   mem2proc_transaction_tag,  // Memory tag for current transaction
     input MEM_BLOCK mem2proc_data,             // Data coming back from memory
     input MEM_TAG   mem2proc_data_tag,         // Tag for which transaction data is for
@@ -23,8 +24,16 @@ module cpu (
     output MEM_BLOCK   proc2mem_data,     // Data sent to memory
     output MEM_SIZE    proc2mem_size,     // Data size sent to memory
 
-    // Note: these are assigned at the very bottom of the module
+    // Retire interface
     output COMMIT_PACKET [`N-1:0] committed_insts,
+
+    // Fake-fetch interface
+    input  DATA  [          `N-1:0] ff_instr,        // Instruction bundle from testbench
+    input  ADDR                     ff_pc,           // Current PC from testbench
+    input  logic [$clog2(`N+1)-1:0] ff_nvalid,       // Number of valid instructions from testbench
+    output logic [$clog2(`N+1)-1:0] ff_consumed,     // Number consumed by CPU
+    output logic                    branch_taken_o,  // Branch taken signal to testbench
+    output ADDR                     branch_target_o, // Branch target to testbench
 
     // Debug outputs: these signals are solely used for debugging in testbenches
     // Do not change for project 3
@@ -538,4 +547,9 @@ module cpu (
     // Output the committed instruction to the testbench for counting
     assign committed_insts[0] = wb_packet;
 
-endmodule  // pipeline
+    // Fake-fetch outputs (placeholder implementations)
+    assign ff_consumed = '0;     // TODO: implement based on dispatch count
+    assign branch_taken_o = 1'b0;  // TODO: implement branch resolution
+    assign branch_target_o = '0;   // TODO: implement branch target
+
+endmodule  // cpu
