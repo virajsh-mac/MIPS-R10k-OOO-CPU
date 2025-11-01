@@ -440,6 +440,7 @@ typedef struct packed {
     DATA [`N-1:0]    values;          // Values to store (if applicable)
     logic [`N-1:0]   branch_taken;    // Resolved taken/not taken (if branch)
     ADDR [`N-1:0]    branch_targets;  // Resolved branch targets (if branch)
+    logic [`N-1:0]   mispredicts;     // Mispredict flags
 } ROB_UPDATE_PACKET;
 
 // RS entry structure (extended for full control signals)

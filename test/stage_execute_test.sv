@@ -19,6 +19,11 @@ module testbench;
     PRF_READ_TAGS prf_read_tag_src1, prf_read_tag_src2;
     logic [`NUM_FU_MULT-1:0] mult_request;
     CDB_FU_OUTPUTS fu_outputs;
+    logic [`N-1:0] ex_valid;
+    EX_COMPLETE_ENTRY ex_comp[`N-1:0];
+
+    // Inputs to stage_execute (new)
+    logic [`N-1:0][`NUM_FU_TOTAL-1:0] gnt_bus;
 
     stage_execute dut (
         .clock(clock),
@@ -33,22 +38,25 @@ module testbench;
         .prf_read_data_src1(prf_read_data_src1),
         .prf_read_data_src2(prf_read_data_src2),
         .mult_request(mult_request),
-        .fu_outputs(fu_outputs)
+        .fu_outputs(fu_outputs),
+        .ex_valid(ex_valid),
+        .ex_comp(ex_comp),
+        .gnt_bus(gnt_bus)
     );
 
-    // Monitor changes in key outputs
-    always @(fu_outputs) begin
-        if (fu_outputs.alu[0].valid || fu_outputs.alu[1].valid || fu_outputs.alu[2].valid ||
-            fu_outputs.mult[0].valid || fu_outputs.branch[0].valid || fu_outputs.mem[0].valid) begin
-            $display(
-                "[@%0t] FU_OUTPUTS CHANGED: alu[0].valid=%b (tag=%0d, data=%h), alu[1].valid=%b (tag=%0d, data=%h), alu[2].valid=%b (tag=%0d, data=%h), mult[0].valid=%b (tag=%0d, data=%h), branch[0].valid=%b (tag=%0d, data=%h), mem[0].valid=%b (tag=%0d, data=%h)",
-                $time, fu_outputs.alu[0].valid, fu_outputs.alu[0].tag, fu_outputs.alu[0].data, fu_outputs.alu[1].valid,
-                fu_outputs.alu[1].tag, fu_outputs.alu[1].data, fu_outputs.alu[2].valid, fu_outputs.alu[2].tag,
-                fu_outputs.alu[2].data, fu_outputs.mult[0].valid, fu_outputs.mult[0].tag, fu_outputs.mult[0].data,
-                fu_outputs.branch[0].valid, fu_outputs.branch[0].tag, fu_outputs.branch[0].data, fu_outputs.mem[0].valid,
-                fu_outputs.mem[0].tag, fu_outputs.mem[0].data);
-        end
-    end
+    // // Monitor changes in key outputs
+    // always @(fu_outputs) begin
+    //     if (fu_outputs.alu[0].valid || fu_outputs.alu[1].valid || fu_outputs.alu[2].valid ||
+    //         fu_outputs.mult[0].valid || fu_outputs.branch[0].valid || fu_outputs.mem[0].valid) begin
+    //         $display(
+    //             "[@%0t] FU_OUTPUTS CHANGED: alu[0].valid=%b (tag=%0d, data=%h), alu[1].valid=%b (tag=%0d, data=%h), alu[2].valid=%b (tag=%0d, data=%h), mult[0].valid=%b (tag=%0d, data=%h), branch[0].valid=%b (tag=%0d, data=%h), mem[0].valid=%b (tag=%0d, data=%h)",
+    //             $time, fu_outputs.alu[0].valid, fu_outputs.alu[0].tag, fu_outputs.alu[0].data, fu_outputs.alu[1].valid,
+    //             fu_outputs.alu[1].tag, fu_outputs.alu[1].data, fu_outputs.alu[2].valid, fu_outputs.alu[2].tag,
+    //             fu_outputs.alu[2].data, fu_outputs.mult[0].valid, fu_outputs.mult[0].tag, fu_outputs.mult[0].data,
+    //             fu_outputs.branch[0].valid, fu_outputs.branch[0].tag, fu_outputs.branch[0].data, fu_outputs.mem[0].valid,
+    //             fu_outputs.mem[0].tag, fu_outputs.mem[0].data);
+    //     end
+    // end
 
     always begin
         #50 clock = ~clock;  // 100ns period
@@ -203,6 +211,7 @@ module testbench;
         issue_entries = empty_issue_entries();
         init_prf_data();
         init_cdb_data();
+        gnt_bus = '0;
         mispredict = 0;
         @(negedge clock);
         @(negedge clock);
@@ -220,6 +229,7 @@ module testbench;
         issue_entries = empty_issue_entries();
         init_prf_data();
         init_cdb_data();
+        gnt_bus = '0;
         mispredict = 0;
 
         reset_dut();
