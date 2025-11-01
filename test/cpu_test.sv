@@ -36,101 +36,101 @@ module testbench;
     // this testbench will generate 4 output files based on the output
     // named OUTPUT.{out cpi, wb, ppln} for the memory, cpi, writeback, and pipeline outputs.
     string program_memory_file, output_name;
-    string out_outfile, cpi_outfile, writeback_outfile;//, pipeline_outfile;
-    int out_fileno, cpi_fileno, wb_fileno; // verilog uses integer file handles with $fopen and $fclose
+    string out_outfile, cpi_outfile, writeback_outfile;  //, pipeline_outfile;
+    int out_fileno, cpi_fileno, wb_fileno;  // verilog uses integer file handles with $fopen and $fclose
 
     // variables used in the testbench
-    logic        clock;
-    logic        reset;
-    logic [31:0] clock_count; // also used for terminating infinite loops
-    logic [31:0] instr_count;
+    logic                   clock;
+    logic                   reset;
+    logic          [  31:0] clock_count;  // also used for terminating infinite loops
+    logic          [  31:0] instr_count;
 
-    MEM_COMMAND proc2mem_command;
-    ADDR        proc2mem_addr;
-    MEM_BLOCK   proc2mem_data;
-    MEM_TAG     mem2proc_transaction_tag;
-    MEM_BLOCK   mem2proc_data;
-    MEM_TAG     mem2proc_data_tag;
-    MEM_SIZE    proc2mem_size;
+    MEM_COMMAND             proc2mem_command;
+    ADDR                    proc2mem_addr;
+    MEM_BLOCK               proc2mem_data;
+    MEM_TAG                 mem2proc_transaction_tag;
+    MEM_BLOCK               mem2proc_data;
+    MEM_TAG                 mem2proc_data_tag;
+    MEM_SIZE                proc2mem_size;
 
-    COMMIT_PACKET [`N-1:0] committed_insts;
-    EXCEPTION_CODE error_status = NO_ERROR;
+    COMMIT_PACKET  [`N-1:0] committed_insts;
+    EXCEPTION_CODE          error_status = NO_ERROR;
 
-    ADDR  if_NPC_dbg;
-    DATA  if_inst_dbg;
-    logic if_valid_dbg;
-    ADDR  if_id_NPC_dbg;
-    DATA  if_id_inst_dbg;
-    logic if_id_valid_dbg;
-    ADDR  id_ex_NPC_dbg;
-    DATA  id_ex_inst_dbg;
-    logic id_ex_valid_dbg;
-    ADDR  ex_mem_NPC_dbg;
-    DATA  ex_mem_inst_dbg;
-    logic ex_mem_valid_dbg;
-    ADDR  mem_wb_NPC_dbg;
-    DATA  mem_wb_inst_dbg;
-    logic mem_wb_valid_dbg;
+    ADDR                    if_NPC_dbg;
+    DATA                    if_inst_dbg;
+    logic                   if_valid_dbg;
+    ADDR                    if_id_NPC_dbg;
+    DATA                    if_id_inst_dbg;
+    logic                   if_id_valid_dbg;
+    ADDR                    id_ex_NPC_dbg;
+    DATA                    id_ex_inst_dbg;
+    logic                   id_ex_valid_dbg;
+    ADDR                    ex_mem_NPC_dbg;
+    DATA                    ex_mem_inst_dbg;
+    logic                   ex_mem_valid_dbg;
+    ADDR                    mem_wb_NPC_dbg;
+    DATA                    mem_wb_inst_dbg;
+    logic                   mem_wb_valid_dbg;
 
 
     // Instantiate the Pipeline
     cpu verisimpleV (
         // Inputs
-        .clock (clock),
-        .reset (reset),
-        .mem2proc_transaction_tag (mem2proc_transaction_tag),
-        .mem2proc_data            (mem2proc_data),
-        .mem2proc_data_tag        (mem2proc_data_tag),
+        .clock                   (clock),
+        .reset                   (reset),
+        .mem2proc_transaction_tag(mem2proc_transaction_tag),
+        .mem2proc_data           (mem2proc_data),
+        .mem2proc_data_tag       (mem2proc_data_tag),
 
         // Outputs
-        .proc2mem_command (proc2mem_command),
-        .proc2mem_addr    (proc2mem_addr),
-        .proc2mem_data    (proc2mem_data),
+        .proc2mem_command(proc2mem_command),
+        .proc2mem_addr   (proc2mem_addr),
+        .proc2mem_data   (proc2mem_data),
 `ifndef CACHE_MODE
-        .proc2mem_size    (proc2mem_size),
+        .proc2mem_size   (proc2mem_size),
 `endif
 
-        .committed_insts (committed_insts),
+        .committed_insts(committed_insts),
 
-        .if_NPC_dbg       (if_NPC_dbg),
-        .if_inst_dbg      (if_inst_dbg),
-        .if_valid_dbg     (if_valid_dbg),
-        .if_id_NPC_dbg    (if_id_NPC_dbg),
-        .if_id_inst_dbg   (if_id_inst_dbg),
-        .if_id_valid_dbg  (if_id_valid_dbg),
-        .id_ex_NPC_dbg    (id_ex_NPC_dbg),
-        .id_ex_inst_dbg   (id_ex_inst_dbg),
-        .id_ex_valid_dbg  (id_ex_valid_dbg),
-        .ex_mem_NPC_dbg   (ex_mem_NPC_dbg),
-        .ex_mem_inst_dbg  (ex_mem_inst_dbg),
-        .ex_mem_valid_dbg (ex_mem_valid_dbg),
-        .mem_wb_NPC_dbg   (mem_wb_NPC_dbg),
-        .mem_wb_inst_dbg  (mem_wb_inst_dbg),
-        .mem_wb_valid_dbg (mem_wb_valid_dbg)
+        .if_NPC_dbg      (if_NPC_dbg),
+        .if_inst_dbg     (if_inst_dbg),
+        .if_valid_dbg    (if_valid_dbg),
+        .if_id_NPC_dbg   (if_id_NPC_dbg),
+        .if_id_inst_dbg  (if_id_inst_dbg),
+        .if_id_valid_dbg (if_id_valid_dbg),
+        .id_ex_NPC_dbg   (id_ex_NPC_dbg),
+        .id_ex_inst_dbg  (id_ex_inst_dbg),
+        .id_ex_valid_dbg (id_ex_valid_dbg),
+        .ex_mem_NPC_dbg  (ex_mem_NPC_dbg),
+        .ex_mem_inst_dbg (ex_mem_inst_dbg),
+        .ex_mem_valid_dbg(ex_mem_valid_dbg),
+        .mem_wb_NPC_dbg  (mem_wb_NPC_dbg),
+        .mem_wb_inst_dbg (mem_wb_inst_dbg),
+        .mem_wb_valid_dbg(mem_wb_valid_dbg)
     );
 
 
     // Instantiate the Data Memory
     mem memory (
         // Inputs
-        .clock            (clock),
-        .proc2mem_command (proc2mem_command),
-        .proc2mem_addr    (proc2mem_addr),
-        .proc2mem_data    (proc2mem_data),
+        .clock           (clock),
+        .proc2mem_command(proc2mem_command),
+        .proc2mem_addr   (proc2mem_addr),
+        .proc2mem_data   (proc2mem_data),
 `ifndef CACHE_MODE
-        .proc2mem_size    (proc2mem_size),
+        .proc2mem_size   (proc2mem_size),
 `endif
 
         // Outputs
-        .mem2proc_transaction_tag (mem2proc_transaction_tag),
-        .mem2proc_data            (mem2proc_data),
-        .mem2proc_data_tag        (mem2proc_data_tag)
+        .mem2proc_transaction_tag(mem2proc_transaction_tag),
+        .mem2proc_data           (mem2proc_data),
+        .mem2proc_data_tag       (mem2proc_data_tag)
     );
 
 
     // Generate System Clock
     always begin
-        #(`CLOCK_PERIOD/2.0);
+        #(`CLOCK_PERIOD / 2.0);
         clock = ~clock;
     end
 
@@ -147,9 +147,9 @@ module testbench;
         end
         if ($value$plusargs("OUTPUT=%s", output_name)) begin
             $display("Using output files : %s.{out, cpi, wb, ppln}", output_name);
-            out_outfile       = {output_name,".out"}; // this is how you concatenate strings in verilog
-            cpi_outfile       = {output_name,".cpi"};
-            writeback_outfile = {output_name,".wb"};
+            out_outfile       = {output_name, ".out"};  // this is how you concatenate strings in verilog
+            cpi_outfile       = {output_name, ".cpi"};
+            writeback_outfile = {output_name, ".wb"};
             //pipeline_outfile  = {output_name,".ppln"};
         end else begin
             $display("\nDid not receive '+OUTPUT=' argument. Exiting.\n");
@@ -171,7 +171,7 @@ module testbench;
 
         @(posedge clock);
         @(posedge clock);
-        #1; // This reset is at an odd time to avoid the pos & neg clock edges
+        #1;  // This reset is at an odd time to avoid the pos & neg clock edges
         $display("  %16t : Deasserting Reset", $realtime);
         reset = 1'b0;
 
@@ -194,7 +194,7 @@ module testbench;
             clock_count = 0;
             instr_count = 0;
         end else begin
-            #2; // wait a short time to avoid a clock edge
+            #2;  // wait a short time to avoid a clock edge
 
             clock_count = clock_count + 1;
 
@@ -236,7 +236,7 @@ module testbench;
 
                 #100 $finish;
             end
-        end // if(reset)
+        end  // if(reset)
     end
 
 
@@ -257,10 +257,7 @@ module testbench;
                 if (committed_insts[n].reg_idx == `ZERO_REG) begin
                     $fdisplay(wb_fileno, "PC %4x:%-8s| ---", pc, decode_inst(inst));
                 end else begin
-                    $fdisplay(wb_fileno, "PC %4x:%-8s| r%02d=%-8x",
-                              pc,
-                              decode_inst(inst),
-                              committed_insts[n].reg_idx,
+                    $fdisplay(wb_fileno, "PC %4x:%-8s| r%02d=%-8x", pc, decode_inst(inst), committed_insts[n].reg_idx,
                               committed_insts[n].data);
                 end
 
@@ -268,28 +265,26 @@ module testbench;
                 if (committed_insts[n].illegal) begin
                     error_status = ILLEGAL_INST;
                     break;
-                end else if(committed_insts[n].halt) begin
+                end else if (committed_insts[n].halt) begin
                     error_status = HALTED_ON_WFI;
                     break;
                 end
-            end // if valid
+            end  // if valid
         end
-    endtask // task output_reg_writeback_and_maybe_halt
+    endtask  // task output_reg_writeback_and_maybe_halt
 
 
     // Task to output the final CPI and # of elapsed clock edges
     task output_cpi_file;
         real cpi;
         begin
-            cpi = $itor(clock_count) / instr_count; // must convert int to real
+            cpi = $itor(clock_count) / instr_count;  // must convert int to real
             cpi_fileno = $fopen(cpi_outfile);
-            $fdisplay(cpi_fileno, "@@@  %0d cycles / %0d instrs = %f CPI",
-                      clock_count, instr_count, cpi);
-            $fdisplay(cpi_fileno, "@@@  %4.2f ns total time to execute",
-                      clock_count * `CLOCK_PERIOD);
+            $fdisplay(cpi_fileno, "@@@  %0d cycles / %0d instrs = %f CPI", clock_count, instr_count, cpi);
+            $fdisplay(cpi_fileno, "@@@  %4.2f ns total time to execute", clock_count * `CLOCK_PERIOD);
             $fclose(cpi_fileno);
         end
-    endtask // task output_cpi_file
+    endtask  // task output_cpi_file
 
 
     // Show contents of Unified Memory in both hex and decimal
@@ -302,10 +297,9 @@ module testbench;
             $fdisplay(out_fileno, "@@@ Unified Memory contents hex on left, decimal on right: ");
             $fdisplay(out_fileno, "@@@");
             showing_data = 0;
-            for (int k = 0; k <= `MEM_64BIT_LINES - 1; k = k+1) begin
+            for (int k = 0; k <= `MEM_64BIT_LINES - 1; k = k + 1) begin
                 if (memory.unified_memory[k] != 0) begin
-                    $fdisplay(out_fileno, "@@@ mem[%5d] = %x : %0d", k*8, memory.unified_memory[k],
-                                                             memory.unified_memory[k]);
+                    $fdisplay(out_fileno, "@@@ mem[%5d] = %x : %0d", k * 8, memory.unified_memory[k], memory.unified_memory[k]);
                     showing_data = 1;
                 end else if (showing_data != 0) begin
                     $fdisplay(out_fileno, "@@@");
@@ -323,7 +317,7 @@ module testbench;
             $fdisplay(out_fileno, "@@@");
             $fclose(out_fileno);
         end
-    endtask // task show_final_mem_and_status
+    endtask  // task show_final_mem_and_status
 
 
 
@@ -336,4 +330,4 @@ module testbench;
     endtask
 
 
-endmodule // module testbench
+endmodule  // module testbench
