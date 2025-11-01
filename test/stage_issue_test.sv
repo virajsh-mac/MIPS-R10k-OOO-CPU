@@ -52,20 +52,18 @@ module testbench;
         empty_entry.op_type = OP_ALU_ADD;
         empty_entry.src1_tag = 0;
         empty_entry.src1_ready = 0;
-        empty_entry.src1_value = 0;
         empty_entry.src2_tag = 0;
         empty_entry.src2_ready = 0;
-        empty_entry.src2_value = 0;
+        empty_entry.src2_immediate = 0;
         empty_entry.dest_tag = 0;
         empty_entry.rob_idx = 0;
-        empty_entry.rob_wrap = 0;
         empty_entry.PC = 0;
         empty_entry.pred_taken = 0;
         empty_entry.pred_target = 0;
     endfunction
 
     // Helper function to create a ready ALU entry
-    function RS_ENTRY ready_alu_entry(input int rob_idx_val, input int rob_wrap_val = 0);
+    function RS_ENTRY ready_alu_entry(input int rob_idx_val);
         ready_alu_entry = empty_entry();
         ready_alu_entry.valid = 1;
         ready_alu_entry.op_type.category = CAT_ALU;
@@ -73,11 +71,10 @@ module testbench;
         ready_alu_entry.src1_ready = 1;
         ready_alu_entry.src2_ready = 1;
         ready_alu_entry.rob_idx = rob_idx_val;
-        ready_alu_entry.rob_wrap = rob_wrap_val;
     endfunction
 
     // Helper function to create a ready MULT entry
-    function RS_ENTRY ready_mult_entry(input int rob_idx_val, input int rob_wrap_val = 0);
+    function RS_ENTRY ready_mult_entry(input int rob_idx_val);
         ready_mult_entry = empty_entry();
         ready_mult_entry.valid = 1;
         ready_mult_entry.op_type.category = CAT_MULT;
@@ -85,11 +82,10 @@ module testbench;
         ready_mult_entry.src1_ready = 1;
         ready_mult_entry.src2_ready = 1;
         ready_mult_entry.rob_idx = rob_idx_val;
-        ready_mult_entry.rob_wrap = rob_wrap_val;
     endfunction
 
     // Helper function to create a ready BRANCH entry
-    function RS_ENTRY ready_branch_entry(input int rob_idx_val, input int rob_wrap_val = 0);
+    function RS_ENTRY ready_branch_entry(input int rob_idx_val);
         ready_branch_entry = empty_entry();
         ready_branch_entry.valid = 1;
         ready_branch_entry.op_type.category = CAT_BRANCH;
@@ -97,11 +93,10 @@ module testbench;
         ready_branch_entry.src1_ready = 1;
         ready_branch_entry.src2_ready = 1;
         ready_branch_entry.rob_idx = rob_idx_val;
-        ready_branch_entry.rob_wrap = rob_wrap_val;
     endfunction
 
     // Helper function to create a ready MEM entry
-    function RS_ENTRY ready_mem_entry(input int rob_idx_val, input int rob_wrap_val = 0);
+    function RS_ENTRY ready_mem_entry(input int rob_idx_val);
         ready_mem_entry = empty_entry();
         ready_mem_entry.valid = 1;
         ready_mem_entry.op_type.category = CAT_MEM;
@@ -109,7 +104,6 @@ module testbench;
         ready_mem_entry.src1_ready = 1;
         ready_mem_entry.src2_ready = 1;
         ready_mem_entry.rob_idx = rob_idx_val;
-        ready_mem_entry.rob_wrap = rob_wrap_val;
     endfunction
 
     // Helper function to create a not-ready entry
