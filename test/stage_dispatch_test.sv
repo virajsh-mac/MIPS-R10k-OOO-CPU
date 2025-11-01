@@ -32,6 +32,11 @@ module testbench;
     // For map table responses (we'll drive these)
     MAP_TABLE_READ_RESPONSE                                                      maptable_read_resp;
 
+    // Test helper variables
+    logic                                                                        expected_count;
+    logic                                                                        expected_rob_valid;
+    logic                                                                        expected_free_valid;
+
     stage_dispatch dut (
         .clock(clock),
         .reset(reset),
@@ -317,6 +322,245 @@ module testbench;
             end else begin
                 $display("  FAIL: Should have no outputs with no valid instructions (count=%0d, rob_valid=%b, free_valid=%b)",
                          dispatch_count, rob_entry_packet[0].valid, free_alloc_valid[0]);
+                failed = 1;
+            end
+        end
+
+        // Test 8: Mixed valid/invalid instruction bundle
+        $display("\nTest %0d: Mixed valid/invalid instructions", test_num++);
+        reset_dut();
+        free_slots_rob = `ROB_SZ;  // Reset to default
+        free_slots_freelst = 32;  // Reset to default
+        begin
+            fetch_packet = empty_fetch_packet();
+            set_alu_inst(fetch_packet, 0, 1, 2, 3);  // Valid ALU
+            set_mult_inst(fetch_packet, 1, 4, 5, 6);  // Valid MULT
+            // Index 2: Invalid (default empty)
+            fetch_valid = 3'b011;  // Only first two valid
+
+            @(negedge clock);
+
+            if (dispatch_count == 2 && rs_alloc.alu.valid[0] && rs_alloc.mult.valid[0] &&
+                !rs_alloc.alu.valid[1] && !rs_alloc.mult.valid[1]) begin
+                $display("  PASS: Only valid instructions dispatched, invalid ones ignored");
+            end else begin
+                $display("  FAIL: Mixed valid/invalid dispatch incorrect (count=%0d, alu0=%b, mult0=%b, alu1=%b, mult1=%b)",
+                         dispatch_count, rs_alloc.alu.valid[0], rs_alloc.mult.valid[0], rs_alloc.alu.valid[1],
+                         rs_alloc.mult.valid[1]);
+                failed = 1;
+            end
+        end
+
+        // Test 9: Partial dispatch due to freelist constraints
+        $display("\nTest %0d: Partial dispatch due to freelist", test_num++);
+        reset_dut();
+        free_slots_rob = `ROB_SZ;  // Reset to default
+        begin
+            fetch_packet = empty_fetch_packet();
+            set_alu_inst(fetch_packet, 0, 1, 2, 3);  // Needs dest reg
+            set_alu_inst(fetch_packet, 1, 4, 5, 6);  // Needs dest reg
+            set_alu_inst(fetch_packet, 2, 7, 8, 9);  // Needs dest reg
+            fetch_valid = 3'b111;
+            free_slots_freelst = 2;  // Only enough for 2 instructions
+
+            @(negedge clock);
+
+            if (dispatch_count == 2 && free_alloc_valid[0] && free_alloc_valid[1] && !free_alloc_valid[2]) begin
+                $display("  PASS: Partial dispatch when freelist constrained");
+            end else begin
+                $display("  FAIL: Freelist constraint handling incorrect (count=%0d, free_valid=%b%b%b)", dispatch_count,
+                         free_alloc_valid[0], free_alloc_valid[1], free_alloc_valid[2]);
+                failed = 1;
+            end
+        end
+
+        // Test 10: Partial dispatch due to ROB constraints
+        $display("\nTest %0d: Partial dispatch due to ROB", test_num++);
+        reset_dut();
+        free_slots_freelst = 32;  // Reset to default
+        begin
+            fetch_packet = empty_fetch_packet();
+            set_alu_inst(fetch_packet, 0, 1, 2, 3);
+            set_alu_inst(fetch_packet, 1, 4, 5, 6);
+            set_alu_inst(fetch_packet, 2, 7, 8, 9);
+            fetch_valid = 3'b111;
+            free_slots_rob = 1;  // Only enough for 1 instruction
+
+            @(negedge clock);
+
+            if (dispatch_count == 1 && rob_entry_packet[0].valid && !rob_entry_packet[1].valid && !rob_entry_packet[2].valid) begin
+                $display("  PASS: Partial dispatch when ROB constrained");
+            end else begin
+                $display("  FAIL: ROB constraint handling incorrect (count=%0d, rob_valid=%b%b%b)", dispatch_count,
+                         rob_entry_packet[0].valid, rob_entry_packet[1].valid, rob_entry_packet[2].valid);
+                failed = 1;
+            end
+        end
+
+        // Test 11: Mixed instructions with/without destination registers
+        $display("\nTest %0d: Mixed dest/no-dest instructions", test_num++);
+        reset_dut();
+        free_slots_rob = `ROB_SZ;  // Reset to default
+        free_slots_freelst = 32;  // Reset to default
+        begin
+            fetch_packet = empty_fetch_packet();
+            set_alu_inst(fetch_packet, 0, 1, 2, 3);  // Has dest reg
+            set_branch_inst(fetch_packet, 1, 4, 5);  // No dest reg
+            set_alu_inst(fetch_packet, 2, 6, 7, 8);  // Has dest reg
+            fetch_valid = 3'b111;
+
+            @(negedge clock);
+
+            if (dispatch_count == 3 && free_alloc_valid[0] && !free_alloc_valid[1] && free_alloc_valid[2]) begin
+                $display("  PASS: Freelist allocation only for instructions with dest regs");
+            end else begin
+                $display("  FAIL: Dest reg allocation incorrect (count=%0d, free_valid=%b%b%b)", dispatch_count,
+                         free_alloc_valid[0], free_alloc_valid[1], free_alloc_valid[2]);
+                failed = 1;
+            end
+        end
+
+        // Test 12: Map table writes only for dispatched instructions with dest regs
+        $display("\nTest %0d: Map table writes for partial dispatch", test_num++);
+        reset_dut();
+        free_slots_rob = `ROB_SZ;  // Reset to default
+        free_slots_freelst = 1;  // Only enough for 1 instruction
+        begin
+            fetch_packet = empty_fetch_packet();
+            set_alu_inst(fetch_packet, 0, 1, 2, 10);  // Has dest reg -> should dispatch and write map
+            set_alu_inst(fetch_packet, 1, 4, 5, 11);  // Has dest reg -> should not dispatch due to freelist
+            set_branch_inst(fetch_packet, 2, 6, 7);  // No dest reg -> should dispatch but not write map
+            fetch_valid = 3'b111;
+
+            @(negedge clock);
+
+            if (maptable_write_reqs[0].valid && maptable_write_reqs[0].addr == 10 &&
+                !maptable_write_reqs[1].valid && !maptable_write_reqs[2].valid) begin
+                $display("  PASS: Map table writes only for dispatched instructions with dest regs");
+            end else begin
+                $display("  FAIL: Map table write logic incorrect (write0=%b addr0=%0d, write1=%b, write2=%b)",
+                         maptable_write_reqs[0].valid, maptable_write_reqs[0].addr, maptable_write_reqs[1].valid,
+                         maptable_write_reqs[2].valid);
+                failed = 1;
+            end
+        end
+
+        // Test 13: RS allocation counters work correctly
+        $display("\nTest %0d: RS allocation counters", test_num++);
+        reset_dut();
+        free_slots_rob = `ROB_SZ;  // Reset to default
+        free_slots_freelst = 32;  // Reset to default
+        begin
+            fetch_packet = empty_fetch_packet();
+            set_alu_inst(fetch_packet, 0, 1, 2, 3);  // ALU -> index 0
+            set_mult_inst(fetch_packet, 1, 4, 5, 6);  // MULT -> index 0
+            set_alu_inst(fetch_packet, 2, 7, 8, 9);  // ALU -> index 1
+            fetch_valid = 3'b111;
+
+            @(negedge clock);
+
+            if (rs_alloc.alu.valid[0] && rs_alloc.alu.valid[1] && !rs_alloc.alu.valid[2] &&
+                rs_alloc.mult.valid[0] && !rs_alloc.mult.valid[1]) begin
+                $display("  PASS: RS allocation counters increment correctly");
+            end else begin
+                $display("  FAIL: RS counters incorrect (alu_valid=%b%b%b, mult_valid=%b%b)", rs_alloc.alu.valid[0],
+                         rs_alloc.alu.valid[1], rs_alloc.alu.valid[2], rs_alloc.mult.valid[0], rs_alloc.mult.valid[1]);
+                failed = 1;
+            end
+        end
+
+        // Test 14: Boundary condition - exactly enough resources
+        $display("\nTest %0d: Boundary condition - exact resources", test_num++);
+        reset_dut();
+        begin
+            fetch_packet = empty_fetch_packet();
+            set_alu_inst(fetch_packet, 0, 1, 2, 3);
+            set_alu_inst(fetch_packet, 1, 4, 5, 6);
+            fetch_valid        = 2'b11;
+            free_slots_rob     = 2;  // Exactly enough ROB slots
+            free_slots_freelst = 2;  // Exactly enough freelist slots
+
+            @(negedge clock);
+
+            if (dispatch_count == 2 && rob_entry_packet[0].valid && rob_entry_packet[1].valid &&
+                free_alloc_valid[0] && free_alloc_valid[1]) begin
+                $display("  PASS: Dispatches all when resources exactly match");
+            end else begin
+                $display("  FAIL: Boundary condition failed (count=%0d, rob_valid=%b%b, free_valid=%b%b)", dispatch_count,
+                         rob_entry_packet[0].valid, rob_entry_packet[1].valid, free_alloc_valid[0], free_alloc_valid[1]);
+                failed = 1;
+            end
+        end
+
+        // Test 15: All instruction categories in one bundle (limited by N=3)
+        $display("\nTest %0d: All instruction categories", test_num++);
+        reset_dut();
+        free_slots_rob = `ROB_SZ;  // Reset to default
+        free_slots_freelst = 32;  // Reset to default
+        begin
+            fetch_packet = empty_fetch_packet();
+            set_alu_inst(fetch_packet, 0, 1, 2, 3);  // ALU
+            set_mult_inst(fetch_packet, 1, 4, 5, 6);  // MULT
+            set_branch_inst(fetch_packet, 2, 7, 8);  // BRANCH
+            fetch_valid = 3'b111;  // Only 3 instructions since N=3
+
+            @(negedge clock);
+
+            if (dispatch_count == 3 && rs_alloc.alu.valid[0] && rs_alloc.mult.valid[0] && rs_alloc.branch.valid[0]) begin
+                $display("  PASS: All instruction categories dispatched correctly");
+            end else begin
+                $display("  FAIL: Category dispatch failed (count=%0d, alu=%b, mult=%b, branch=%b)", dispatch_count,
+                         rs_alloc.alu.valid[0], rs_alloc.mult.valid[0], rs_alloc.branch.valid[0]);
+                failed = 1;
+            end
+        end
+
+        // Test 16: Instruction ordering in dispatch
+        $display("\nTest %0d: Instruction ordering in dispatch", test_num++);
+        reset_dut();
+        free_slots_rob = `ROB_SZ;  // Reset to default
+        free_slots_freelst = 32;  // Reset to default
+        begin
+            fetch_packet = empty_fetch_packet();
+            set_alu_inst(fetch_packet, 0, 1, 2, 10);  // rd=10
+            set_alu_inst(fetch_packet, 1, 3, 4, 11);  // rd=11
+            set_branch_inst(fetch_packet, 2, 5, 6);  // no rd
+            fetch_valid = 3'b111;
+
+            @(negedge clock);
+
+            // Should dispatch all 3, with map table writes for first two only
+            if (dispatch_count == 3 &&
+                maptable_write_reqs[0].valid && maptable_write_reqs[0].addr == 10 &&
+                maptable_write_reqs[1].valid && maptable_write_reqs[1].addr == 11 &&
+                !maptable_write_reqs[2].valid) begin
+                $display("  PASS: Instructions dispatched in order with correct map table writes");
+            end else begin
+                $display("  FAIL: Ordering issue (count=%0d, mt0=%b addr0=%0d, mt1=%b addr1=%0d, mt2=%b)", dispatch_count,
+                         maptable_write_reqs[0].valid, maptable_write_reqs[0].addr, maptable_write_reqs[1].valid,
+                         maptable_write_reqs[1].addr, maptable_write_reqs[2].valid);
+                failed = 1;
+            end
+        end
+
+        // Test 17: Map table read requests always generated
+        $display("\nTest %0d: Map table read requests", test_num++);
+        reset_dut();
+        free_slots_rob = `ROB_SZ;  // Reset to default
+        free_slots_freelst = 32;  // Reset to default
+        begin
+            fetch_packet = empty_fetch_packet();
+            set_alu_inst(fetch_packet, 0, 1, 2, 3);
+            fetch_valid[0] = 1'b1;
+
+            @(negedge clock);
+
+            if (maptable_read_req.rs1_addrs[0] == 1 && maptable_read_req.rs2_addrs[0] == 2 &&
+                maptable_read_req.told_addrs[0] == 3) begin
+                $display("  PASS: Map table read requests generated correctly");
+            end else begin
+                $display("  FAIL: Map table read requests incorrect (rs1=%0d, rs2=%0d, told=%0d)",
+                         maptable_read_req.rs1_addrs[0], maptable_read_req.rs2_addrs[0], maptable_read_req.told_addrs[0]);
                 failed = 1;
             end
         end
