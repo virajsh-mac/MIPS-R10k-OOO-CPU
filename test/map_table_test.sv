@@ -28,12 +28,12 @@ module testbench;
     REG_IDX [`N-1:0] arch_read_addrs;
 
     // Mispredict recovery I/O for arch_map_table
-    ARCH_MAP_ENTRY [`ARCH_REG_SZ-1:0] arch_table_restore;
+    MAP_ENTRY [`ARCH_REG_SZ-1:0] arch_table_restore;
     logic arch_table_restore_en;
 
     // Outputs from arch_map_table
-    ARCH_MAP_ENTRY [`N-1:0] arch_read_entries;
-    ARCH_MAP_ENTRY [`ARCH_REG_SZ-1:0] arch_table_snapshot;
+    MAP_ENTRY [`N-1:0] arch_read_entries;
+    MAP_ENTRY [`ARCH_REG_SZ-1:0] arch_table_snapshot;
 
     map_table dut (
         .clock(clock),
@@ -128,7 +128,7 @@ module testbench;
 
     // Helper to check if an arch read entry matches expected values
     function logic check_arch_entry(input int port, input PHYS_TAG expected_phys);
-        return (arch_read_entries[port].phys_reg == expected_phys);
+        return (arch_read_entries[port].phys_reg == expected_phys && arch_read_entries[port].ready == 1'b1);
     endfunction
 
     initial begin

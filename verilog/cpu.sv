@@ -145,7 +145,10 @@ module cpu (
 
     // Global mispredict signal
     logic              mispredict;
-    assign mispredict          = rob_mispredict;
+    assign mispredict = rob_mispredict;
+
+    // Arch map table signals
+    MAP_ENTRY [`ARCH_REG_SZ-1:0] arch_table_snapshot;
 
     // CDB requests: single-cycle FUs request during issue, multi-cycle during execute
     assign cdb_requests.alu    = issue_cdb_requests.alu;  // From issue stage
@@ -185,8 +188,7 @@ module cpu (
 
     // these signals go to and from the processor and memory
     // we give precedence to the mem stage over instruction fetch
-    // note that there is no latency in project 3
-    // but there will be a 100ns latency in project 4
+    // there is a 100ns latency to memory 
 
     always_comb begin
         if (Dmem_command != MEM_NONE) begin  // read or write DATA from memory
@@ -613,7 +615,7 @@ module cpu (
 
         // Mispredict recovery
         .table_snapshot(),
-        .table_restore(),
+        .table_restore(arch_table_snapshot),
         .table_restore_en(bp_recover_en)
     );
 
@@ -623,8 +625,24 @@ module cpu (
     //                                              //
     //////////////////////////////////////////////////
 
-    // TODO: Instantiate arch_map_table when implemented
-    // For now, arch table writes are not connected
+    arch_map_table arch_map_table_0 (
+        .clock(clock),
+        .reset(reset),
+
+        // From retire: update architected register mappings
+        .write_enables (arch_write_enables),
+        .write_addrs   (arch_write_addrs),
+        .write_phys_regs(arch_write_phys_regs),
+
+        // Read ports for selective access (not used in current design)
+        .read_addrs  ('0),
+        .read_entries(),
+
+        // Mispredict recovery: output snapshot for map_table restoration
+        .table_snapshot(arch_table_snapshot),
+        .table_restore('0),  // Not used - arch table doesn't restore
+        .table_restore_en(1'b0)  // Arch table never restores
+    );
 
     //////////////////////////////////////////////////
     //                                              //

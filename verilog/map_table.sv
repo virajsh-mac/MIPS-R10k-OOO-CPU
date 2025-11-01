@@ -100,17 +100,17 @@ module arch_map_table #(
     input PHYS_TAG [NUM_WRITE_PORTS-1:0] write_phys_regs,
 
     // Read ports for selective access (always ready)
-    input  REG_IDX        [(`N)-1:0] read_addrs,
-    output ARCH_MAP_ENTRY [(`N)-1:0] read_entries,
+    input  REG_IDX   [(`N)-1:0] read_addrs,
+    output MAP_ENTRY [(`N)-1:0] read_entries,
 
     // Mispredict recovery: output entire table and accept table overwrite
-    output ARCH_MAP_ENTRY [`ARCH_REG_SZ-1:0] table_snapshot,   // For copying from map_table
-    input  ARCH_MAP_ENTRY [`ARCH_REG_SZ-1:0] table_restore,    // For restoring from map_table
-    input  logic                             table_restore_en  // Enable table restore on mispredict
+    output MAP_ENTRY [`ARCH_REG_SZ-1:0] table_snapshot,   // For copying from map_table
+    input  MAP_ENTRY [`ARCH_REG_SZ-1:0] table_restore,    // For restoring from map_table
+    input  logic                        table_restore_en  // Enable table restore on mispredict
 );
 
     // Internal architected map table state (ARCH_REG_SZ architectural registers)
-    ARCH_MAP_ENTRY [`ARCH_REG_SZ-1:0] arch_map_table_reg, arch_map_table_next;
+    MAP_ENTRY [`ARCH_REG_SZ-1:0] arch_map_table_reg, arch_map_table_next;
 
     // Combinational logic: Compute next state
     always_comb begin
@@ -120,6 +120,7 @@ module arch_map_table #(
         for (int i = 0; i < NUM_WRITE_PORTS; i++) begin
             if (write_enables[i]) begin
                 arch_map_table_next[write_addrs[i]].phys_reg = write_phys_regs[i];
+                arch_map_table_next[write_addrs[i]].ready    = 1'b1;  // Architected mappings are always ready
             end
         end
     end
@@ -142,6 +143,7 @@ module arch_map_table #(
 
             for (int i = 0; i < `ARCH_REG_SZ; i++) begin
                 arch_map_table_reg[i].phys_reg <= PHYS_TAG'(i);  // Identity mapping initially
+                arch_map_table_reg[i].ready    <= 1'b1;  // Architected state always ready
             end
         end else if (table_restore_en) begin
             // Mispredict recovery: restore entire table from speculative map_table
