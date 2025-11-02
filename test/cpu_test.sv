@@ -17,14 +17,23 @@
 // These link to the pipeline_print.c file in this directory, and are used below to print
 // detailed output to the pipeline_output_file, initialized by open_pipeline_output_file()
 import "DPI-C" function string decode_inst(int inst);
-//import "DPI-C" function void open_pipeline_output_file(string file_name);
-//import "DPI-C" function void print_header();
-//import "DPI-C" function void print_cycles(int clock_count);
-//import "DPI-C" function void print_stage(int inst, int npc, int valid_inst);
-//import "DPI-C" function void print_reg(int wb_data, int wb_idx, int wb_en);
-//import "DPI-C" function void print_membus(int proc2mem_command, int proc2mem_addr,
-//                                          int proc2mem_data_hi, int proc2mem_data_lo);
-//import "DPI-C" function void close_pipeline_output_file();
+// Pipeline printing disabled for OOO processor
+// import "DPI-C" function void open_pipeline_output_file(string file_name);
+// import "DPI-C" function void print_header();
+// import "DPI-C" function void print_cycles(int clock_count);
+// import "DPI-C" function void print_stage(
+//     int inst,
+//     int npc,
+//     int valid_inst
+// );
+// import "DPI-C" function void print_reg(
+//     int wb_data,
+//     int wb_idx,
+//     int wb_en
+// );
+// import "DPI-C" function void print_membus(int proc2mem_command, int proc2mem_addr,
+//                                           int proc2mem_data_hi, int proc2mem_data_lo);
+// import "DPI-C" function void close_pipeline_output_file();
 
 
 `define TB_MAX_CYCLES 50000000
@@ -40,10 +49,10 @@ module testbench;
     int out_fileno, cpi_fileno, wb_fileno;  // verilog uses integer file handles with $fopen and $fclose
 
     // variables used in the testbench
-    logic                             clock;
-    logic                             reset;
-    logic          [            31:0] clock_count;  // also used for terminating infinite loops
-    logic          [            31:0] instr_count;
+    logic                                 clock;
+    logic                                 reset;
+    logic              [            31:0] clock_count;  // also used for terminating infinite loops
+    logic              [            31:0] instr_count;
 
     // Disconnected: proc2mem/mem2proc portions (fake-fetch)
     // MEM_COMMAND             proc2mem_command;
@@ -54,35 +63,52 @@ module testbench;
     // MEM_TAG                 mem2proc_data_tag;
     // MEM_SIZE                proc2mem_size;
 
-    COMMIT_PACKET  [          `N-1:0] committed_insts;
-    EXCEPTION_CODE                    error_status = NO_ERROR;
+    COMMIT_PACKET      [          `N-1:0] committed_insts;
+    EXCEPTION_CODE                        error_status = NO_ERROR;
 
-    ADDR                              if_NPC_dbg;
-    DATA                              if_inst_dbg;
-    logic                             if_valid_dbg;
-    ADDR                              if_id_NPC_dbg;
-    DATA                              if_id_inst_dbg;
-    logic                             if_id_valid_dbg;
-    ADDR                              id_ex_NPC_dbg;
-    DATA                              id_ex_inst_dbg;
-    logic                             id_ex_valid_dbg;
-    ADDR                              ex_mem_NPC_dbg;
-    DATA                              ex_mem_inst_dbg;
-    logic                             ex_mem_valid_dbg;
-    ADDR                              mem_wb_NPC_dbg;
-    DATA                              mem_wb_inst_dbg;
-    logic                             mem_wb_valid_dbg;
+    ADDR                                  if_NPC_dbg;
+    DATA                                  if_inst_dbg;
+    logic                                 if_valid_dbg;
+    ADDR                                  if_id_NPC_dbg;
+    DATA                                  if_id_inst_dbg;
+    logic                                 if_id_valid_dbg;
+    ADDR                                  id_ex_NPC_dbg;
+    DATA                                  id_ex_inst_dbg;
+    logic                                 id_ex_valid_dbg;
+    ADDR                                  ex_mem_NPC_dbg;
+    DATA                                  ex_mem_inst_dbg;
+    logic                                 ex_mem_valid_dbg;
+    ADDR                                  mem_wb_NPC_dbg;
+    DATA                                  mem_wb_inst_dbg;
+    logic                                 mem_wb_valid_dbg;
+
+    // OOO debug signals
+    logic              [          `N-1:0] rob_head_valids;
+    ROB_ENTRY          [          `N-1:0] rob_head_entries;
+    logic              [$clog2(`N+1)-1:0] dispatch_count;
+    RS_GRANTED_BANKS                      rs_granted;
+
+    // Additional debug for RS and issue state
+    logic              [  `RS_ALU_SZ-1:0] rs_alu_ready;
+    ISSUE_ENTRIES                         issue_entries;
+
+    // Execute stage debug signals
+    logic              [          `N-1:0] ex_valid;
+    EX_COMPLETE_PACKET                    ex_comp;
+
+    // Complete stage debug signals
+    ROB_UPDATE_PACKET                     rob_update_packet;
 
     // ----------------------------------------------------------------
     // Fake-Fetch wires (testbench <-> cpu)
     // ----------------------------------------------------------------
-    ADDR                              fake_pc;
-    DATA                              fake_instr                                               [`N-1:0];
-    logic          [$clog2(`N+1)-1:0] fake_nvalid;
-    logic          [$clog2(`N+1)-1:0] fake_consumed;
+    ADDR                                  fake_pc;
+    DATA                                  fake_instr                                               [`N-1:0];
+    logic              [$clog2(`N+1)-1:0] fake_nvalid;
+    logic              [$clog2(`N+1)-1:0] fake_consumed;
 
-    logic                             ff_branch_taken;
-    ADDR                              ff_branch_target;
+    logic                                 ff_branch_taken;
+    ADDR                                  ff_branch_target;
 
 
     // Instantiate the Pipeline
@@ -105,21 +131,39 @@ module testbench;
 
         .committed_insts(committed_insts),
 
-        .if_NPC_dbg      (if_NPC_dbg),
-        .if_inst_dbg     (if_inst_dbg),
-        .if_valid_dbg    (if_valid_dbg),
-        .if_id_NPC_dbg   (if_id_NPC_dbg),
-        .if_id_inst_dbg  (if_id_inst_dbg),
-        .if_id_valid_dbg (if_id_valid_dbg),
-        .id_ex_NPC_dbg   (id_ex_NPC_dbg),
-        .id_ex_inst_dbg  (id_ex_inst_dbg),
-        .id_ex_valid_dbg (id_ex_valid_dbg),
-        .ex_mem_NPC_dbg  (ex_mem_NPC_dbg),
-        .ex_mem_inst_dbg (ex_mem_inst_dbg),
-        .ex_mem_valid_dbg(ex_mem_valid_dbg),
-        .mem_wb_NPC_dbg  (mem_wb_NPC_dbg),
-        .mem_wb_inst_dbg (mem_wb_inst_dbg),
-        .mem_wb_valid_dbg(mem_wb_valid_dbg),
+        .fetch_NPC_dbg     (if_NPC_dbg),
+        .fetch_inst_dbg    (if_inst_dbg),
+        .fetch_valid_dbg   (if_valid_dbg),
+        .dispatch_NPC_dbg  (if_id_NPC_dbg),
+        .dispatch_inst_dbg (if_id_inst_dbg),
+        .dispatch_valid_dbg(if_id_valid_dbg),
+        .issue_NPC_dbg     (id_ex_NPC_dbg),
+        .issue_inst_dbg    (id_ex_inst_dbg),
+        .issue_valid_dbg   (id_ex_valid_dbg),
+        .execute_NPC_dbg   (ex_mem_NPC_dbg),
+        .execute_inst_dbg  (ex_mem_inst_dbg),
+        .execute_valid_dbg (ex_mem_valid_dbg),
+        .complete_NPC_dbg  (mem_wb_NPC_dbg),    // Using old names for compatibility
+        .complete_inst_dbg (mem_wb_inst_dbg),
+        .complete_valid_dbg(mem_wb_valid_dbg),
+        .retire_NPC_dbg    (),                  // Not used in testbench
+        .retire_inst_dbg   (),
+        .retire_valid_dbg  (),
+
+        // Additional debug outputs
+        .rob_head_valids_dbg(rob_head_valids),
+        .rob_head_entries_dbg(rob_head_entries),
+        .dispatch_count_dbg(dispatch_count),
+        .rs_granted_dbg(rs_granted),
+        .rs_alu_ready_dbg(rs_alu_ready),
+        .issue_entries_dbg(issue_entries),
+
+        // Execute stage debug outputs
+        .ex_valid_dbg(ex_valid),
+        .ex_comp_dbg (ex_comp),
+
+        // Complete stage debug outputs
+        .rob_update_packet_dbg(rob_update_packet),
 
         // ---- Fake-Fetch interface ----
         .ff_instr       (fake_instr),
@@ -205,11 +249,11 @@ module testbench;
             $finish;
         end
         if ($value$plusargs("OUTPUT=%s", output_name)) begin
-            $display("Using output files : %s.{out, cpi, wb, ppln}", output_name);
+            $display("Using output files : %s.{out, cpi, wb}", output_name);
             out_outfile       = {output_name, ".out"};  // this is how you concatenate strings in verilog
             cpi_outfile       = {output_name, ".cpi"};
             writeback_outfile = {output_name, ".wb"};
-            //pipeline_outfile  = {output_name,".ppln"};
+            // pipeline_outfile  = {output_name, ".ppln"};
         end else begin
             $display("\nDid not receive '+OUTPUT=' argument. Exiting.\n");
             $finish;
@@ -237,7 +281,7 @@ module testbench;
         wb_fileno = $fopen(writeback_outfile);
         $fdisplay(wb_fileno, "Register writeback output (hexadecimal)");
 
-        // Open pipeline output file AFTER throwing the reset otherwise the reset state is displayed
+        // Pipeline output disabled for OOO processor
         // open_pipeline_output_file(pipeline_outfile);
         // print_header();
 
@@ -260,18 +304,17 @@ module testbench;
             if ((clock_count % 10000) == 0) $display("  %16t : %0d cycles", $realtime, clock_count);
 
             // Optional: peek at fake-fetch behavior
-            // $display("%0t [FF] pc=%h consumed=%0d br=%0d tgt=%h",
-            //          $time, fake_pc, fake_consumed, ff_branch_taken, ff_branch_target);
+            $display("%0t [FF] pc=%h consumed=%0d br=%0d tgt=%h", $time, fake_pc, fake_consumed, ff_branch_taken,
+                     ff_branch_target);
 
-            // print the pipeline debug outputs via c code to the pipeline output file
+            // Pipeline printing disabled for OOO processor
             // print_cycles(clock_count - 1);
-            // print_stage(if_inst_dbg,     if_NPC_dbg,     {31'b0,if_valid_dbg});
-            // print_stage(if_id_inst_dbg,  if_id_NPC_dbg,  {31'b0,if_id_valid_dbg});
-            // print_stage(id_ex_inst_dbg,  id_ex_NPC_dbg,  {31'b0,id_ex_valid_dbg});
-            // print_stage(ex_mem_inst_dbg, ex_mem_NPC_dbg, {31'b0,ex_mem_valid_dbg});
-            // print_stage(mem_wb_inst_dbg, mem_wb_NPC_dbg, {31'b0,mem_wb_valid_dbg});
-            // print_reg(committed_insts[0].data, {27'b0,committed_insts[0].reg_idx},
-            //           {31'b0,committed_insts[0].valid});
+            // print_stage(if_inst_dbg, if_NPC_dbg, {31'b0, if_valid_dbg});  // Fetch
+            // print_stage(if_id_inst_dbg, if_id_NPC_dbg, {31'b0, if_id_valid_dbg});  // Dispatch
+            // print_stage(id_ex_inst_dbg, id_ex_NPC_dbg, {31'b0, id_ex_valid_dbg});  // Issue
+            // print_stage(ex_mem_inst_dbg, ex_mem_NPC_dbg, {31'b0, ex_mem_valid_dbg});  // Execute
+            // print_stage(mem_wb_inst_dbg, mem_wb_NPC_dbg, {31'b0, mem_wb_valid_dbg});  // Complete/Retire
+            // print_reg(committed_insts[0].data, {27'b0, committed_insts[0].reg_idx}, {31'b0, committed_insts[0].valid});
             // print_membus({30'b0,proc2mem_command}, proc2mem_addr[31:0],
             //              proc2mem_data[63:32], proc2mem_data[31:0]);
 
@@ -284,7 +327,7 @@ module testbench;
 
                 $display("  %16t : Processor Finished", $realtime);
 
-                // close the writeback and pipeline output files
+                // close the writeback output file (pipeline output disabled)
                 // close_pipeline_output_file();
                 $fclose(wb_fileno);
 
@@ -385,9 +428,10 @@ module testbench;
     // OPTIONAL: Print our your data here
     // It will go to the $program.log file
     task print_custom_data;
-        //$display("%3d: YOUR DATA HERE", 
-        //    clock_count-1
-        //);
+        $display(
+            "%3d: ROB head valid=%b | Dispatch count=%0d | RS ready=%b | Issue ALU valid=%b | Execute valid=%b | ROB update valid=%b | Committed halt=%b valid=%b",
+            clock_count - 1, rob_head_valids, dispatch_count, rs_alu_ready, issue_entries.alu[0].valid, ex_valid,
+            rob_update_packet.valid, committed_insts[0].halt, committed_insts[0].valid);
     endtask
 
 

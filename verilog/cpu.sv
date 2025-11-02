@@ -37,23 +37,40 @@ module cpu (
     output ADDR                     branch_target_o,          // Branch target to testbench
 
     // Debug outputs: these signals are solely used for debugging in testbenches
-    // Do not change for project 3
-    // You should definitely change these for project 4
-    output ADDR  if_NPC_dbg,
-    output DATA  if_inst_dbg,
-    output logic if_valid_dbg,
-    output ADDR  if_id_NPC_dbg,
-    output DATA  if_id_inst_dbg,
-    output logic if_id_valid_dbg,
-    output ADDR  id_ex_NPC_dbg,
-    output DATA  id_ex_inst_dbg,
-    output logic id_ex_valid_dbg,
-    output ADDR  ex_mem_NPC_dbg,
-    output DATA  ex_mem_inst_dbg,
-    output logic ex_mem_valid_dbg,
-    output ADDR  mem_wb_NPC_dbg,
-    output DATA  mem_wb_inst_dbg,
-    output logic mem_wb_valid_dbg
+    // Adapted for OOO pipeline: fetch, dispatch, issue, execute, complete, retire
+    output ADDR  fetch_NPC_dbg,
+    output DATA  fetch_inst_dbg,
+    output logic fetch_valid_dbg,
+    output ADDR  dispatch_NPC_dbg,
+    output DATA  dispatch_inst_dbg,
+    output logic dispatch_valid_dbg,
+    output ADDR  issue_NPC_dbg,
+    output DATA  issue_inst_dbg,
+    output logic issue_valid_dbg,
+    output ADDR  execute_NPC_dbg,
+    output DATA  execute_inst_dbg,
+    output logic execute_valid_dbg,
+    output ADDR  complete_NPC_dbg,
+    output DATA  complete_inst_dbg,
+    output logic complete_valid_dbg,
+    output ADDR  retire_NPC_dbg,
+    output DATA  retire_inst_dbg,
+    output logic retire_valid_dbg,
+
+    // Additional debug outputs for OOO processor debugging
+    output logic [`N-1:0] rob_head_valids_dbg,
+    output ROB_ENTRY [`N-1:0] rob_head_entries_dbg,
+    output logic [$clog2(`N+1)-1:0] dispatch_count_dbg,
+    output RS_GRANTED_BANKS rs_granted_dbg,
+    output logic [`RS_ALU_SZ-1:0] rs_alu_ready_dbg,
+    output ISSUE_ENTRIES issue_entries_dbg,
+
+    // Execute stage debug outputs
+    output logic [`N-1:0] ex_valid_dbg,
+    output EX_COMPLETE_PACKET ex_comp_dbg,
+
+    // Complete stage debug outputs
+    output ROB_UPDATE_PACKET rob_update_packet_dbg
 );
 
     //////////////////////////////////////////////////
@@ -510,7 +527,11 @@ module cpu (
 
     // Issue stage structured inputs/outputs
     ISSUE_ENTRIES issue_entries;
-    FU_REQUESTS   issue_cdb_requests;
+    FU_REQUESTS issue_cdb_requests;
+
+    // Debug signals from issue stage
+    logic [`RS_ALU_SZ-1:0] rs_alu_ready;
+    ISSUE_ENTRIES issue_entries_debug;
 
     // Create structured RS banks from individual RS module outputs
     assign rs_banks.alu    = rs_alu_entries;
@@ -536,7 +557,11 @@ module cpu (
         .issue_entries(issue_entries),
 
         // CDB requests for single-cycle FUs
-        .cdb_requests(issue_cdb_requests)
+        .cdb_requests(issue_cdb_requests),
+
+        // Debug outputs
+        .rs_alu_ready_dbg (rs_alu_ready),
+        .issue_entries_dbg(issue_entries_debug)
     );
 
     // Extract clear signals from structured output for RS modules
@@ -733,7 +758,10 @@ module cpu (
         .ex_comp_in (ex_comp_reg),
 
         // To ROB
-        .rob_update_packet(rob_update_packet)
+        .rob_update_packet(rob_update_packet),
+
+        // Debug output
+        .rob_update_packet_dbg(rob_update_packet_dbg)
     );
 
     //////////////////////////////////////////////////
@@ -774,24 +802,68 @@ module cpu (
     //////////////////////////////////////////////////
 
     // Output the committed instructions to the testbench for counting
-    // For now, only output the oldest retired instruction
+    // For superscalar, show the oldest ready instruction (whether retired or not)
     always_comb begin
         committed_insts = '0;
-        if (rob_head_valids[`N-1]) begin  // Oldest instruction is valid
+        if (rob_head_valids[0]) begin  // Oldest instruction is valid
             committed_insts[0] = '{
-                NPC: rob_head_entries[`N-1].PC + 4,
+                NPC: rob_head_entries[0].PC + 4,
                 data: '0,  // TODO: Get actual result data
-                reg_idx: rob_head_entries[`N-1].arch_rd,
-                halt: rob_head_entries[`N-1].halt,
-                illegal: rob_head_entries[`N-1].exception == ILLEGAL_INST,
-                valid: rob_head_entries[`N-1].complete
+                reg_idx: rob_head_entries[0].arch_rd,
+                halt: rob_head_entries[0].halt,
+                illegal: rob_head_entries[0].exception == ILLEGAL_INST,
+                valid: rob_head_entries[0].complete
             };
         end
     end
 
     // Fake-fetch outputs
-    assign ff_consumed     = dispatch_count;  // Number of instructions consumed by dispatch
-    assign branch_taken_o  = 1'b0;  // TODO: implement branch resolution
-    assign branch_target_o = '0;  // TODO: implement branch target
+    assign ff_consumed          = dispatch_count;  // Number of instructions consumed by dispatch
+    assign branch_taken_o       = 1'b0;  // TODO: implement branch resolution
+    assign branch_target_o      = '0;  // TODO: implement branch target
+
+    // Debug signal assignments for OOO pipeline stages
+
+    // Fetch: fake-fetch inputs (instructions available to dispatch)
+    assign fetch_NPC_dbg        = ff_pc;
+    assign fetch_inst_dbg       = ff_instr[0];
+    assign fetch_valid_dbg      = (ff_nvalid > 0);
+
+    // Dispatch: instructions dispatched to ROB/RS (first dispatched instruction)
+    assign dispatch_NPC_dbg     = fetch_disp_packet.PC[0];
+    assign dispatch_inst_dbg    = fetch_disp_packet.inst[0];
+    assign dispatch_valid_dbg   = fetch_valid_mask[0] && (dispatch_count > 0);
+
+    // Issue: instructions issued from RS to execute (first issued instruction)
+    assign issue_NPC_dbg        = issue_entries.alu[0].PC;  // RS_ENTRY has PC
+    assign issue_inst_dbg       = '0;  // RS_ENTRY doesn't have inst
+    assign issue_valid_dbg      = |rs_granted.alu;  // Any ALU RS granted
+
+    // Execute: instructions currently executing (first executing instruction)
+    assign execute_NPC_dbg      = '0;  // EX_COMPLETE_PACKET doesn't have PC
+    assign execute_inst_dbg     = '0;  // EX_COMPLETE_PACKET doesn't have inst
+    assign execute_valid_dbg    = ex_valid[0];  // First execution slot valid
+
+    // Complete: instructions that just completed (from completion register)
+    assign complete_NPC_dbg     = '0;  // EX_COMPLETE_PACKET doesn't have PC
+    assign complete_inst_dbg    = '0;  // EX_COMPLETE_PACKET doesn't have inst
+    assign complete_valid_dbg   = ex_comp_reg_valid[0];
+
+    // Retire: instructions being retired (ROB head)
+    assign retire_NPC_dbg       = rob_head_entries[`N-1].PC;
+    assign retire_inst_dbg      = rob_head_entries[`N-1].inst;
+    assign retire_valid_dbg     = rob_head_valids[`N-1] && rob_head_entries[`N-1].complete;
+
+    // Additional debug outputs
+    assign rob_head_valids_dbg  = rob_head_valids;
+    assign rob_head_entries_dbg = rob_head_entries;
+    assign dispatch_count_dbg   = dispatch_count;
+    assign rs_granted_dbg       = rs_granted;
+    assign rs_alu_ready_dbg     = rs_alu_ready;
+    assign issue_entries_dbg    = issue_entries_debug;
+
+    // Execute stage debug outputs
+    assign ex_valid_dbg         = ex_valid;
+    assign ex_comp_dbg          = ex_comp;
 
 endmodule  // cpu

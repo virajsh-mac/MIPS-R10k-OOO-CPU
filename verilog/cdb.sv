@@ -78,4 +78,7 @@ module cdb (
         end
     end
 
+    // Connect gnt_bus to output
+    assign gnt_bus_out = gnt_bus;
+
 endmodule

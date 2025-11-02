@@ -10,7 +10,11 @@ module stage_issue (
 
     output ISSUE_CLEAR   issue_clear,    // Clear signals (structured)
     output ISSUE_ENTRIES issue_entries,  // To EX stage (structured)
-    output FU_REQUESTS   cdb_requests    // CDB requests for single-cycle FUs
+    output FU_REQUESTS   cdb_requests,   // CDB requests for single-cycle FUs
+
+    // Debug outputs
+    output logic [`RS_ALU_SZ-1:0] rs_alu_ready_dbg,
+    output ISSUE_ENTRIES issue_entries_dbg
 );
 
     // Helper: Check if RS entry is ready
@@ -182,23 +186,24 @@ module stage_issue (
         end
     end
 
-    // Generate CDB requests for single-cycle FUs currently in issue register
+    // Generate CDB requests for single-cycle FUs
+    // Request for each FU that has a valid allocated instruction (use next state for same-cycle requests)
     always_comb begin
         cdb_requests = '0;
 
-        // ALU requests: each valid ALU entry requests CDB access
+        // ALU requests: one-hot array where each bit indicates FU has valid instruction
         for (int i = 0; i < `NUM_FU_ALU; i++) begin
-            cdb_requests.alu[i] = issue_register.alu[i].valid;
+            cdb_requests.alu[i] = issue_register_next.alu[i].valid;
         end
 
-        // BRANCH requests: each valid BRANCH entry requests CDB access
+        // BRANCH requests: one-hot array where each bit indicates FU has valid instruction
         for (int i = 0; i < `NUM_FU_BRANCH; i++) begin
-            cdb_requests.branch[i] = issue_register.branch[i].valid;
+            cdb_requests.branch[i] = issue_register_next.branch[i].valid;
         end
 
-        // MEM requests: each valid MEM entry requests CDB access
+        // MEM requests: one-hot array where each bit indicates FU has valid instruction
         for (int i = 0; i < `NUM_FU_MEM; i++) begin
-            cdb_requests.mem[i] = issue_register.mem[i].valid;
+            cdb_requests.mem[i] = issue_register_next.mem[i].valid;
         end
 
         // MULT requests come from execute stage (pipelined), not from issue register
@@ -207,6 +212,10 @@ module stage_issue (
 
     // Output assignment
     assign issue_entries = issue_register;
+
+    // Debug assignments
+    assign rs_alu_ready_dbg = rs_ready_alu;
+    assign issue_entries_dbg = issue_register;
 
     always_ff @(posedge clock) begin
         if (reset | mispredict) begin

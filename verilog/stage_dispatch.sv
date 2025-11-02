@@ -104,7 +104,13 @@ module stage_dispatch (
             local_reg2_tag[i]   = maptable_read_resp.rs2_entries[i].phys_reg;
             local_reg1_ready[i] = maptable_read_resp.rs1_entries[i].ready;
             local_reg2_ready[i] = maptable_read_resp.rs2_entries[i].ready;
-            local_Told[i]       = maptable_read_resp.told_entries[i].phys_reg;
+
+            // Halt instructions don't use source registers, so mark them ready
+            if (fetch_packet.halt[i]) begin
+                local_reg1_ready[i] = 1'b1;
+                local_reg2_ready[i] = 1'b1;
+            end
+            local_Told[i] = maptable_read_resp.told_entries[i].phys_reg;
         end
 
         // Extract physical register allocations from freelist grants
@@ -150,6 +156,7 @@ module stage_dispatch (
                     branch: (fetch_packet.op_type[i].category == CAT_BRANCH),
                     pred_target: fetch_packet.pred_target[i],
                     pred_taken: fetch_packet.pred_taken[i],
+                    halt: fetch_packet.halt[i],
                     default: '0
                 };
 

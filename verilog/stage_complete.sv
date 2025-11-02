@@ -11,15 +11,20 @@ module stage_complete #(
     input EX_COMPLETE_PACKET         ex_comp_in,
 
     // To ROB
-    output ROB_UPDATE_PACKET rob_update_packet
+    output ROB_UPDATE_PACKET rob_update_packet,
+
+    // Debug output
+    output ROB_UPDATE_PACKET rob_update_packet_dbg
 );
 
     // ROB updates: mark complete
     always_comb begin
         if (reset) begin
             rob_update_packet = '0;
+            rob_update_packet_dbg = '0;
         end else begin
             rob_update_packet = '0;  // Initialize all fields to 0
+            rob_update_packet_dbg = '0;  // Initialize debug output
 
             for (int i = 0; i < N; i++) begin  // Per-lane fan-out (not a dependent loop)
                 if (ex_valid_in[i]) begin
@@ -34,6 +39,7 @@ module stage_complete #(
                     end
                 end
             end
+            rob_update_packet_dbg = rob_update_packet;  // Mirror to debug output
         end
     end
 
