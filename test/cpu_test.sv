@@ -36,7 +36,7 @@ import "DPI-C" function string decode_inst(int inst);
 // import "DPI-C" function void close_pipeline_output_file();
 
 
-`define TB_MAX_CYCLES 50000000
+`define TB_MAX_CYCLES 20
 
 
 module testbench;
@@ -239,6 +239,9 @@ module testbench;
 
 
     initial begin
+        $dumpfile("cpu_test.vcd");
+        $dumpvars(0, testbench);
+
         $display("\n---- Starting CPU Testbench (Fake-Fetch) ----\n");
 
         // set paramterized strings, see comment at start of module
@@ -299,6 +302,7 @@ module testbench;
         end else begin
             #2;  // wait a short time to avoid a clock edge
 
+
             clock_count = clock_count + 1;
 
             if ((clock_count % 10000) == 0) $display("  %16t : %0d cycles", $realtime, clock_count);
@@ -321,6 +325,13 @@ module testbench;
             print_custom_data();
 
             output_reg_writeback_and_maybe_halt();
+
+           
+            // Optional: print CDB broadcasts
+            for (int i = 0; i < `N; i++) begin
+                $display("  CDB[%0d]: valid=%b, tag=%0d, data=%h", i, verisimpleV.cdb_output[i].valid, verisimpleV.cdb_output[i].tag, verisimpleV.cdb_output[i].data);
+            end
+
 
             // stop the processor
             if (error_status != NO_ERROR || clock_count > `TB_MAX_CYCLES) begin

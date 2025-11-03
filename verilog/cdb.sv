@@ -64,7 +64,7 @@ module cdb (
     // grants_flat order: [mult, mem, alu, branch] (same as request concatenation)
     assign {grants.mult, grants.mem, grants.alu, grants.branch} = grants_flat;
     assign cdb_output = cdb;
-    assign gnt_bus_next_out = gnt_bus;
+    //assign gnt_bus_next = gnt_bus;
 
     always_ff @(posedge clock) begin
         if (reset) begin

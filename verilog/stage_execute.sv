@@ -373,10 +373,15 @@ module stage_execute (
     end
 
     // Add constants for FU index ranges (to avoid manual offset calculations)
-    localparam int MULT_START = 0;
-    localparam int MEM_START = MULT_START + `NUM_FU_MULT;
-    localparam int ALU_START = MEM_START + `NUM_FU_MEM;
-    localparam int BRANCH_START = ALU_START + `NUM_FU_ALU;
+    // localparam int MULT_START = 0;
+    // localparam int MEM_START = MULT_START + `NUM_FU_MULT;
+    // localparam int ALU_START = MEM_START + `NUM_FU_MEM;
+    // localparam int BRANCH_START = ALU_START + `NUM_FU_ALU;
+    localparam int BRANCH_START = 0;
+    localparam int ALU_START    = BRANCH_START + `NUM_FU_BRANCH;
+    localparam int MEM_START    = ALU_START    + `NUM_FU_ALU;
+    localparam int MULT_START   = MEM_START    + `NUM_FU_MEM;
+
 
     // Separate grant signals for each FU type (extracted from global gnt_bus)
     logic [`N-1:0][`NUM_FU_MULT-1:0]   gnt_mult;
