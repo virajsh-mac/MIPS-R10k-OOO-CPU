@@ -176,7 +176,7 @@ module cpu (
     // CDB requests: single-cycle FUs request during issue, multi-cycle during execute
     assign cdb_requests.alu    = issue_cdb_requests.alu;  // From issue stage
     // TODO fix mult (for now its 0 to make things work)
-    assign cdb_requests.mult   = 0;  // From execute stage (when completing)
+    assign cdb_requests.mult   = mult_request;  // From execute stage (when completing)
     assign cdb_requests.branch = issue_cdb_requests.branch;  // From issue stage
     assign cdb_requests.mem    = issue_cdb_requests.mem;  // From issue stage
 

@@ -27,6 +27,13 @@ module testbench;
     // From CDB for grant selection
     logic [`N-1:0][`NUM_FU_TOTAL-1:0] gnt_bus;
 
+    // --- FU index constants (module scope, not inside initial) ---
+    localparam int MULT_START   = 0;
+    localparam int MEM_START    = MULT_START + `NUM_FU_MULT;
+    localparam int ALU_START    = MEM_START  + `NUM_FU_MEM;
+    localparam int BRANCH_START = ALU_START  + `NUM_FU_ALU;
+
+
     // DUT instantiation (packed struct, no guards needed)
     stage_execute dut (
         .clock(clock),
@@ -171,6 +178,12 @@ module testbench;
         tagged_entry.PC = 32'h100C;
     endfunction
 
+
+    function automatic bit has_x(input logic [1023:0] v);
+        has_x = (^v) === 1'bx;
+    endfunction
+
+
     // Helper to initialize PRF read data
     task init_prf_data;
         int i;
@@ -231,14 +244,102 @@ module testbench;
         @(negedge clock);
     endtask
 
+    // Pretty-print one retire lane of ex_* (module scope is fine)
+    task automatic dump_ex_lane(input int lane);
+        $display("  lane %0d: ex_valid=%0b | "
+                // rob_idx/dest_pr/result shown; branch fields shown too, but comment if unused
+                //"branch_valid=%0b mispredict=%0b taken=%0b target=%h | "
+                //"rob_idx=%0d dest_pr=%0d result=%h",
+                , lane, ex_valid[lane]
+                //, ex_comp.branch_valid[lane], ex_comp.mispredict[lane]
+                //, ex_comp.branch_taken[lane], ex_comp.branch_target[lane]
+                , ex_comp.rob_idx[lane], ex_comp.dest_pr[lane], ex_comp.result[lane]);
+    endtask
+
+
+
+    always @(posedge clock) if (!reset) begin
+        if (has_x({gnt_bus}))               $fatal(1, "X in gnt_bus -> ex_valid X");
+        if (has_x({issue_entries}))         $fatal(1, "X in issue_entries -> ex_valid X");
+        if (has_x({prf_read_data_src1}))    $fatal(1, "X in prf_read_data_src1 -> ex_valid X");
+        if (has_x({prf_read_data_src2}))    $fatal(1, "X in prf_read_data_src2 -> ex_valid X");
+        if (has_x({cdb_data}))              $fatal(1, "X in cdb_data -> ex_valid X");
+        if (mispredict === 1'bx)            $fatal(1, "X in mispredict -> ex_valid X");
+        if (has_x({ex_valid}))              $fatal(1, "X in ex_valid even though inputs are known");
+    end
+    int test_num;
+
     initial begin
-        int test_num = 1;
+        $dumpfile("stage_exeucte_test.vcd");
+        $dumpvars(0, testbench);
+        test_num = 1;
         clock  = 0;
         reset  = 1;
         failed = 0;
 
         // Initialize all inputs
         init_inputs();
+
+        // ===== PRINT-ENHANCED SMOKE TEST (no ex_comp.valid) =====
+        $display("\n[Smoke] ex_valid should never be X");
+        reset_dut();
+
+        begin
+        // ---------- IDLE PHASE ----------
+        issue_entries       = empty_issue_entries();
+        gnt_bus             = '0;
+        prf_read_data_src1  = '0;
+        prf_read_data_src2  = '0;
+        cdb_data            = '0;
+
+        $display("[t=%0t] IDLE: driving all inputs to 0/known", $time);
+        @(negedge clock);
+
+        $display("[t=%0t] IDLE OBSERVE:", $time);
+        $display("  ex_valid = %b", ex_valid);
+        dump_ex_lane(0);
+
+        if ((^ex_valid) === 1'bx) $fatal(1, "ex_valid is X while idle");
+        if (ex_valid !== '0)      $fatal(1, "ex_valid not zero while idle");
+
+        // ---------- DRIVE A SINGLE ALU OP ----------
+        issue_entries.alu[0]              = ready_alu_entry(10, PHYS_TAG'(9));
+        prf_read_data_src1.alu[0]         = 32'd1;
+        prf_read_data_src2.alu[0]         = 32'd2;
+        gnt_bus                           = '0;
+        gnt_bus[0][ALU_START+0]           = 1'b1;  // one-hot grant for ALU[0]
+
+        $display("[t=%0t] DRIVE:", $time);
+        $display("  issue_entries.alu[0].valid    = %0b", issue_entries.alu[0].valid);
+        $display("  issue_entries.alu[0].dest_tag = %0d", issue_entries.alu[0].dest_tag);
+        $display("  PRF src1=%0d src2=%0d", prf_read_data_src1.alu[0], prf_read_data_src2.alu[0]);
+        $display("  gnt_bus lane0 bits = %b (expect bit %0d high)", gnt_bus[0], ALU_START+0);
+
+        @(negedge clock);
+
+        // ---------- POST-GRANT OBSERVE ----------
+        $display("[t=%0t] POST-GRANT OBSERVE:", $time);
+        $display("  ex_valid = %b", ex_valid);
+        dump_ex_lane(0);
+
+        if ((^ex_valid) === 1'bx) $fatal(1, "ex_valid is X with clean ALU grant");
+        if (ex_valid[0] !== 1'b1) $fatal(1, "ex_valid[0] should be 1 with grant");
+        if (`N > 1 && ex_valid[`N-1:1] !== '0)
+            $fatal(1, "other lanes of ex_valid should be 0");
+
+        // ---------- CLEAR ----------
+        issue_entries = empty_issue_entries();
+        gnt_bus       = '0;
+        @(negedge clock);
+
+        $display("[t=%0t] CLEAR OBSERVE:", $time);
+        $display("  ex_valid = %b", ex_valid);
+        dump_ex_lane(0);
+        end
+
+
+
+
 
         // Test 2: Single ready ALU instruction should execute
         $display("\nTest %0d: Single ready ALU instruction should execute", test_num++);
@@ -361,57 +462,57 @@ module testbench;
             end
         end
 
-        // // Test 6b: MULT instruction should execute after pipeline delay and check metadata
-        // $display("\nTest %0d: MULT instruction should execute after pipeline delay", test_num++);
-        // reset_dut();
-        // begin
-        //     int cycles = 0;
-        //     // Hold PRF data constant across cycles
-        //     prf_read_data_src1.mult[0] = 32'h3;
-        //     prf_read_data_src2.mult[0] = 32'h4;
-        //     gnt_bus = '0;
+        // Test 6b: MULT instruction should execute after pipeline delay and check metadata
+        $display("\nTest %0d: MULT instruction should execute after pipeline delay", test_num++);
+        reset_dut();
+        begin
+            int cycles = 0;
+            // Hold PRF data constant across cycles
+            prf_read_data_src1.mult[0] = 32'h3;
+            prf_read_data_src2.mult[0] = 32'h4;
+            gnt_bus = '0;
 
-        //     // Set issue_entries and keep valid throughout pipeline (metadata needs to flow through)
-        //     @(negedge clock);
-        //     issue_entries = empty_issue_entries();
-        //     issue_entries.mult[0] = ready_mult_entry(15);
+            // Set issue_entries and keep valid throughout pipeline (metadata needs to flow through)
+            @(negedge clock);
+            issue_entries = empty_issue_entries();
+            issue_entries.mult[0] = ready_mult_entry(15);
 
-        //     // Wait for MULT pipeline to complete (keep issue_entries valid)
-        //     while (!fu_outputs.mult[0].valid && cycles < 100) begin
-        //         @(posedge clock);
-        //         cycles++;
-        //     end
-        //     if (cycles >= 100) begin
-        //         $display("  FAIL: MULT timeout after %0d cycles", cycles);
-        //         failed = 1;
-        //     end else begin
-        //         $display("  MULT completed after %0d cycles, data=%h", cycles, fu_outputs.mult[0].data);
-        //     end
+            // Wait for MULT pipeline to complete (keep issue_entries valid)
+            while (!fu_outputs.mult[0].valid && cycles < 100) begin
+                @(posedge clock);
+                cycles++;
+            end
+            if (cycles >= 100) begin
+                $display("  FAIL: MULT timeout after %0d cycles", cycles);
+                failed = 1;
+            end else begin
+                $display("  MULT completed after %0d cycles, data=%h", cycles, fu_outputs.mult[0].data);
+            end
 
-        //     // Set grant for completion (one cycle)
-        //     @(negedge clock);
-        //     gnt_bus[0][0] = 1'b1;
-        //     @(posedge clock);  // End of grant cycle
-        //     gnt_bus = '0;
+            // Set grant for completion (one cycle)
+            @(negedge clock);
+            gnt_bus[0][0] = 1'b1;
+            @(posedge clock);  // End of grant cycle
+            gnt_bus = '0;
 
-        //     // Check results after grant
-        //     if (fu_outputs.mult[0].data == 32'hC) begin
-        //         $display("  PASS: MULT executed correctly (3 * 4 = %0d)", fu_outputs.mult[0].data);
-        //     end else begin
-        //         $display("  FAIL: MULT should produce correct result (got %0d, expected 12)", fu_outputs.mult[0].data);
-        //         failed = 1;
-        //     end
+            // Check results after grant
+            if (fu_outputs.mult[0].data == 32'hC) begin
+                $display("  PASS: MULT executed correctly (3 * 4 = %0d)", fu_outputs.mult[0].data);
+            end else begin
+                $display("  FAIL: MULT should produce correct result (got %0d, expected 12)", fu_outputs.mult[0].data);
+                failed = 1;
+            end
 
-        //     // Check metadata passing through to completion
-        //     if (ex_valid[0] && ex_comp.rob_idx[0] == 15 && ex_comp.result[0] == 32'hC && ex_comp.dest_pr[0] == 2) begin
-        //         $display("  PASS: MULT metadata passed correctly to completion (rob_idx=%0d, result=0x%h, dest_pr=%0d)",
-        //                  ex_comp.rob_idx[0], ex_comp.result[0], ex_comp.dest_pr[0]);
-        //     end else begin
-        //         $display("  FAIL: MULT metadata not passed correctly (ex_valid[0]=%b, rob_idx=%0d, result=0x%h, dest_pr=%0d)",
-        //                  ex_valid[0], ex_comp.rob_idx[0], ex_comp.result[0], ex_comp.dest_pr[0]);
-        //         failed = 1;
-        //     end
-        // end
+            // Check metadata passing through to completion
+            if (ex_valid[0] && ex_comp.rob_idx[0] == 15 && ex_comp.result[0] == 32'hC && ex_comp.dest_pr[0] == 2) begin
+                $display("  PASS: MULT metadata passed correctly to completion (rob_idx=%0d, result=0x%h, dest_pr=%0d)",
+                         ex_comp.rob_idx[0], ex_comp.result[0], ex_comp.dest_pr[0]);
+            end else begin
+                $display("  FAIL: MULT metadata not passed correctly (ex_valid[0]=%b, rob_idx=%0d, result=0x%h, dest_pr=%0d)",
+                         ex_valid[0], ex_comp.rob_idx, ex_comp.result[0], ex_comp.dest_pr[0]);
+                failed = 1;
+            end
+        end
 
         // Test 7: BRANCH instruction should evaluate condition
         $display("\nTest %0d: BRANCH instruction should evaluate condition", test_num++);
