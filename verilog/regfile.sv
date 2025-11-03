@@ -9,7 +9,11 @@ module regfile (
     output PRF_READ_DATA read_data,
 
     // Write interface from CDB
-    input CDB_ENTRY [`CDB_SZ-1:0] cdb_writes
+    input CDB_ENTRY [`CDB_SZ-1:0] cdb_writes,
+
+    // debug output TODO remove when no longer needed (especially for synthesis)
+    output DATA [`PHYS_REG_SZ_R10K-1:0] regfile_entries
+
 );
 
     DATA [`PHYS_REG_SZ_R10K-1:0]
@@ -71,5 +75,9 @@ module regfile (
             register_file_entries <= register_file_entries_next;
         end
     end
+
+    // remove as part of TODO above (when no longer needed)
+    assign regfile_entries = register_file_entries;
+
 
 endmodule

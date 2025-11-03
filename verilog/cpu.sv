@@ -188,6 +188,9 @@ module cpu (
     // Calculate freelist free slots (placeholder - TODO: get from freelist module)
     assign freelist_free_slots = 32;  // Placeholder
 
+    // TODO Debug for PRF remove when synthesizing/ not needed anymore
+    DATA [`PHYS_REG_SZ_R10K-1:0] regfile_entries;
+
 
     //////////////////////////////////////////////////
     //                                              //
@@ -714,7 +717,9 @@ module cpu (
         .read_data(prf_read_data_src1),
 
         // Write interface - directly from CDB
-        .cdb_writes(cdb_output)
+        .cdb_writes(cdb_output),
+
+        .regfile_entries(regfile_entries)
     );
 
     //////////////////////////////////////////////////
@@ -804,19 +809,22 @@ module cpu (
 
     // Output the committed instructions to the testbench for counting
     // For superscalar, show the oldest ready instruction (whether retired or not)
-    always_comb begin
+   always_comb begin
         committed_insts = '0;
-        if (rob_head_valids[0]) begin  // Oldest instruction is valid
-            committed_insts[0] = '{
-                NPC: rob_head_entries[0].PC + 4,
-                data: '0,  // TODO: Get actual result data
-                reg_idx: rob_head_entries[0].arch_rd,
-                halt: rob_head_entries[0].halt,
-                illegal: rob_head_entries[0].exception == ILLEGAL_INST,
-                valid: rob_head_entries[0].complete
-            };
+        for (int i = 0; i < `N; i++) begin
+            if (rob_head_valids[i]) begin  // Instruction i is valid
+                committed_insts[i] = '{
+                    NPC: rob_head_entries[i].PC + 4,
+                    data: regfile_entries[arch_table_snapshot[rob_head_entries[i].arch_rd]],  // TODO: Get actual result data
+                    reg_idx: rob_head_entries[i].arch_rd,
+                    halt: rob_head_entries[i].halt,
+                    illegal: rob_head_entries[i].exception == ILLEGAL_INST,
+                    valid: rob_head_entries[i].complete
+                };
+            end
         end
     end
+
 
     // Fake-fetch outputs
     assign ff_consumed          = dispatch_count;  // Number of instructions consumed by dispatch

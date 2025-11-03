@@ -96,7 +96,7 @@
 # there should be no need to change anything for project 3
 
 # this is a global clock period variable used in the tcl script and referenced in testbenches
-export CLOCK_PERIOD = 30.0
+export CLOCK_PERIOD = 3.0
 
 # the Verilog Compiler command and arguments
 VCS = module load vcs/2023.12-SP2-1 && \

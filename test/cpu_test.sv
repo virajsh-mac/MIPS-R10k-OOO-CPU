@@ -360,7 +360,7 @@ module testbench;
         ADDR pc;
         DATA inst;
         MEM_BLOCK block;
-        for (int n = 0; n < `N; ++n) begin
+        for (int n = 0; n < `N; n++) begin
             if (committed_insts[n].valid) begin
                 // update the count for every committed instruction
                 instr_count = instr_count + 1;
