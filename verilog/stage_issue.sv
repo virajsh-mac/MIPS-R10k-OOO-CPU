@@ -14,7 +14,11 @@ module stage_issue (
 
     // Debug outputs
     output logic [`RS_ALU_SZ-1:0] rs_alu_ready_dbg,
-    output ISSUE_ENTRIES issue_entries_dbg
+    output ISSUE_ENTRIES issue_entries_dbg,
+    output logic [`RS_ALU_SZ-1:0] rs_alu_requests_dbg,
+    output logic [`RS_MULT_SZ-1:0] rs_mult_requests_dbg,
+    output logic [`RS_BRANCH_SZ-1:0] rs_branch_requests_dbg,
+    output logic [`RS_MEM_SZ-1:0] rs_mem_requests_dbg
 );
 
     // Helper: Check if RS entry is ready
@@ -216,6 +220,10 @@ module stage_issue (
     // Debug assignments
     assign rs_alu_ready_dbg = rs_ready_alu;
     assign issue_entries_dbg = issue_register;
+    assign rs_alu_requests_dbg = rs_ready_alu;
+    assign rs_mult_requests_dbg = rs_ready_mult;
+    assign rs_branch_requests_dbg = rs_ready_branch;
+    assign rs_mem_requests_dbg = rs_ready_mem;
 
     always_ff @(posedge clock) begin
         if (reset | mispredict) begin

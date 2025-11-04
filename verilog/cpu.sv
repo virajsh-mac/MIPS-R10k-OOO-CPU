@@ -45,6 +45,10 @@ module cpu (
     output RS_GRANTED_BANKS rs_granted_dbg,
     output logic [`RS_ALU_SZ-1:0] rs_alu_ready_dbg,
     output ISSUE_ENTRIES issue_entries_dbg,
+    output logic [`RS_ALU_SZ-1:0] rs_alu_requests_dbg,
+    output logic [`RS_MULT_SZ-1:0] rs_mult_requests_dbg,
+    output logic [`RS_BRANCH_SZ-1:0] rs_branch_requests_dbg,
+    output logic [`RS_MEM_SZ-1:0] rs_mem_requests_dbg,
 
     // Execute stage debug outputs
     output logic [`N-1:0] ex_valid_dbg,
@@ -588,7 +592,11 @@ module cpu (
 
         // Debug outputs
         .rs_alu_ready_dbg (rs_alu_ready),
-        .issue_entries_dbg(issue_entries_debug)
+        .issue_entries_dbg(issue_entries_debug),
+        .rs_alu_requests_dbg(rs_alu_requests_dbg),
+        .rs_mult_requests_dbg(rs_mult_requests_dbg),
+        .rs_branch_requests_dbg(rs_branch_requests_dbg),
+        .rs_mem_requests_dbg(rs_mem_requests_dbg)
     );
 
     // Extract clear signals from structured output for RS modules

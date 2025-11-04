@@ -77,6 +77,12 @@ module testbench;
     logic [`RS_ALU_SZ-1:0] rs_alu_ready;
     ISSUE_ENTRIES issue_entries;
 
+    // RS request debug signals
+    logic [`RS_ALU_SZ-1:0] rs_alu_requests;
+    logic [`RS_MULT_SZ-1:0] rs_mult_requests;
+    logic [`RS_BRANCH_SZ-1:0] rs_branch_requests;
+    logic [`RS_MEM_SZ-1:0] rs_mem_requests;
+
     // Execute stage debug signals
     logic [`N-1:0] ex_valid;
     EX_COMPLETE_PACKET ex_comp;
@@ -163,6 +169,10 @@ module testbench;
         .rs_granted_dbg(rs_granted),
         .rs_alu_ready_dbg(rs_alu_ready),
         .issue_entries_dbg(issue_entries),
+        .rs_alu_requests_dbg(rs_alu_requests),
+        .rs_mult_requests_dbg(rs_mult_requests),
+        .rs_branch_requests_dbg(rs_branch_requests),
+        .rs_mem_requests_dbg(rs_mem_requests),
 
         // Execute stage debug outputs
         .ex_valid_dbg(ex_valid),
@@ -524,6 +534,13 @@ module testbench;
 
         // RESERVATION STATIONS
         $display("\n--- RESERVATION STATIONS ---");
+
+        // Show RS requests (ready entries)
+        $display("RS Requests (ready entries):");
+        $display("  ALU requests: %b", rs_alu_requests);
+        $display("  MULT requests: %b", rs_mult_requests);
+        $display("  BRANCH requests: %b", rs_branch_requests);
+        $display("  MEM requests: %b", rs_mem_requests);
 
         // ALU RS
         $display("\nALU RS (%0d entries):", `RS_ALU_SZ);

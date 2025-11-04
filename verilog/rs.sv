@@ -13,17 +13,17 @@
 
 
 module rs #(
-    parameter ALLOC_WIDTH = `N,              // Number of allocation entries per cycle
-    parameter RS_SIZE = `RS_SZ,              // Reservation station size
-    parameter CLEAR_WIDTH = `NUM_FU_TOTAL,   // Number of clear ports (functional units)
-    parameter CDB_WIDTH = `CDB_SZ            // Number of CDB broadcast ports
+    parameter ALLOC_WIDTH = `N,             // Number of allocation entries per cycle
+    parameter RS_SIZE     = `RS_SZ,         // Reservation station size
+    parameter CLEAR_WIDTH = `NUM_FU_TOTAL,  // Number of clear ports (functional units)
+    parameter CDB_WIDTH   = `CDB_SZ         // Number of CDB broadcast ports
 ) (
     input clock,  // system clock
     input reset,  // system reset
 
     // From dispatch: allocation signals
-    input logic [ALLOC_WIDTH-1:0] alloc_valid,       // Valid allocations this cycle
-    input RS_ENTRY [ALLOC_WIDTH-1:0] alloc_entries,  // N way allocating entries
+    input logic    [ALLOC_WIDTH-1:0] alloc_valid,   // Valid allocations this cycle
+    input RS_ENTRY [ALLOC_WIDTH-1:0] alloc_entries, // N way allocating entries
 
     // From complete: CDB broadcasts for operand wakeup
     input CDB_EARLY_TAG_ENTRY [CDB_WIDTH-1:0] early_tag_broadcast,
@@ -33,12 +33,12 @@ module rs #(
     input RS_IDX [CLEAR_WIDTH-1:0] clear_idxs,   // RS indices to clear
 
     // From execute: mispredict flush signal
-    input logic   mispredict,      // Mispredict detected (flush speculative)
+    input logic mispredict,  // Mispredict detected (flush speculative)
     // input ROB_IDX mispred_rob_idx, ROB index of mispredicted branch used for EARLY BRANCH RESOLUTION
 
     // Outputs to issue/dispatch
     output RS_ENTRY [RS_SIZE-1:0] entries,  // Full RS entries for issue selection
-    output logic [ALLOC_WIDTH-1:0][RS_SIZE-1:0] granted_entries // Granted RS slots for each allocation request
+    output logic [ALLOC_WIDTH-1:0][RS_SIZE-1:0] granted_entries  // Granted RS slots for each allocation request
 );
 
     // Internal storage: array of RS entries
@@ -59,11 +59,11 @@ module rs #(
 
     allocator #(
         .NUM_RESOURCES(RS_SIZE),
-        .NUM_REQUESTS(ALLOC_WIDTH)
+        .NUM_REQUESTS (ALLOC_WIDTH)
     ) rs_allocator (
         .reset(reset | mispredict),
         .clock(clock),
-        .req(alloc_valid),
+        .req  (alloc_valid),
         .clear(clear_mask),
         .grant(granted_entries)
     );
