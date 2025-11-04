@@ -36,7 +36,20 @@ module stage_execute (
     output EX_COMPLETE_PACKET ex_comp,
 
     // From CDB for grant selection
-    input logic [`N-1:0][`NUM_FU_TOTAL-1:0] gnt_bus
+    input logic [`N-1:0][`NUM_FU_TOTAL-1:0] gnt_bus,
+
+    // Debug outputs
+    output FU_RESULTS fu_results_dbg,
+    output PRF_READ_EN prf_read_en_src1_dbg,
+    output PRF_READ_EN prf_read_en_src2_dbg,
+    output PRF_READ_TAGS prf_read_tag_src1_dbg,
+    output PRF_READ_TAGS prf_read_tag_src2_dbg,
+    output PRF_READ_DATA resolved_src1_dbg,
+    output PRF_READ_DATA resolved_src2_dbg,
+    output logic [`NUM_FU_MULT-1:0] mult_start_dbg,
+    output logic [`NUM_FU_MULT-1:0] mult_done_dbg,
+    output logic [`NUM_FU_BRANCH-1:0] branch_take_dbg,
+    output ADDR [`NUM_FU_BRANCH-1:0] branch_target_dbg
 );
 
     // =========================================================================
@@ -489,5 +502,21 @@ module stage_execute (
             end
         end
     end
+
+    // =========================================================================
+    // Debug Output Assignments
+    // =========================================================================
+
+    assign fu_results_dbg = fu_results;
+    assign prf_read_en_src1_dbg = prf_read_en_src1;
+    assign prf_read_en_src2_dbg = prf_read_en_src2;
+    assign prf_read_tag_src1_dbg = prf_read_tag_src1;
+    assign prf_read_tag_src2_dbg = prf_read_tag_src2;
+    assign resolved_src1_dbg = resolved_src1;
+    assign resolved_src2_dbg = resolved_src2;
+    assign mult_start_dbg = mult_start;
+    assign mult_done_dbg = mult_done;
+    assign branch_take_dbg = branch_take;
+    assign branch_target_dbg = branch_target;
 
 endmodule

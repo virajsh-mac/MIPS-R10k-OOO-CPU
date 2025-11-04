@@ -36,30 +36,11 @@ module cpu (
     output logic                    branch_taken_o,           // Branch taken signal to testbench
     output ADDR                     branch_target_o,          // Branch target to testbench
 
-    // Debug outputs: these signals are solely used for debugging in testbenches
-    // Adapted for OOO pipeline: fetch, dispatch, issue, execute, complete, retire
-    output ADDR  fetch_NPC_dbg,
-    output DATA  fetch_inst_dbg,
-    output logic fetch_valid_dbg,
-    output ADDR  dispatch_NPC_dbg,
-    output DATA  dispatch_inst_dbg,
-    output logic dispatch_valid_dbg,
-    output ADDR  issue_NPC_dbg,
-    output DATA  issue_inst_dbg,
-    output logic issue_valid_dbg,
-    output ADDR  execute_NPC_dbg,
-    output DATA  execute_inst_dbg,
-    output logic execute_valid_dbg,
-    output ADDR  complete_NPC_dbg,
-    output DATA  complete_inst_dbg,
-    output logic complete_valid_dbg,
-    output ADDR  retire_NPC_dbg,
-    output DATA  retire_inst_dbg,
-    output logic retire_valid_dbg,
 
     // Additional debug outputs for OOO processor debugging
     output logic [`N-1:0] rob_head_valids_dbg,
     output ROB_ENTRY [`N-1:0] rob_head_entries_dbg,
+    output ROB_IDX [`N-1:0] rob_head_idxs_dbg,
     output logic [$clog2(`N+1)-1:0] dispatch_count_dbg,
     output RS_GRANTED_BANKS rs_granted_dbg,
     output logic [`RS_ALU_SZ-1:0] rs_alu_ready_dbg,
@@ -79,7 +60,43 @@ module cpu (
     output MAP_ENTRY [`ARCH_REG_SZ-1:0] arch_table_snapshot,
 
     // rs_alu Debug output
-    output RS_ENTRY            [   `RS_ALU_SZ-1:0] rs_alu_entries
+    output RS_ENTRY [`RS_ALU_SZ-1:0] rs_alu_entries,
+
+    // Additional RS debug outputs
+    output RS_ENTRY [  `RS_MULT_SZ-1:0] rs_mult_entries_dbg,
+    output RS_ENTRY [`RS_BRANCH_SZ-1:0] rs_branch_entries_dbg,
+    output RS_ENTRY [   `RS_MEM_SZ-1:0] rs_mem_entries_dbg,
+
+    // Map table debug output
+    output MAP_ENTRY [`ARCH_REG_SZ-1:0] map_table_snapshot_dbg,
+
+    // Freelist debug output (available physical registers)
+    output logic [`PHYS_REG_SZ_R10K-1:0] freelist_available_dbg,
+
+    // CDB debug outputs
+    output CDB_ENTRY [`N-1:0] cdb_output_dbg,
+    output logic [`N-1:0][`NUM_FU_TOTAL-1:0] cdb_gnt_bus_dbg,
+
+    // Dispatch packet debug output
+    output FETCH_DISP_PACKET fetch_disp_packet_dbg,
+
+    // Issue clear signals debug output
+    output RS_CLEAR_SIGNALS rs_clear_signals_dbg,
+
+    // Execute stage debug outputs
+    output FU_RESULTS fu_results_dbg,
+    output PRF_READ_EN prf_read_en_src1_dbg,
+    output PRF_READ_EN prf_read_en_src2_dbg,
+    output PRF_READ_TAGS prf_read_tag_src1_dbg,
+    output PRF_READ_TAGS prf_read_tag_src2_dbg,
+    output PRF_READ_DATA resolved_src1_dbg,
+    output PRF_READ_DATA resolved_src2_dbg,
+    output logic [`N-1:0][`NUM_FU_TOTAL-1:0] fu_gnt_bus_dbg,
+    output logic [`NUM_FU_MULT-1:0] mult_request_dbg,
+    output logic [`NUM_FU_MULT-1:0] mult_start_dbg,
+    output logic [`NUM_FU_MULT-1:0] mult_done_dbg,
+    output logic [`NUM_FU_BRANCH-1:0] branch_take_dbg,
+    output ADDR [`NUM_FU_BRANCH-1:0] branch_target_dbg
 
 );
 
@@ -619,7 +636,20 @@ module cpu (
         .ex_comp (ex_comp),
 
         // From CDB for grant selection
-        .gnt_bus(cdb_0.gnt_bus_out)
+        .gnt_bus(cdb_0.gnt_bus_out),
+
+        // Debug outputs
+        .fu_results_dbg(fu_results_dbg),
+        .prf_read_en_src1_dbg(prf_read_en_src1_dbg),
+        .prf_read_en_src2_dbg(prf_read_en_src2_dbg),
+        .prf_read_tag_src1_dbg(prf_read_tag_src1_dbg),
+        .prf_read_tag_src2_dbg(prf_read_tag_src2_dbg),
+        .resolved_src1_dbg(resolved_src1_dbg),
+        .resolved_src2_dbg(resolved_src2_dbg),
+        .mult_start_dbg(mult_start_dbg),
+        .mult_done_dbg(mult_done_dbg),
+        .branch_take_dbg(branch_take_dbg),
+        .branch_target_dbg(branch_target_dbg)
     );
 
     //////////////////////////////////////////////////
@@ -825,7 +855,7 @@ module cpu (
 
     // Output the committed instructions to the testbench for counting
     // For superscalar, show the oldest ready instruction (whether retired or not)
-   always_comb begin
+    always_comb begin
         committed_insts = '0;
         for (int i = 0; i < `N; i++) begin
             if (rob_head_valids[i]) begin  // Instruction i is valid
@@ -843,52 +873,45 @@ module cpu (
 
 
     // Fake-fetch outputs
-    assign ff_consumed          = dispatch_count;  // Number of instructions consumed by dispatch
-    assign branch_taken_o       = 1'b0;  // TODO: implement branch resolution
-    assign branch_target_o      = '0;  // TODO: implement branch target
+    assign ff_consumed            = dispatch_count;  // Number of instructions consumed by dispatch
+    assign branch_taken_o         = 1'b0;  // TODO: implement branch resolution
+    assign branch_target_o        = '0;  // TODO: implement branch target
 
-    // Debug signal assignments for OOO pipeline stages
-
-    // Fetch: fake-fetch inputs (instructions available to dispatch)
-    assign fetch_NPC_dbg        = ff_pc;
-    assign fetch_inst_dbg       = ff_instr[0];
-    assign fetch_valid_dbg      = (ff_nvalid > 0);
-
-    // Dispatch: instructions dispatched to ROB/RS (first dispatched instruction)
-    assign dispatch_NPC_dbg     = fetch_disp_packet.PC[0];
-    assign dispatch_inst_dbg    = fetch_disp_packet.inst[0];
-    assign dispatch_valid_dbg   = fetch_valid_mask[0] && (dispatch_count > 0);
-
-    // Issue: instructions issued from RS to execute (first issued instruction)
-    assign issue_NPC_dbg        = issue_entries.alu[0].PC;  // RS_ENTRY has PC
-    assign issue_inst_dbg       = '0;  // RS_ENTRY doesn't have inst
-    assign issue_valid_dbg      = |rs_granted.alu;  // Any ALU RS granted
-
-    // Execute: instructions currently executing (first executing instruction)
-    assign execute_NPC_dbg      = '0;  // EX_COMPLETE_PACKET doesn't have PC
-    assign execute_inst_dbg     = '0;  // EX_COMPLETE_PACKET doesn't have inst
-    assign execute_valid_dbg    = ex_valid[0];  // First execution slot valid
-
-    // Complete: instructions that just completed (from completion register)
-    assign complete_NPC_dbg     = '0;  // EX_COMPLETE_PACKET doesn't have PC
-    assign complete_inst_dbg    = '0;  // EX_COMPLETE_PACKET doesn't have inst
-    assign complete_valid_dbg   = ex_comp_reg_valid[0];
-
-    // Retire: instructions being retired (ROB head)
-    assign retire_NPC_dbg       = rob_head_entries[`N-1].PC;
-    assign retire_inst_dbg      = rob_head_entries[`N-1].inst;
-    assign retire_valid_dbg     = rob_head_valids[`N-1] && rob_head_entries[`N-1].complete;
 
     // Additional debug outputs
-    assign rob_head_valids_dbg  = rob_head_valids;
-    assign rob_head_entries_dbg = rob_head_entries;
-    assign dispatch_count_dbg   = dispatch_count;
-    assign rs_granted_dbg       = rs_granted;
-    assign rs_alu_ready_dbg     = rs_alu_ready;
-    assign issue_entries_dbg    = issue_entries_debug;
+    assign rob_head_valids_dbg    = rob_head_valids;
+    assign rob_head_entries_dbg   = rob_head_entries;
+    assign rob_head_idxs_dbg      = rob_head_idxs;
+    assign dispatch_count_dbg     = dispatch_count;
+    assign rs_granted_dbg         = rs_granted;
+    assign rs_alu_ready_dbg       = rs_alu_ready;
+    assign issue_entries_dbg      = issue_entries_debug;
 
     // Execute stage debug outputs
-    assign ex_valid_dbg         = ex_valid;
-    assign ex_comp_dbg          = ex_comp;
+    assign ex_valid_dbg           = ex_valid;
+    assign ex_comp_dbg            = ex_comp;
+    assign fu_gnt_bus_dbg         = cdb_0.gnt_bus_out;
+    assign mult_request_dbg       = mult_request;
+
+    // Additional RS debug outputs
+    assign rs_mult_entries_dbg    = rs_mult_entries;
+    assign rs_branch_entries_dbg  = rs_branch_entries;
+    assign rs_mem_entries_dbg     = rs_mem_entries;
+
+    // Map table debug output
+    assign map_table_snapshot_dbg = map_table_0.map_table_reg;
+
+    // Freelist debug output (available physical registers)
+    assign freelist_available_dbg = freelist_0.reg_allocator.resource_status;
+
+    // CDB debug outputs
+    assign cdb_output_dbg         = cdb_output;
+    assign cdb_gnt_bus_dbg        = cdb_0.gnt_bus;
+
+    // Dispatch packet debug output
+    assign fetch_disp_packet_dbg  = fetch_disp_packet;
+
+    // Issue clear signals debug output
+    assign rs_clear_signals_dbg   = rs_clear_signals;
 
 endmodule  // cpu

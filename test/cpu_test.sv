@@ -49,10 +49,10 @@ module testbench;
     int out_fileno, cpi_fileno, wb_fileno;  // verilog uses integer file handles with $fopen and $fclose
 
     // variables used in the testbench
-    logic                                 clock;
-    logic                                 reset;
-    logic              [            31:0] clock_count;  // also used for terminating infinite loops
-    logic              [            31:0] instr_count;
+    logic clock;
+    logic reset;
+    logic [31:0] clock_count;  // also used for terminating infinite loops
+    logic [31:0] instr_count;
 
     // Disconnected: proc2mem/mem2proc portions (fake-fetch)
     // MEM_COMMAND             proc2mem_command;
@@ -63,52 +63,37 @@ module testbench;
     // MEM_TAG                 mem2proc_data_tag;
     // MEM_SIZE                proc2mem_size;
 
-    COMMIT_PACKET      [          `N-1:0] committed_insts;
-    EXCEPTION_CODE                        error_status = NO_ERROR;
-
-    ADDR                                  if_NPC_dbg;
-    DATA                                  if_inst_dbg;
-    logic                                 if_valid_dbg;
-    ADDR                                  if_id_NPC_dbg;
-    DATA                                  if_id_inst_dbg;
-    logic                                 if_id_valid_dbg;
-    ADDR                                  id_ex_NPC_dbg;
-    DATA                                  id_ex_inst_dbg;
-    logic                                 id_ex_valid_dbg;
-    ADDR                                  ex_mem_NPC_dbg;
-    DATA                                  ex_mem_inst_dbg;
-    logic                                 ex_mem_valid_dbg;
-    ADDR                                  mem_wb_NPC_dbg;
-    DATA                                  mem_wb_inst_dbg;
-    logic                                 mem_wb_valid_dbg;
+    COMMIT_PACKET [`N-1:0] committed_insts;
+    EXCEPTION_CODE error_status = NO_ERROR;
 
     // OOO debug signals
-    logic              [          `N-1:0] rob_head_valids;
-    ROB_ENTRY          [          `N-1:0] rob_head_entries;
-    logic              [$clog2(`N+1)-1:0] dispatch_count;
-    RS_GRANTED_BANKS                      rs_granted;
+    logic [`N-1:0] rob_head_valids;
+    ROB_ENTRY [`N-1:0] rob_head_entries;
+    ROB_IDX [`N-1:0] rob_head_idxs;
+    logic [$clog2(`N+1)-1:0] dispatch_count;
+    RS_GRANTED_BANKS rs_granted;
 
     // Additional debug for RS and issue state
-    logic              [  `RS_ALU_SZ-1:0] rs_alu_ready;
-    ISSUE_ENTRIES                         issue_entries;
+    logic [`RS_ALU_SZ-1:0] rs_alu_ready;
+    ISSUE_ENTRIES issue_entries;
 
     // Execute stage debug signals
-    logic              [          `N-1:0] ex_valid;
-    EX_COMPLETE_PACKET                    ex_comp;
+    logic [`N-1:0] ex_valid;
+    EX_COMPLETE_PACKET ex_comp;
 
     // Complete stage debug signals
-    ROB_UPDATE_PACKET                     rob_update_packet;
+    ROB_UPDATE_PACKET rob_update_packet;
 
     // ----------------------------------------------------------------
     // Fake-Fetch wires (testbench <-> cpu)
     // ----------------------------------------------------------------
-    ADDR                                  fake_pc;
-    DATA                                  fake_instr                                               [`N-1:0];
-    logic              [$clog2(`N+1)-1:0] fake_nvalid;
-    logic              [$clog2(`N+1)-1:0] fake_consumed;
+    ADDR fake_pc;
+    DATA fake_instr[`N-1:0];
+    logic [$clog2(`N+1)-1:0] fake_nvalid;
+    logic [$clog2(`N+1)-1:0] fake_consumed;
 
-    logic                                 ff_branch_taken;
-    ADDR                                  ff_branch_target;
+    logic ff_branch_taken;
+    ADDR ff_branch_target;
 
     // Debug Output PRF
     DATA [`PHYS_REG_SZ_R10K-1:0] regfile_entries;
@@ -117,7 +102,37 @@ module testbench;
     MAP_ENTRY [`ARCH_REG_SZ-1:0] arch_table_snapshot;
 
     // debug output rs_alu
-    RS_ENTRY            [   `RS_ALU_SZ-1:0] rs_alu_entries;
+    RS_ENTRY [`RS_ALU_SZ-1:0] rs_alu_entries;
+
+    // Additional RS debug outputs
+    RS_ENTRY [`RS_MULT_SZ-1:0] rs_mult_entries;
+    RS_ENTRY [`RS_BRANCH_SZ-1:0] rs_branch_entries;
+    RS_ENTRY [`RS_MEM_SZ-1:0] rs_mem_entries;
+
+    // Map table debug output
+    MAP_ENTRY [`ARCH_REG_SZ-1:0] map_table_snapshot;
+
+    // Freelist debug output (available physical registers)
+    logic [`PHYS_REG_SZ_R10K-1:0] freelist_available;
+
+    // CDB debug outputs
+    CDB_ENTRY [`N-1:0] cdb_output;
+    logic [`N-1:0][`NUM_FU_TOTAL-1:0] cdb_gnt_bus;
+
+    // Dispatch packet debug output
+    FETCH_DISP_PACKET fetch_disp_packet;
+
+    // Issue clear signals debug output
+    RS_CLEAR_SIGNALS rs_clear_signals;
+
+    // Execute stage debug outputs
+    FU_RESULTS fu_results;
+    PRF_READ_EN prf_read_en_src1, prf_read_en_src2;
+    PRF_READ_TAGS prf_read_tag_src1, prf_read_tag_src2;
+    PRF_READ_DATA resolved_src1, resolved_src2;
+    logic [`NUM_FU_MULT-1:0] mult_request, mult_start, mult_done;
+    logic [`NUM_FU_BRANCH-1:0] branch_take;
+    ADDR  [`NUM_FU_BRANCH-1:0] branch_target;
 
 
     // Instantiate the Pipeline
@@ -140,28 +155,10 @@ module testbench;
 
         .committed_insts(committed_insts),
 
-        .fetch_NPC_dbg     (if_NPC_dbg),
-        .fetch_inst_dbg    (if_inst_dbg),
-        .fetch_valid_dbg   (if_valid_dbg),
-        .dispatch_NPC_dbg  (if_id_NPC_dbg),
-        .dispatch_inst_dbg (if_id_inst_dbg),
-        .dispatch_valid_dbg(if_id_valid_dbg),
-        .issue_NPC_dbg     (id_ex_NPC_dbg),
-        .issue_inst_dbg    (id_ex_inst_dbg),
-        .issue_valid_dbg   (id_ex_valid_dbg),
-        .execute_NPC_dbg   (ex_mem_NPC_dbg),
-        .execute_inst_dbg  (ex_mem_inst_dbg),
-        .execute_valid_dbg (ex_mem_valid_dbg),
-        .complete_NPC_dbg  (mem_wb_NPC_dbg),    // Using old names for compatibility
-        .complete_inst_dbg (mem_wb_inst_dbg),
-        .complete_valid_dbg(mem_wb_valid_dbg),
-        .retire_NPC_dbg    (),                  // Not used in testbench
-        .retire_inst_dbg   (),
-        .retire_valid_dbg  (),
-
         // Additional debug outputs
         .rob_head_valids_dbg(rob_head_valids),
         .rob_head_entries_dbg(rob_head_entries),
+        .rob_head_idxs_dbg(rob_head_idxs),
         .dispatch_count_dbg(dispatch_count),
         .rs_granted_dbg(rs_granted),
         .rs_alu_ready_dbg(rs_alu_ready),
@@ -182,6 +179,42 @@ module testbench;
 
         // Debug output from RS_ALU
         .rs_alu_entries(rs_alu_entries),
+
+        // Additional RS debug outputs
+        .rs_mult_entries_dbg(rs_mult_entries),
+        .rs_branch_entries_dbg(rs_branch_entries),
+        .rs_mem_entries_dbg(rs_mem_entries),
+
+        // Map table debug output
+        .map_table_snapshot_dbg(map_table_snapshot),
+
+        // Freelist debug output
+        .freelist_available_dbg(freelist_available),
+
+        // CDB debug outputs
+        .cdb_output_dbg (cdb_output),
+        .cdb_gnt_bus_dbg(cdb_gnt_bus),
+
+        // Dispatch packet debug output
+        .fetch_disp_packet_dbg(fetch_disp_packet),
+
+        // Issue clear signals debug output
+        .rs_clear_signals_dbg(rs_clear_signals),
+
+        // Execute stage debug outputs
+        .fu_results_dbg(fu_results),
+        .prf_read_en_src1_dbg(prf_read_en_src1),
+        .prf_read_en_src2_dbg(prf_read_en_src2),
+        .prf_read_tag_src1_dbg(prf_read_tag_src1),
+        .prf_read_tag_src2_dbg(prf_read_tag_src2),
+        .resolved_src1_dbg(resolved_src1),
+        .resolved_src2_dbg(resolved_src2),
+        .fu_gnt_bus_dbg(),
+        .mult_request_dbg(mult_request),
+        .mult_start_dbg(mult_start),
+        .mult_done_dbg(mult_done),
+        .branch_take_dbg(branch_take),
+        .branch_target_dbg(branch_target),
 
         // ---- Fake-Fetch interface ----
         .ff_instr       (fake_instr),
@@ -251,7 +284,7 @@ module testbench;
     int count;
     always_comb begin
         count = 0;
-        for (int i = 0; i < `N; i++) begin
+        for (integer i = 0; i < `N; i++) begin
             fake_instr[i] = get_inst32(fake_pc + 32'(4 * i));
             if (fake_instr[i] != 32'b0) begin
                 count++;
@@ -349,10 +382,11 @@ module testbench;
 
             output_reg_writeback_and_maybe_halt();
 
-           
+
             // Optional: print CDB broadcasts
-            for (int i = 0; i < `N; i++) begin
-                $display("  CDB[%0d]: valid=%b, tag=%0d, data=%h", i, verisimpleV.cdb_output[i].valid, verisimpleV.cdb_output[i].tag, verisimpleV.cdb_output[i].data);
+            for (integer i = 0; i < `N; i++) begin
+                $display("  CDB[%0d]: valid=%b, tag=%0d, data=%h", i, verisimpleV.cdb_output[i].valid,
+                         verisimpleV.cdb_output[i].tag, verisimpleV.cdb_output[i].data);
             end
 
 
@@ -469,83 +503,274 @@ module testbench;
     // endtask
 
     task print_custom_data;
-        $display("\n--- Cycle %0d ---", clock_count-1);
-        $display("ROB head valid: %b | Dispatch count: %0d | RS ALU ready: %b",
-                rob_head_valids, dispatch_count, rs_alu_ready);
-        
-        // Print all ALU RS entries
-        // for (int i = 0; i < `RS_ALU_SZ; i++) begin
-        //     $display("RS[%0d]: valid=%b ready=%b opcode=%h dest_pr=%0d src_tags=%0d,%0d",
-        //             i,
-        //             verisimpleV.rs_alu[i].valid,
-        //             verisimpleV.rs_alu[i].ready,
-        //             verisimpleV.rs_alu[i].opcode,
-        //             verisimpleV.rs_alu[i].dest_pr,
-        //             verisimpleV.rs_alu[i].src_tag1,
-        //             verisimpleV.rs_alu[i].src_tag2);
-        // end
+        integer prf_count;
+        integer i;
 
-        // Print which RS entries were granted to issue
-        for (int i = 0; i < `N; i++) begin
-            $display("RS grant[%0d]: granted=%b", i, rs_granted.alu[i]);
-        end
+        $display("\n=================================================================================");
+        $display("CPU STATE SNAPSHOT - Cycle %0d", clock_count - 1);
+        $display("=================================================================================");
 
-        // Print Issue entries
-        for (int i = 0; i < `N; i++) begin
-            $display("Issue entry[%0d]: valid=%b", i, issue_entries.alu[i].valid);
-        end
+        // FETCH/DISPATCH STAGE
+        $display("\n--- FETCH/DISPATCH STAGE ---");
+        $display("Dispatch count: %0d", dispatch_count);
+        $display("Fake PC: 0x%08h | Consumed: %0d", fake_pc, fake_consumed);
 
-        // Print execution stage
-        for (int i = 0; i < `N; i++) begin
-            $display("EX[%0d]: valid=%b", i, ex_valid[i]);
-        end
-
-        // Print ROB head entries
-        for (int i = 0; i < `N; i++) begin
-            $display("ROB[%0d]: valid=%b", i, rob_head_valids[i]);
-        end
-
-        // Optional: print CDB broadcasts
-        for (int i = 0; i < `N; i++) begin
-            $display("CDB[%0d]: valid=%b tag=%0d data=%h",
-                    i,
-                    verisimpleV.cdb_output[i].valid,
-                    verisimpleV.cdb_output[i].tag,
-                    verisimpleV.cdb_output[i].data);
-        end
-
-        for (int i = 0; i < `N; i++) begin
-            if (committed_insts[i].valid) begin
-                //ADDR pc = committed_insts[i].NPC - 4;
-                //string inst_str = decode_inst(get_inst32(pc));
-                if (committed_insts[i].reg_idx == `ZERO_REG)
-                    $display("COMMIT[%0d]: PC=%h | ---", i, committed_insts[i].NPC - 4);
-                else
-                    $display("COMMIT[%0d]: PC=%h | r%0d=%h",
-                            i, committed_insts[i].NPC - 4, committed_insts[i].reg_idx, committed_insts[i].data);
+        for (integer i = 0; i < `N; i++) begin
+            if (i < dispatch_count) begin
+                $display("DISP[%0d]: PC=0x%08h | Inst=0x%08h | Uses_RD=%b | RD=%0d", i, fetch_disp_packet.PC[i],
+                         fetch_disp_packet.inst[i], fetch_disp_packet.uses_rd[i], fetch_disp_packet.rd_idx[i]);
             end
         end
 
-        //$display("PRF REGISTER 1: %d", regfile_entries[arch_table_snapshot[1].phys_reg]);
-        //$display("ARCH MAP TABLE R1 MAPPING ->: %d",arch_table_snapshot[1].phys_reg);
+        // RESERVATION STATIONS
+        $display("\n--- RESERVATION STATIONS ---");
 
-        for (int i = 0; i < `RS_ALU_SZ; i++) begin
-            $display("RS[%0d]: valid=%b, opa=%0d, opb=%0d, op_type=%0d, src1_tag=%0d, src1_ready=%b, src2_tag=%0d, src2_ready=%b, dest_tag=%0d, rob_idx=%0d, PC=0x%08h",
-                    i,
-                    rs_alu_entries[i].valid,
-                    rs_alu_entries[i].opa_select,
-                    rs_alu_entries[i].opb_select,
-                    rs_alu_entries[i].op_type,
-                    rs_alu_entries[i].src1_tag,
-                    rs_alu_entries[i].src1_ready,
-                    rs_alu_entries[i].src2_tag,
-                    rs_alu_entries[i].src2_ready,
-                    rs_alu_entries[i].dest_tag,
-                    rs_alu_entries[i].rob_idx,
-                    rs_alu_entries[i].PC
-            );
+        // ALU RS
+        $display("\nALU RS (%0d entries):", `RS_ALU_SZ);
+        for (integer i = 0; i < `RS_ALU_SZ; i++) begin
+            if (rs_alu_entries[i].valid) begin
+                $display("  ALU_RS[%0d]: PC=0x%08h | OP=%0d | Dest=P%0d | Src1=P%0d(%b) | Src2=P%0d(%b) | ROB=%0d", i,
+                         rs_alu_entries[i].PC, rs_alu_entries[i].op_type.category, rs_alu_entries[i].dest_tag,
+                         rs_alu_entries[i].src1_tag, rs_alu_entries[i].src1_ready, rs_alu_entries[i].src2_tag,
+                         rs_alu_entries[i].src2_ready, rs_alu_entries[i].rob_idx);
+            end else begin
+                $display("  ALU_RS[%0d]: EMPTY", i);
+            end
         end
 
+        // MULT RS
+        $display("\nMULT RS (%0d entries):", `RS_MULT_SZ);
+        for (integer i = 0; i < `RS_MULT_SZ; i++) begin
+            if (rs_mult_entries[i].valid) begin
+                $display("  MULT_RS[%0d]: PC=0x%08h | OP=%0d | Dest=P%0d | Src1=P%0d(%b) | Src2=P%0d(%b) | ROB=%0d", i,
+                         rs_mult_entries[i].PC, rs_mult_entries[i].op_type.category, rs_mult_entries[i].dest_tag,
+                         rs_mult_entries[i].src1_tag, rs_mult_entries[i].src1_ready, rs_mult_entries[i].src2_tag,
+                         rs_mult_entries[i].src2_ready, rs_mult_entries[i].rob_idx);
+            end else begin
+                $display("  MULT_RS[%0d]: EMPTY", i);
+            end
+        end
+
+        // BRANCH RS
+        $display("\nBRANCH RS (%0d entries):", `RS_BRANCH_SZ);
+        for (integer i = 0; i < `RS_BRANCH_SZ; i++) begin
+            if (rs_branch_entries[i].valid) begin
+                $display("  BR_RS[%0d]: PC=0x%08h | OP=%0d | Dest=P%0d | Src1=P%0d(%b) | Src2=P%0d(%b) | ROB=%0d", i,
+                         rs_branch_entries[i].PC, rs_branch_entries[i].op_type.category, rs_branch_entries[i].dest_tag,
+                         rs_branch_entries[i].src1_tag, rs_branch_entries[i].src1_ready, rs_branch_entries[i].src2_tag,
+                         rs_branch_entries[i].src2_ready, rs_branch_entries[i].rob_idx);
+            end else begin
+                $display("  BR_RS[%0d]: EMPTY", i);
+            end
+        end
+
+        // MEM RS
+        $display("\nMEM RS (%0d entries):", `RS_MEM_SZ);
+        for (integer i = 0; i < `RS_MEM_SZ; i++) begin
+            if (rs_mem_entries[i].valid) begin
+                $display("  MEM_RS[%0d]: PC=0x%08h | OP=%0d | Dest=P%0d | Src1=P%0d(%b) | Src2=P%0d(%b) | ROB=%0d", i,
+                         rs_mem_entries[i].PC, rs_mem_entries[i].op_type.category, rs_mem_entries[i].dest_tag,
+                         rs_mem_entries[i].src1_tag, rs_mem_entries[i].src1_ready, rs_mem_entries[i].src2_tag,
+                         rs_mem_entries[i].src2_ready, rs_mem_entries[i].rob_idx);
+            end else begin
+                $display("  MEM_RS[%0d]: EMPTY", i);
+            end
+        end
+
+        // ISSUE STAGE
+        $display("\n--- ISSUE STAGE ---");
+        $display("RS Grants - ALU: %b | MULT: %b | BRANCH: %b | MEM: %b", rs_granted.alu, rs_granted.mult, rs_granted.branch,
+                 rs_granted.mem);
+
+        for (integer i = 0; i < `N; i++) begin
+            $display("ISSUE[%0d]: ALU_valid=%b | MULT_valid=%b | BR_valid=%b | MEM_valid=%b", i, issue_entries.alu[i].valid,
+                     issue_entries.mult[i].valid, issue_entries.branch[i].valid, issue_entries.mem[i].valid);
+        end
+
+        $display("Issue Clears - ALU: %b | MULT: %b | BRANCH: %b | MEM: %b", rs_clear_signals.valid_alu,
+                 rs_clear_signals.valid_mult, rs_clear_signals.valid_branch, rs_clear_signals.valid_mem);
+
+        // EXECUTE STAGE
+        $display("\n--- EXECUTE STAGE ---");
+        for (integer i = 0; i < `N; i++) begin
+            $display("EX[%0d]: valid=%b", i, ex_valid[i]);
+        end
+
+        // FU Results
+        $display("\nFunctional Unit Results:");
+        for (integer i = 0; i < `NUM_FU_ALU; i++) begin
+            $display("  ALU[%0d]: 0x%08h", i, fu_results.alu[i]);
+        end
+        for (integer i = 0; i < `NUM_FU_MULT; i++) begin
+            $display("  MULT[%0d]: 0x%08h (start=%b done=%b req=%b)", i, fu_results.mult[i], mult_start[i], mult_done[i],
+                     mult_request[i]);
+        end
+        for (integer i = 0; i < `NUM_FU_BRANCH; i++) begin
+            $display("  BRANCH[%0d]: take=%b target=0x%08h", i, branch_take[i], branch_target[i]);
+        end
+
+        // PRF Reads
+        $display("\nPRF Read Operations:");
+        $display("  ALU reads - src1_en=%b src2_en=%b", prf_read_en_src1.alu, prf_read_en_src2.alu);
+        $display("  MULT reads - src1_en=%b src2_en=%b", prf_read_en_src1.mult, prf_read_en_src2.mult);
+        $display("  BRANCH reads - src1_en=%b src2_en=%b", prf_read_en_src1.branch, prf_read_en_src2.branch);
+
+        // Resolved Operands (after forwarding)
+        $display("\nResolved Operands (after CDB forwarding):");
+        for (integer i = 0; i < `NUM_FU_ALU; i++) begin
+            if (prf_read_en_src1.alu[i] || prf_read_en_src2.alu[i]) begin
+                $display("  ALU[%0d]: src1=0x%08h (P%0d) src2=0x%08h (P%0d)", i, resolved_src1.alu[i], prf_read_tag_src1.alu[i],
+                         resolved_src2.alu[i], prf_read_tag_src2.alu[i]);
+            end
+        end
+        for (integer i = 0; i < `NUM_FU_MULT; i++) begin
+            if (prf_read_en_src1.mult[i] || prf_read_en_src2.mult[i]) begin
+                $display("  MULT[%0d]: src1=0x%08h (P%0d) src2=0x%08h (P%0d)", i, resolved_src1.mult[i],
+                         prf_read_tag_src1.mult[i], resolved_src2.mult[i], prf_read_tag_src2.mult[i]);
+            end
+        end
+        for (integer i = 0; i < `NUM_FU_BRANCH; i++) begin
+            if (prf_read_en_src1.branch[i] || prf_read_en_src2.branch[i]) begin
+                $display("  BRANCH[%0d]: src1=0x%08h (P%0d) src2=0x%08h (P%0d)", i, resolved_src1.branch[i],
+                         prf_read_tag_src1.branch[i], resolved_src2.branch[i], prf_read_tag_src2.branch[i]);
+            end
+        end
+
+        // COMPLETE STAGE
+        $display("\n--- COMPLETE STAGE ---");
+        $display("ROB Update: valid=%b", rob_update_packet.valid);
+        if (rob_update_packet.valid) begin
+            for (integer i = 0; i < `N; i++) begin
+                if (rob_update_packet.valid[i]) begin
+                    $display("  ROB[%0d]: idx=%0d | value=%h | taken=%b | target=%h", i, rob_update_packet.idx[i],
+                             rob_update_packet.values[i], rob_update_packet.branch_taken[i], rob_update_packet.branch_targets[i]);
+                end
+            end
+        end
+
+        // CDB
+        $display("\n--- COMMON DATA BUS (CDB) ---");
+        for (integer i = 0; i < `N; i++) begin
+            if (cdb_output[i].valid) begin
+                $display("CDB[%0d]: tag=P%0d | data=0x%08h | grant_bus=%b", i, cdb_output[i].tag, cdb_output[i].data,
+                         cdb_gnt_bus[i]);
+            end else begin
+                $display("CDB[%0d]: INVALID", i);
+            end
+        end
+
+        // ROB Head Window (oldest N instructions, candidates for retirement)
+        $display("\n--- REORDER BUFFER HEAD WINDOW ---");
+        for (integer i = 0; i < `N; i++) begin
+            if (rob_head_valids[i]) begin
+                $display("HEAD[%0d] (ROB idx=%0d): PC=0x%08h | Inst=0x%08h | RD=r%0d->P%0d | Complete=%b | Branch=%b", i,
+                         rob_head_idxs[i], rob_head_entries[i].PC, rob_head_entries[i].inst, rob_head_entries[i].arch_rd,
+                         rob_head_entries[i].phys_rd, rob_head_entries[i].complete, rob_head_entries[i].branch);
+            end else begin
+                $display("HEAD[%0d]: INVALID", i);
+            end
+        end
+
+        // RETIRE/COMMIT
+        $display("\n--- RETIRE/COMMIT ---");
+        for (integer i = 0; i < `N; i++) begin
+            if (committed_insts[i].valid) begin
+                if (committed_insts[i].reg_idx == `ZERO_REG)
+                    $display("COMMIT[%0d]: PC=0x%08h | ---", i, committed_insts[i].NPC - 4);
+                else
+                    $display(
+                        "COMMIT[%0d]: PC=0x%08h | r%0d = 0x%08h",
+                        i,
+                        committed_insts[i].NPC - 4,
+                        committed_insts[i].reg_idx,
+                        committed_insts[i].data
+                    );
+            end
+        end
+
+        // MAP TABLES
+        $display("\n--- MAP TABLES ---");
+        $display("Architected Map Table (speculative):");
+        for (integer i = 0; i < 8; i++) begin  // Show first 8 registers
+            $display("  r%0d -> P%0d", i, arch_table_snapshot[i].phys_reg);
+        end
+
+        $display("Working Map Table:");
+        for (integer i = 0; i < 8; i++) begin  // Show first 8 registers
+            $display("  r%0d -> P%0d%s", i, map_table_snapshot[i].phys_reg, map_table_snapshot[i].ready ? "+" : "");
+        end
+
+        // FREE LIST
+        $display("\n--- FREE LIST ---");
+        $display("Available Physical Registers: %0d", $countones(freelist_available));
+        $display("Available Register Ranges:");
+
+        begin
+            integer start_range = -1;
+            integer in_range = 0;
+            integer first_available = 1;
+
+            // Find and display contiguous ranges of available registers
+            for (i = 0; i < `PHYS_REG_SZ_R10K; i = i + 1) begin
+                if (freelist_available[i]) begin
+                    if (!in_range) begin
+                        start_range = i;
+                        in_range = 1;
+                    end
+                end else begin
+                    if (in_range) begin
+                        // End of range
+                        if (first_available) begin
+                            first_available = 0;
+                            $write("  ");
+                        end else begin
+                            $write(", ");
+                        end
+
+                        if (start_range == i - 1) begin
+                            $write("P%0d", start_range);
+                        end else begin
+                            $write("P%0d-P%0d", start_range, i - 1);
+                        end
+                        in_range = 0;
+                    end
+                end
+            end
+
+            // Handle case where last register is available
+            if (in_range) begin
+                if (first_available) begin
+                    $write("  ");
+                end else begin
+                    $write(", ");
+                end
+
+                if (start_range == `PHYS_REG_SZ_R10K - 1) begin
+                    $write("P%0d", start_range);
+                end else begin
+                    $write("P%0d-P%0d", start_range, `PHYS_REG_SZ_R10K - 1);
+                end
+            end
+
+            if (first_available) begin
+                $display("  (None)");
+            end else begin
+                $display("");
+            end
+        end
+
+        // PHYSICAL REGISTER FILE (show non-zero values)
+        $display("\n--- PHYSICAL REGISTER FILE (non-zero values) ---");
+        prf_count = 0;
+        for (i = 0; i < `PHYS_REG_SZ_R10K; i = i + 1) begin
+            if (regfile_entries[i] != 0 && prf_count < 16) begin  // Limit output
+                $display("  P%0d = 0x%08h", i, regfile_entries[i]);
+                prf_count = prf_count + 1;
+            end
+        end
+        if (prf_count == 0) $display("  (All registers are zero)");
+
+        $display("=================================================================================\n");
     endtask
 
 
