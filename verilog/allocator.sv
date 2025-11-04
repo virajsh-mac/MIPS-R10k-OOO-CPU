@@ -120,7 +120,7 @@ module allocator #(
             //       This preserves the original parking lot logic behavior
             // TODO changed from XOR to OR as this prevents stalling for 1 cycle instructions (ALU, BRANCH, ETC)
             // need to check if this works for mult as it is not a 1 cycle instruction
-            resource_status <= (resource_status | clear) | resource_allocated;
+            resource_status <= (resource_status | clear) ^ resource_allocated;
         end
     end
 
