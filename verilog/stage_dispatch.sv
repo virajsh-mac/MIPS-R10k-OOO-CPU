@@ -168,6 +168,38 @@ module stage_dispatch (
             end
         end
 
+        // Forward register renaming within dispatch group
+        // For each instruction, check if any earlier instruction renamed its source registers
+        begin
+            PHYS_TAG [`ARCH_REG_SZ-1:0] dispatch_renames;
+            logic [`ARCH_REG_SZ-1:0] has_rename;
+
+            // Initialize rename map
+            dispatch_renames = '0;
+            has_rename = '0;
+
+            // Build rename map incrementally as we process each instruction
+            for (int i = 0; i < dispatch_count; i++) begin
+                if (fetch_valid[i]) begin
+                    // First apply forwarding from previous renames to this instruction
+                    if (has_rename[fetch_packet.rs1_idx[i]]) begin
+                        local_reg1_tag[i] = dispatch_renames[fetch_packet.rs1_idx[i]];
+                        local_reg1_ready[i] = 1'b0;
+                    end
+                    if (has_rename[fetch_packet.rs2_idx[i]]) begin
+                        local_reg2_tag[i] = dispatch_renames[fetch_packet.rs2_idx[i]];
+                        local_reg2_ready[i] = 1'b0;
+                    end
+
+                    // Then add this instruction's rename to the map for future instructions
+                    if (fetch_packet.uses_rd[i]) begin
+                        dispatch_renames[fetch_packet.rd_idx[i]] = allocated_phys[i];
+                        has_rename[fetch_packet.rd_idx[i]] = 1'b1;
+                    end
+                end
+            end
+        end
+
         // Setup register remapping writes
         for (int i = 0; i < `N; i++) begin
             if (i < dispatch_count && fetch_valid[i] && fetch_packet.uses_rd[i]) begin
