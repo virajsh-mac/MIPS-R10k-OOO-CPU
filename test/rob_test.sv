@@ -192,7 +192,7 @@ module testbench;
             //@(posedge clock);
 
             // Check that head entry is now complete
-            if (head_entries[`N-1].complete) begin
+            if (head_entries[0].complete) begin
                 $display("  PASS: Head entry marked as complete");
             end else begin
                 $display("  FAIL: Head entry should be marked as complete");
@@ -222,7 +222,7 @@ module testbench;
             @(negedge clock);
 
             // Check that head entry has mispredict flag set
-            if (head_entries[`N-1].mispredict) begin
+            if (head_entries[0].mispredict) begin
                 $display("  PASS: Head entry marked with mispredict");
             end else begin
                 $display("  FAIL: Head entry should be marked with mispredict");
@@ -260,7 +260,7 @@ module testbench;
             // Should be able to retire both now (since head entries are complete)
             // The ROB retire logic is implicit - when head entries are complete,
             // they can be retired by external logic
-            if (head_entries[`N-1].complete && head_entries[`N-2].complete) begin
+            if (head_entries[0].complete && head_entries[`N-2].complete) begin
                 $display("  PASS: Both head entries are complete and ready for retire");
             end else begin
                 $display("  FAIL: Both head entries should be complete");

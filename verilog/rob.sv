@@ -9,9 +9,10 @@
 //                                                                                             //   
 //                1. No retire on current instructions completed this cycle for clock period   //
 //                2. Write to Physical Register File in complete stage                         //
-//                3. Only retire when all `N after head pointers are marked as complete        //
-//                4. free_count_next, head_idx_next, tail_idx_next are calculated based on     //
-//                the number of retired and dispatched instructions                            //
+//                3. Retire a longest in-order prefix (0..N) of {valid && complete}            //
+//                   entries at the head.                                                      //
+//                4. free_count_next, head_idx_next, tail_idx_next are computed                //
+//                   from retired/dispatch counts                                              //
 /////////////////////////////////////////////////////////////////////////////////////////////////
 `include "sys_defs.svh"
 
@@ -95,14 +96,24 @@ module rob (
         end
     end
 
-    // Expose head window: N-1 = oldest, 0 = youngest (matches stage_retire)
+    // Expose head window: 0 = oldest, N-1 = youngest
     always_comb begin
         for (int i = 0; i < `N; i++) begin
-            head_entries[`N-1 - i] = rob_entries[(head_idx + i) % `ROB_SZ];
-            head_idxs[`N-1 - i]    = ROB_IDX'((head_idx + i) % `ROB_SZ);
-            head_valids[`N-1 - i]  = rob_entries[(head_idx + i) % `ROB_SZ].valid;
+            head_entries[i] = rob_entries[(head_idx + i) % `ROB_SZ];
+            head_idxs[i]    = ROB_IDX'((head_idx + i) % `ROB_SZ);
+            head_valids[i]  = rob_entries[(head_idx + i) % `ROB_SZ].valid;
         end
     end
+
+
+    // Expose head window: N-1 = oldest, 0 = youngest (matches stage_retire)
+    // always_comb begin
+    //     for (int i = 0; i < `N; i++) begin
+    //         head_entries[`N-1 - i] = rob_entries[(head_idx + i) % `ROB_SZ];
+    //         head_idxs[`N-1 - i]    = ROB_IDX'((head_idx + i) % `ROB_SZ);
+    //         head_valids[`N-1 - i]  = rob_entries[(head_idx + i) % `ROB_SZ].valid;
+    //     end
+    // end
 
     assign free_slots = free_count;
 
@@ -120,7 +131,20 @@ module rob (
         end
     end
 
+`ifndef SYNTH
+always_ff @(posedge clock) begin
+  if (!reset) begin
+    $display("%0t | head=%0d tail=%0d retire_count=%0d dispatched=%0d",
+             $time, head_idx, tail_idx, retire_count, $countones(entry_packet_valid_bits));
+    for (int i = 0; i < `N; i++) begin
+      $display("  H[%0d] idx=%0d valid=%0b complete=%0b",
+               i,
+               ((head_idx + i) % `ROB_SZ),
+               rob_entries[((head_idx + i) % `ROB_SZ)].valid,
+               rob_entries[((head_idx + i) % `ROB_SZ)].complete);
+    end
+  end
+end
+`endif
+
 endmodule
-
-
-
