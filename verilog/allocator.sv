@@ -57,14 +57,13 @@ module allocator #(
     // which requesters are prioritized when multiple requests arrive simultaneously.
     logic [NUM_REQUESTS-1:0][NUM_REQUESTS-1:0] request_gnt_bus;
 
-
     // Priority selector for resource allocation: grants available resources
     // to incoming requests based on priority (alternating MSB/LSB priority scheme)
     psel_gen #(
         .WIDTH(NUM_RESOURCES),
         .REQS (NUM_REQUESTS)
     ) resource_psel (
-        .req(resource_status),
+        .req(resource_status | clear),
         .gnt_bus(resource_gnt_bus)
     );
 

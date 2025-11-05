@@ -41,7 +41,7 @@ module cdb (
 
     psel_gen #(
         .WIDTH(`NUM_FU_TOTAL),  // 6
-        .REQS (`N)              // 2
+        .REQS (`N)              // 3
     ) cdb_arbiter (
         // CRITICAL: Priority order is BRANCH (highest), ALU, MEM, MULT (lowest)
         // This concatenation order determines arbitration priority

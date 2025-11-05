@@ -18,7 +18,9 @@ module stage_issue (
     output logic [`RS_ALU_SZ-1:0] rs_alu_requests_dbg,
     output logic [`RS_MULT_SZ-1:0] rs_mult_requests_dbg,
     output logic [`RS_BRANCH_SZ-1:0] rs_branch_requests_dbg,
-    output logic [`RS_MEM_SZ-1:0] rs_mem_requests_dbg
+    output logic [`RS_MEM_SZ-1:0] rs_mem_requests_dbg,
+    output logic [`NUM_FU_ALU-1:0] alu_clear_signals_dbg,  // TEMP: ALU clear signals from CDB
+    output logic [`RS_ALU_SZ-1:0][`NUM_FU_ALU-1:0] grants_alu_dbg
 );
 
     // Helper: Check if RS entry is ready
@@ -177,7 +179,6 @@ module stage_issue (
             end
         end
 
-
         // ALU - use structured ALU bank
         for (int rs = 0; rs < `RS_ALU_SZ; rs++) begin
             for (int fu = 0; fu < `NUM_FU_ALU; fu++) begin
@@ -249,6 +250,8 @@ module stage_issue (
     assign rs_mult_requests_dbg = rs_ready_mult;
     assign rs_branch_requests_dbg = rs_ready_branch;
     assign rs_mem_requests_dbg = rs_ready_mem;
+    assign alu_clear_signals_dbg = fu_grants.alu;  // TEMP: ALU clear signals from CDB
+    assign grants_alu_dbg = grants_alu;
 
     always_ff @(posedge clock) begin
         if (reset | mispredict) begin

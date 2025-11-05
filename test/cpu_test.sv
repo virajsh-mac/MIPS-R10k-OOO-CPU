@@ -83,6 +83,12 @@ module testbench;
     logic [`RS_BRANCH_SZ-1:0] rs_branch_requests;
     logic [`RS_MEM_SZ-1:0] rs_mem_requests;
 
+    // TEMP: ALU clear signals
+    logic [`NUM_FU_ALU-1:0] alu_clear_signals;
+
+    // TEMP: allocator grants
+    logic [`RS_ALU_SZ-1:0][`NUM_FU_ALU-1:0] grants_alu;
+
     // Execute stage debug signals
     logic [`N-1:0] ex_valid;
     EX_COMPLETE_PACKET ex_comp;
@@ -183,6 +189,8 @@ module testbench;
         .rs_mult_requests_dbg(rs_mult_requests),
         .rs_branch_requests_dbg(rs_branch_requests),
         .rs_mem_requests_dbg(rs_mem_requests),
+        .alu_clear_signals_dbg(alu_clear_signals),
+        .grants_alu_dbg(grants_alu),
 
         // Execute stage debug outputs
         .ex_valid_dbg(ex_valid),
@@ -627,6 +635,14 @@ module testbench;
         $display("RS CLEARS (immediate, follow grants):");
         $display("  ALU: %b | MULT: %b | BRANCH: %b | MEM: %b", rs_clear_signals.valid_alu, rs_clear_signals.valid_mult,
                  rs_clear_signals.valid_branch, rs_clear_signals.valid_mem);
+
+        $display("TEMP DEBUG - ALU Clear Signals from CDB: %b", alu_clear_signals);
+        $display("TEMP DEBUG - Grants ALU[0]: %b", grants_alu[0]);
+        $display("TEMP DEBUG - Grants ALU[1]: %b", grants_alu[1]);
+        $display("TEMP DEBUG - Grants ALU[2]: %b", grants_alu[2]);
+        $display("TEMP DEBUG - Grants ALU[3]: %b", grants_alu[3]);
+        $display("TEMP DEBUG - Grants ALU[4]: %b", grants_alu[4]);
+        $display("TEMP DEBUG - Grants ALU[5]: %b", grants_alu[5]);
 
         // EXECUTE STAGE
         $display("\n--- EXECUTE STAGE ---");

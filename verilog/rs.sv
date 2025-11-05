@@ -38,11 +38,15 @@ module rs #(
 
     // Outputs to issue/dispatch
     output RS_ENTRY [RS_SIZE-1:0] entries,  // Full RS entries for issue selection
-    output logic [ALLOC_WIDTH-1:0][RS_SIZE-1:0] granted_entries  // Granted RS slots for each allocation request
+    output logic [ALLOC_WIDTH-1:0][RS_SIZE-1:0] granted_entries,  // Granted RS slots for each allocation request
+    output logic [$clog2(RS_SIZE+1)-1:0] free_slots  // Number of free RS entries
 );
 
     // Internal storage: array of RS entries
     RS_ENTRY [RS_SIZE-1:0] rs_array, rs_array_next;
+
+    // Free slots counter
+    logic [$clog2(RS_SIZE+1)-1:0] free_count, free_count_next;
 
     // Generic allocator for RS entries - handles allocation in parallel
     logic [RS_SIZE-1:0] clear_mask;
@@ -71,6 +75,7 @@ module rs #(
     // Allocating and Freeing RS entries
     always_comb begin
         rs_array_next = rs_array;
+        free_count_next = free_count;
 
         // Clear valid bits for entries that are being issued
         // Note: Clearing happens here for the RS array state, while the allocator
@@ -78,6 +83,7 @@ module rs #(
         for (int i = 0; i < CLEAR_WIDTH; i++) begin
             if (clear_valid[i]) begin
                 rs_array_next[clear_idxs[i]].valid = 1'b0;
+                free_count_next++;  // Increment free count on clear
             end
         end
 
@@ -88,6 +94,7 @@ module rs #(
             for (int j = 0; j < RS_SIZE; j++) begin
                 if (granted_entries[i][j]) begin
                     rs_array_next[j] = alloc_entries[i];
+                    free_count_next--;  // Decrement free count on allocation
                 end
             end
         end
@@ -111,14 +118,17 @@ module rs #(
 
     end
 
-    // RS Output: expose entries array for issue selection
+    // RS Output: expose entries array and free slots for issue selection
     assign entries = rs_array;
+    assign free_slots = free_count;
 
     always_ff @(posedge clock) begin
         if (reset | mispredict) begin
             rs_array <= '0;
+            free_count <= RS_SIZE;
         end else begin
             rs_array <= rs_array_next;
+            free_count <= free_count_next;
         end
     end
 

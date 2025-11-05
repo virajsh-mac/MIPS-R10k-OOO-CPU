@@ -49,6 +49,8 @@ module cpu (
     output logic [`RS_MULT_SZ-1:0] rs_mult_requests_dbg,
     output logic [`RS_BRANCH_SZ-1:0] rs_branch_requests_dbg,
     output logic [`RS_MEM_SZ-1:0] rs_mem_requests_dbg,
+    output logic [`NUM_FU_ALU-1:0] alu_clear_signals_dbg,  // TEMP: ALU clear signals
+    output logic [`RS_ALU_SZ-1:0][`NUM_FU_ALU-1:0] grants_alu_dbg,  // TEMP: allocator grants
 
     // Execute stage debug outputs
     output logic [`N-1:0] ex_valid_dbg,
@@ -222,8 +224,8 @@ module cpu (
     // Connect dispatch outputs to freelist inputs
     assign freelist_alloc_req  = free_alloc_valid;
 
-    // Calculate freelist free slots (placeholder - TODO: get from freelist module)
-    assign freelist_free_slots = 32;  // Placeholder
+    // Get free slots from freelist module
+    assign freelist_free_slots = freelist_0.free_slots;
 
     // TODO Debug for PRF remove when synthesizing/ not needed anymore
     DATA [`PHYS_REG_SZ_R10K-1:0] regfile_entries;
@@ -380,8 +382,14 @@ module cpu (
 
         // From ROB/Freelist
         .free_slots_rob    (rob_free_slots),
-        .free_slots_freelst(freelist_free_slots),
         .rob_alloc_idxs    (rob_alloc_idxs),
+        .freelist_free_slots(freelist_free_slots),
+
+        // From RS Banks: free slot counts
+        .rs_alu_free_slots   (rs_alu.free_slots),
+        .rs_mult_free_slots  (rs_mult.free_slots),
+        .rs_branch_free_slots(rs_branch.free_slots),
+        .rs_mem_free_slots   (rs_mem.free_slots),
 
         // From RS Banks: granted allocations (from current cycle)
         .rs_alu_granted(rs_granted.alu),
@@ -604,7 +612,9 @@ module cpu (
         .rs_alu_requests_dbg(rs_alu_requests_dbg),
         .rs_mult_requests_dbg(rs_mult_requests_dbg),
         .rs_branch_requests_dbg(rs_branch_requests_dbg),
-        .rs_mem_requests_dbg(rs_mem_requests_dbg)
+        .rs_mem_requests_dbg(rs_mem_requests_dbg),
+        .alu_clear_signals_dbg(alu_clear_signals_dbg),
+        .grants_alu_dbg(grants_alu_dbg)
     );
 
     // Extract clear signals from structured output for RS modules

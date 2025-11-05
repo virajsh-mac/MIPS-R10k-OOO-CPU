@@ -13,12 +13,12 @@ module testbench;
     FETCH_DISP_PACKET                                                                fetch_packet;
     logic                   [                         `N-1:0]                        fetch_valid;
     logic                   [          $clog2(`ROB_SZ+1)-1:0]                        free_slots_rob;
-    logic                   [$clog2(`PHYS_REG_SZ_R10K+1)-1:0]                        free_slots_freelst;
+    logic                   [$clog2(`PHYS_REG_SZ_R10K+1)-1:0]                        freelist_free_slots;
     ROB_IDX                 [                         `N-1:0]                        rob_alloc_idxs;
-    logic                   [                         `N-1:0][       `RS_ALU_SZ-1:0] rs_alu_granted;
-    logic                   [                         `N-1:0][      `RS_MULT_SZ-1:0] rs_mult_granted;
-    logic                   [                         `N-1:0][    `RS_BRANCH_SZ-1:0] rs_branch_granted;
-    logic                   [                         `N-1:0][       `RS_MEM_SZ-1:0] rs_mem_granted;
+    logic                   [       $clog2(`RS_ALU_SZ+1)-1:0]                        rs_alu_free_slots;
+    logic                   [     $clog2(`RS_MULT_SZ+1)-1:0]                        rs_mult_free_slots;
+    logic                   [   $clog2(`RS_BRANCH_SZ+1)-1:0]                        rs_branch_free_slots;
+    logic                   [      $clog2(`RS_MEM_SZ+1)-1:0]                        rs_mem_free_slots;
 
     // Outputs from stage_dispatch
     logic                   [                 $clog2(`N)-1:0]                        dispatch_count;
@@ -43,12 +43,12 @@ module testbench;
         .fetch_packet(fetch_packet),
         .fetch_valid(fetch_valid),
         .free_slots_rob(free_slots_rob),
-        .free_slots_freelst(free_slots_freelst),
         .rob_alloc_idxs(rob_alloc_idxs),
-        .rs_alu_granted(rs_alu_granted),
-        .rs_mult_granted(rs_mult_granted),
-        .rs_branch_granted(rs_branch_granted),
-        .rs_mem_granted(rs_mem_granted),
+        .freelist_free_slots(freelist_free_slots),
+        .rs_alu_free_slots(rs_alu_free_slots),
+        .rs_mult_free_slots(rs_mult_free_slots),
+        .rs_branch_free_slots(rs_branch_free_slots),
+        .rs_mem_free_slots(rs_mem_free_slots),
         .dispatch_count(dispatch_count),
         .rob_entry_packet(rob_entry_packet),
         .rs_alloc(rs_alloc),
@@ -151,6 +151,12 @@ module testbench;
     // Helper to reset and wait for proper timing
     task reset_dut;
         reset = 1;
+        free_slots_rob = `ROB_SZ;
+        freelist_free_slots = 32;
+        rs_alu_free_slots = `RS_ALU_SZ;
+        rs_mult_free_slots = `RS_MULT_SZ;
+        rs_branch_free_slots = `RS_BRANCH_SZ;
+        rs_mem_free_slots = `RS_MEM_SZ;
         @(negedge clock);
         @(negedge clock);
         reset = 0;
@@ -168,12 +174,12 @@ module testbench;
         fetch_packet = empty_fetch_packet();
         fetch_valid = '0;
         free_slots_rob = `ROB_SZ;
-        free_slots_freelst = 32;
+        freelist_free_slots = 32;
         rob_alloc_idxs = '0;
-        rs_alu_granted = '1;  // Assume grants available
-        rs_mult_granted = '1;
-        rs_branch_granted = '1;
-        rs_mem_granted = '1;
+        rs_alu_free_slots = `RS_ALU_SZ;     // Full RS available
+        rs_mult_free_slots = `RS_MULT_SZ;   // Full RS available
+        rs_branch_free_slots = `RS_BRANCH_SZ; // Full RS available
+        rs_mem_free_slots = `RS_MEM_SZ;     // Full RS available
         granted_regs = '0;
         // Set up default physical register grants for any allocation requests
         // Each instruction gets a distinct physical register starting from 32
@@ -207,7 +213,7 @@ module testbench;
         $display("\nTest %0d: ROB full prevents dispatch", test_num++);
         reset_dut();
         free_slots_rob = `ROB_SZ;  // Reset to default
-        free_slots_freelst = 32;  // Reset to default
+        freelist_free_slots = 32;  // Reset to default
         begin
             fetch_packet = empty_fetch_packet();
             set_alu_inst(fetch_packet, 0, 1, 2, 3);
@@ -228,12 +234,12 @@ module testbench;
         $display("\nTest %0d: Freelist empty prevents dispatch", test_num++);
         reset_dut();
         free_slots_rob = `ROB_SZ;  // Reset to default
-        free_slots_freelst = 32;  // Reset to default
+        freelist_free_slots = 32;  // Reset to default
         begin
             fetch_packet = empty_fetch_packet();
             set_alu_inst(fetch_packet, 0, 1, 2, 3);
             fetch_valid[0] = 1'b1;
-            free_slots_freelst = 0;  // Freelist empty
+            freelist_free_slots = 0;  // Freelist empty
 
             @(negedge clock);
 
@@ -249,7 +255,7 @@ module testbench;
         $display("\nTest %0d: Multiple instruction categories dispatch", test_num++);
         reset_dut();
         free_slots_rob = `ROB_SZ;  // Reset to default
-        free_slots_freelst = 32;  // Reset to default
+        freelist_free_slots = 32;  // Reset to default
         begin
             fetch_packet = empty_fetch_packet();
             set_alu_inst(fetch_packet, 0, 1, 2, 3);
@@ -272,7 +278,7 @@ module testbench;
         $display("\nTest %0d: Branch instruction doesn't allocate from freelist", test_num++);
         reset_dut();
         free_slots_rob     = `ROB_SZ;  // Reset to default
-        free_slots_freelst = 32;  // Reset to default
+        freelist_free_slots = 32;  // Reset to default
         fetch_valid        = '0;  // Reset fetch_valid
         begin
             fetch_packet = empty_fetch_packet();
@@ -294,7 +300,7 @@ module testbench;
         $display("\nTest %0d: Map table write requests generated", test_num++);
         reset_dut();
         free_slots_rob = `ROB_SZ;  // Reset to default
-        free_slots_freelst = 32;  // Reset to default
+        freelist_free_slots = 32;  // Reset to default
         begin
             fetch_packet = empty_fetch_packet();
             set_alu_inst(fetch_packet, 0, 1, 2, 3);
@@ -314,7 +320,7 @@ module testbench;
         // Test 7: Combinational behavior - no valid inputs = no outputs
         $display("\nTest %0d: Combinational behavior verified", test_num++);
         free_slots_rob = `ROB_SZ;  // Reset to default
-        free_slots_freelst = 32;  // Reset to default
+        freelist_free_slots = 32;  // Reset to default
         begin
             // Test that with no valid instructions, outputs are inactive
             fetch_packet = empty_fetch_packet();
@@ -335,7 +341,7 @@ module testbench;
         $display("\nTest %0d: Mixed valid/invalid instructions", test_num++);
         reset_dut();
         free_slots_rob = `ROB_SZ;  // Reset to default
-        free_slots_freelst = 32;  // Reset to default
+        freelist_free_slots = 32;  // Reset to default
         begin
             fetch_packet = empty_fetch_packet();
             set_alu_inst(fetch_packet, 0, 1, 2, 3);  // Valid ALU
@@ -366,7 +372,7 @@ module testbench;
             set_alu_inst(fetch_packet, 1, 4, 5, 6);  // Needs dest reg
             set_alu_inst(fetch_packet, 2, 7, 8, 9);  // Needs dest reg
             fetch_valid = 3'b111;
-            free_slots_freelst = 2;  // Only enough for 2 instructions
+            freelist_free_slots = 2;  // Only enough for 2 instructions
 
             @(negedge clock);
 
@@ -382,7 +388,7 @@ module testbench;
         // Test 10: Partial dispatch due to ROB constraints
         $display("\nTest %0d: Partial dispatch due to ROB", test_num++);
         reset_dut();
-        free_slots_freelst = 32;  // Reset to default
+        freelist_free_slots = 32;  // Reset to default
         begin
             fetch_packet = empty_fetch_packet();
             set_alu_inst(fetch_packet, 0, 1, 2, 3);
@@ -406,7 +412,7 @@ module testbench;
         $display("\nTest %0d: Mixed dest/no-dest instructions", test_num++);
         reset_dut();
         free_slots_rob = `ROB_SZ;  // Reset to default
-        free_slots_freelst = 32;  // Reset to default
+        freelist_free_slots = 32;  // Reset to default
         begin
             fetch_packet = empty_fetch_packet();
             set_alu_inst(fetch_packet, 0, 1, 2, 3);  // Has dest reg
@@ -429,7 +435,7 @@ module testbench;
         $display("\nTest %0d: Map table writes for partial dispatch", test_num++);
         reset_dut();
         free_slots_rob = `ROB_SZ;  // Reset to default
-        free_slots_freelst = 1;  // Only enough for 1 instruction
+        freelist_free_slots = 1;  // Only enough for 1 instruction
         begin
             fetch_packet = empty_fetch_packet();
             set_alu_inst(fetch_packet, 0, 1, 2, 10);  // Has dest reg -> should dispatch and write map
@@ -454,7 +460,7 @@ module testbench;
         $display("\nTest %0d: RS allocation counters", test_num++);
         reset_dut();
         free_slots_rob = `ROB_SZ;  // Reset to default
-        free_slots_freelst = 32;  // Reset to default
+        freelist_free_slots = 32;  // Reset to default
         begin
             fetch_packet = empty_fetch_packet();
             set_alu_inst(fetch_packet, 0, 1, 2, 3);  // ALU -> index 0
@@ -483,7 +489,7 @@ module testbench;
             set_alu_inst(fetch_packet, 1, 4, 5, 6);
             fetch_valid        = 2'b11;
             free_slots_rob     = 2;  // Exactly enough ROB slots
-            free_slots_freelst = 2;  // Exactly enough freelist slots
+            freelist_free_slots = 2;  // Exactly enough freelist slots
 
             @(negedge clock);
 
@@ -501,7 +507,7 @@ module testbench;
         $display("\nTest %0d: All instruction categories", test_num++);
         reset_dut();
         free_slots_rob = `ROB_SZ;  // Reset to default
-        free_slots_freelst = 32;  // Reset to default
+        freelist_free_slots = 32;  // Reset to default
         begin
             fetch_packet = empty_fetch_packet();
             set_alu_inst(fetch_packet, 0, 1, 2, 3);  // ALU
@@ -524,7 +530,7 @@ module testbench;
         $display("\nTest %0d: Instruction ordering in dispatch", test_num++);
         reset_dut();
         free_slots_rob = `ROB_SZ;  // Reset to default
-        free_slots_freelst = 32;  // Reset to default
+        freelist_free_slots = 32;  // Reset to default
         begin
             fetch_packet = empty_fetch_packet();
             set_alu_inst(fetch_packet, 0, 1, 2, 10);  // rd=10
@@ -552,7 +558,7 @@ module testbench;
         $display("\nTest %0d: Map table read requests", test_num++);
         reset_dut();
         free_slots_rob = `ROB_SZ;  // Reset to default
-        free_slots_freelst = 32;  // Reset to default
+        freelist_free_slots = 32;  // Reset to default
         begin
             fetch_packet = empty_fetch_packet();
             set_alu_inst(fetch_packet, 0, 1, 2, 3);
@@ -566,6 +572,107 @@ module testbench;
             end else begin
                 $display("  FAIL: Map table read requests incorrect (rs1=%0d, rs2=%0d, told=%0d)",
                          maptable_read_req.rs1_addrs[0], maptable_read_req.rs2_addrs[0], maptable_read_req.told_addrs[0]);
+                failed = 1;
+            end
+        end
+
+        // Test 18: RS ALU bank full prevents any dispatch (ordered constraint)
+        $display("\nTest %0d: RS ALU bank full blocks ordered dispatch", test_num++);
+        reset_dut();
+        free_slots_rob = `ROB_SZ;  // Reset to default
+        freelist_free_slots = 32;  // Reset to default
+        begin
+            fetch_packet = empty_fetch_packet();
+            set_alu_inst(fetch_packet, 0, 1, 2, 3);    // ALU instruction (blocked by full RS)
+            set_mult_inst(fetch_packet, 1, 4, 5, 6);   // MULT instruction (can't dispatch due to ordering)
+            fetch_valid = 2'b11;
+            rs_alu_free_slots = 0;  // ALU RS full
+            rs_mult_free_slots = 2; // MULT RS has space
+
+            @(negedge clock);
+
+            if (dispatch_count == 0 && !rs_alloc.alu.valid[0] && !rs_alloc.mult.valid[0]) begin
+                $display("  PASS: Ordered dispatch stops when first instruction blocked");
+            end else begin
+                $display("  FAIL: Should not dispatch when first instruction blocked (count=%0d, alu_disp=%b, mult_disp=%b)",
+                         dispatch_count, rs_alloc.alu.valid[0], rs_alloc.mult.valid[0]);
+                failed = 1;
+            end
+        end
+
+        // Test 19: Partial dispatch due to RS bank constraints
+        $display("\nTest %0d: Partial dispatch due to RS bank full", test_num++);
+        reset_dut();
+        free_slots_rob = `ROB_SZ;  // Reset to default
+        freelist_free_slots = 32;  // Reset to default
+        begin
+            fetch_packet = empty_fetch_packet();
+            set_alu_inst(fetch_packet, 0, 1, 2, 3);    // ALU (should dispatch)
+            set_alu_inst(fetch_packet, 1, 4, 5, 6);    // ALU (should dispatch)
+            set_mult_inst(fetch_packet, 2, 7, 8, 9);   // MULT (should be blocked)
+            fetch_valid = 3'b111;
+            rs_alu_free_slots = 2;   // Enough for 2 ALUs
+            rs_mult_free_slots = 0;  // MULT RS full
+
+            @(negedge clock);
+
+            if (dispatch_count == 2 && rs_alloc.alu.valid[0] && rs_alloc.alu.valid[1] && !rs_alloc.mult.valid[0]) begin
+                $display("  PASS: Dispatched 2 ALUs, stopped at MULT due to full RS");
+            end else begin
+                $display("  FAIL: Partial RS dispatch incorrect (count=%0d, alu0=%b, alu1=%b, mult0=%b)",
+                         dispatch_count, rs_alloc.alu.valid[0], rs_alloc.alu.valid[1], rs_alloc.mult.valid[0]);
+                failed = 1;
+            end
+        end
+
+        // Test 20: Ordering - dispatch stops at first instruction that hits RS constraint
+        $display("\nTest %0d: RS ordering - stops at first blocked instruction", test_num++);
+        reset_dut();
+        free_slots_rob = `ROB_SZ;  // Reset to default
+        freelist_free_slots = 32;  // Reset to default
+        begin
+            fetch_packet = empty_fetch_packet();
+            set_branch_inst(fetch_packet, 0, 1, 2);    // BRANCH (should dispatch)
+            set_alu_inst(fetch_packet, 1, 3, 4, 5);    // ALU (should be blocked)
+            set_mult_inst(fetch_packet, 2, 6, 7, 8);   // MULT (should not reach due to ordering)
+            fetch_valid = 3'b111;
+            rs_branch_free_slots = 1; // BRANCH has space
+            rs_alu_free_slots = 0;    // ALU RS full
+            rs_mult_free_slots = 1;   // MULT has space but comes after blocked ALU
+
+            @(negedge clock);
+
+            if (dispatch_count == 1 && rs_alloc.branch.valid[0] && !rs_alloc.alu.valid[0] && !rs_alloc.mult.valid[0]) begin
+                $display("  PASS: Dispatched BRANCH, stopped at ALU RS constraint, MULT not reached");
+            end else begin
+                $display("  FAIL: RS ordering incorrect (count=%0d, branch=%b, alu=%b, mult=%b)",
+                         dispatch_count, rs_alloc.branch.valid[0], rs_alloc.alu.valid[0], rs_alloc.mult.valid[0]);
+                failed = 1;
+            end
+        end
+
+        // Test 21: All RS banks have different constraints
+        $display("\nTest %0d: Mixed RS bank constraints", test_num++);
+        reset_dut();
+        free_slots_rob = `ROB_SZ;  // Reset to default
+        freelist_free_slots = 32;  // Reset to default
+        begin
+            fetch_packet = empty_fetch_packet();
+            set_alu_inst(fetch_packet, 0, 1, 2, 3);     // ALU (OK)
+            set_mult_inst(fetch_packet, 1, 4, 5, 6);    // MULT (blocked)
+            set_branch_inst(fetch_packet, 2, 7, 8);     // BRANCH (OK, but after blocked MULT)
+            fetch_valid = 3'b111;
+            rs_alu_free_slots = 1;     // ALU: 1 slot
+            rs_mult_free_slots = 0;    // MULT: 0 slots
+            rs_branch_free_slots = 1;  // BRANCH: 1 slot
+
+            @(negedge clock);
+
+            if (dispatch_count == 1 && rs_alloc.alu.valid[0] && !rs_alloc.mult.valid[0] && !rs_alloc.branch.valid[0]) begin
+                $display("  PASS: Dispatched ALU, stopped at MULT constraint");
+            end else begin
+                $display("  FAIL: Mixed RS constraints incorrect (count=%0d, alu=%b, mult=%b, branch=%b)",
+                         dispatch_count, rs_alloc.alu.valid[0], rs_alloc.mult.valid[0], rs_alloc.branch.valid[0]);
                 failed = 1;
             end
         end

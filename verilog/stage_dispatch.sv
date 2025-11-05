@@ -11,8 +11,12 @@ module stage_dispatch (
 
     // Structural hazard inputs
     input logic   [          $clog2(`ROB_SZ+1)-1:0] free_slots_rob,
-    input logic   [$clog2(`PHYS_REG_SZ_R10K+1)-1:0] free_slots_freelst,
     input ROB_IDX [                         `N-1:0] rob_alloc_idxs,
+    input logic   [$clog2(`PHYS_REG_SZ_R10K+1)-1:0] freelist_free_slots,
+    input logic   [       $clog2(`RS_ALU_SZ+1)-1:0] rs_alu_free_slots,
+    input logic   [     $clog2(`RS_MULT_SZ+1)-1:0] rs_mult_free_slots,
+    input logic   [   $clog2(`RS_BRANCH_SZ+1)-1:0] rs_branch_free_slots,
+    input logic   [      $clog2(`RS_MEM_SZ+1)-1:0] rs_mem_free_slots,
 
     // RS allocation grants (unused in current impl)
     input logic [`N-1:0][`RS_ALU_SZ-1:0] rs_alu_granted,
@@ -41,7 +45,9 @@ module stage_dispatch (
 
     // Dispatch control
     logic [$clog2(`N+1)-1:0] num_to_dispatch;
-    int num_valid_from_fetch, num_rds_needed;
+    int num_valid_from_fetch;
+    int rob_slots_used, freelist_slots_used;
+    logic rs_bank_available;
 
     // RS allocation counters
     int alu_count, mult_count, branch_count, mem_count;
@@ -75,13 +81,47 @@ module stage_dispatch (
     endfunction
 
     always_comb begin
-        // Count valid instructions and check resource constraints
-        num_valid_from_fetch = $countones(fetch_valid);
-        num_rds_needed = $countones(fetch_valid & fetch_packet.uses_rd);
+        // Count valid instructions and check for contiguous validity (ordered dispatch)
+        num_valid_from_fetch = 0;
+        for (int i = 0; i < `N; i++) begin
+            if (fetch_valid[i]) begin
+                num_valid_from_fetch = i + 1;  // Must be contiguous from 0
+            end else if (num_valid_from_fetch > 0) begin
+                break;  // Gap found, stop counting
+            end
+        end
 
-        num_to_dispatch = num_valid_from_fetch;
-        if (free_slots_rob < num_to_dispatch) num_to_dispatch = free_slots_rob;
-        if (free_slots_freelst < num_rds_needed) num_to_dispatch = free_slots_freelst;
+        // Calculate dispatch count by checking each instruction individually
+        // Stop at the first instruction that hits a structural hazard
+        num_to_dispatch = 0;
+        rob_slots_used = 0;
+        freelist_slots_used = 0;
+
+        for (int i = 0; i < `N; i++) begin
+            if (i >= num_valid_from_fetch) break;  // No more valid instructions
+
+            // Check ROB space
+            if (rob_slots_used >= free_slots_rob) break;
+
+            // Check freelist space (only if instruction uses a destination register)
+            if (fetch_packet.uses_rd[i] && freelist_slots_used >= freelist_free_slots) break;
+
+            // Check RS bank space for this instruction's functional unit
+            case (fetch_packet.op_type[i].category)
+                CAT_ALU:    rs_bank_available = (rs_alu_free_slots > 0);
+                CAT_MULT:   rs_bank_available = (rs_mult_free_slots > 0);
+                CAT_BRANCH: rs_bank_available = (rs_branch_free_slots > 0);
+                CAT_MEM:    rs_bank_available = (rs_mem_free_slots > 0);
+                default:    rs_bank_available = 1'b0;  // Unknown category, can't dispatch
+            endcase
+
+            if (!rs_bank_available) break;  // This instruction's RS bank is full
+
+            // This instruction can be dispatched
+            num_to_dispatch++;
+            rob_slots_used++;
+            if (fetch_packet.uses_rd[i]) freelist_slots_used++;
+        end
 
         // Set dispatch count (0 = stall)
         dispatch_count = num_to_dispatch;
