@@ -886,20 +886,30 @@ module cpu (
     // Output the committed instructions to the testbench for counting
     // For superscalar, show the oldest ready instruction (whether retired or not)
     always_comb begin
-        committed_insts = '0;
+        committed_insts = '0;  // default all entries to zero/invalid
+
         for (int i = 0; i < `N; i++) begin
-            if (rob_head_valids[i]) begin  // Instruction i is valid
-                committed_insts[i] = '{
-                    NPC: rob_head_entries[i].PC + 4,
-                    data: regfile_entries[arch_table_snapshot_dbg_next[rob_head_entries[i].arch_rd].phys_reg],
-                    reg_idx: rob_head_entries[i].arch_rd,
-                    halt: rob_head_entries[i].halt,
-                    illegal: rob_head_entries[i].exception == ILLEGAL_INST,
-                    valid: rob_head_entries[i].complete
-                };
+            // If this instruction is valid and all previous committed are valid
+            if (rob_head_valids[i] && (i == 0 || committed_insts[i-1].valid)) begin
+                if (rob_head_entries[i].complete) begin
+                    committed_insts[i] = '{
+                        NPC: rob_head_entries[i].PC + 4,
+                        data: regfile_entries[arch_table_snapshot_dbg_next[rob_head_entries[i].arch_rd].phys_reg],
+                        reg_idx: rob_head_entries[i].arch_rd,
+                        halt: rob_head_entries[i].halt,
+                        illegal: rob_head_entries[i].exception == ILLEGAL_INST,
+                        valid: 1'b1
+                    };
+                end else begin
+                    // First incomplete instruction: mark invalid
+                    committed_insts[i].valid = 1'b0;
+                end
+            end else begin
+                committed_insts[i].valid = 1'b0;  // all later instructions invalid
             end
         end
     end
+
 
 
     // Fake-fetch outputs

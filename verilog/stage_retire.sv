@@ -9,7 +9,7 @@ module stage_retire #(
     input logic clock,
     input logic reset,
 
-    // From ROB: head window (N-1 = oldest, 0 = youngest)
+    // From ROB: head window (0 = oldest, N-1 = youngest)
     input ROB_ENTRY [N-1:0] head_entries,
     input logic     [N-1:0] head_valids,
     input ROB_IDX   [N-1:0] head_idxs,     // ROB index per head slot
@@ -47,15 +47,15 @@ module stage_retire #(
         entry = '0;
 
         // -------- Mispredict detect on oldest visible head --------
-        if (head_valids[N-1]) begin
-            head_entry = head_entries[N-1];
+        if (head_valids[0]) begin   // <-- oldest is now index 0
+            head_entry = head_entries[0];
             if (head_entry.branch && head_entry.complete) begin
                 mispred_dir = (head_entry.pred_taken != head_entry.branch_taken);
                 mispred_tgt = (head_entry.branch_taken && (head_entry.pred_target != head_entry.branch_target));
                 mispred     = (mispred_dir || mispred_tgt);
                 if (mispred) begin
                     rob_mispredict  = 1'b1;
-                    rob_mispred_idx = head_idxs[N-1];  // provided by ROB
+                    rob_mispred_idx = head_idxs[0];  // oldest
                     bp_recover_en   = 1'b1;  // one-cycle recover pulse
                     recover         = 1'b1;  // block normal retire this cycle
                 end
@@ -64,7 +64,7 @@ module stage_retire #(
 
         // -------- Normal retire: multi-commit (oldest→younger; stop at first incomplete) --------
         if (!recover) begin
-            for (int w = N - 1; w >= 0; w--) begin
+            for (int w = 0; w < N; w++) begin   // <-- loop oldest->youngest
                 if (!head_valids[w]) continue;
 
                 entry = head_entries[w];
@@ -77,7 +77,8 @@ module stage_retire #(
                     arch_write_phys_regs[w] = entry.phys_rd;
 
                     // Freelist: free the Told (previous phys)
-                    if ((entry.prev_phys_rd != '0) && (entry.prev_phys_rd < PHYS_REGS)) free_mask[entry.prev_phys_rd] = 1'b1;
+                    if ((entry.prev_phys_rd != '0) && (entry.prev_phys_rd < PHYS_REGS))
+                        free_mask[entry.prev_phys_rd] = 1'b1;
                 end
                 // No-dest instructions (e.g., branches) retire silently.
             end
@@ -85,3 +86,4 @@ module stage_retire #(
     end
 
 endmodule
+

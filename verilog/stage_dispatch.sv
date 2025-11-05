@@ -186,7 +186,7 @@ module stage_dispatch (
                         local_reg1_tag[i] = dispatch_renames[fetch_packet.rs1_idx[i]];
                         local_reg1_ready[i] = 1'b0;
                     end
-                    if (has_rename[fetch_packet.rs2_idx[i]]) begin
+                    if (has_rename[fetch_packet.rs2_idx[i]] && fetch_packet.opb_select[i] == OPB_IS_RS2) begin
                         local_reg2_tag[i] = dispatch_renames[fetch_packet.rs2_idx[i]];
                         local_reg2_ready[i] = 1'b0;
                     end
