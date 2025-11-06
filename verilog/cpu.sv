@@ -881,7 +881,10 @@ module cpu (
 
         // To fake fetch
         .branch_taken_o(branch_taken_o),
-        .branch_target_o(branch_target_o)
+        .branch_target_o(branch_target_o),
+
+        // From PRF for committed data
+        .regfile_entries(regfile_entries)
     );
 
     //////////////////////////////////////////////////
@@ -892,13 +895,7 @@ module cpu (
 
     // Output the committed instructions to the testbench for counting
     // For superscalar, show the oldest ready instruction (whether retired or not)
-    always_comb begin
-        committed_insts = retire_commits_dbg;
-        for (int i = 0; i < `N; i++) begin
-            committed_insts[i].data = regfile_entries[arch_table_snapshot_dbg_next[retire_commits_dbg[i].reg_idx].phys_reg];
-        end
-
-    end
+    assign committed_insts = retire_commits_dbg;
 
 
     // Fake-fetch outputs

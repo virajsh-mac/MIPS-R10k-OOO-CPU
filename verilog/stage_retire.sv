@@ -34,7 +34,10 @@ module stage_retire #(
 
     // to Fake fetch for branching
     output logic branch_taken_o,
-    output ADDR  branch_target_o
+    output ADDR  branch_target_o,
+
+    // to read committed data from PRF
+    input DATA [`PHYS_REG_SZ_R10K-1:0] regfile_entries
 
 );
     // debug output
@@ -75,8 +78,9 @@ module stage_retire #(
                 break;
             end
 
-            // Record debug info 
+            // Record debug info
             retire_commits_dbg[w].NPC    = entry.PC + 4;
+            retire_commits_dbg[w].data   = regfile_entries[entry.phys_rd];
             retire_commits_dbg[w].reg_idx = entry.arch_rd;
             retire_commits_dbg[w].halt   = entry.halt;
             retire_commits_dbg[w].illegal = (entry.exception == ILLEGAL_INST);

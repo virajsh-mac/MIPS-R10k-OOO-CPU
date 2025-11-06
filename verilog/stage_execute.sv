@@ -368,11 +368,19 @@ module stage_execute (
     end
 
     // BRANCH outputs to CDB
+    // Only JAL and JALR produce data results; conditional branches don't
     always_comb begin
-        fu_outputs.branch[0].valid = issue_entries.branch[0].valid;
-        fu_outputs.branch[0].tag   = issue_entries.branch[0].dest_tag;
-        // For branches, data could be PC+4 for branch-and-link or 0 for conditional branches
-        fu_outputs.branch[0].data  = issue_entries.branch[0].PC + 4;  // TODO: check if needed
+        if (issue_entries.branch[0].valid &&
+            (issue_entries.branch[0].op_type.func == JAL ||
+             issue_entries.branch[0].op_type.func == JALR)) begin
+            fu_outputs.branch[0].valid = 1'b1;
+            fu_outputs.branch[0].tag   = issue_entries.branch[0].dest_tag;
+            fu_outputs.branch[0].data  = issue_entries.branch[0].PC + 4;  // Return address for JAL/JALR
+        end else begin
+            fu_outputs.branch[0].valid = 1'b0;
+            fu_outputs.branch[0].tag   = '0;
+            fu_outputs.branch[0].data  = '0;
+        end
     end
 
     // =========================================================================
