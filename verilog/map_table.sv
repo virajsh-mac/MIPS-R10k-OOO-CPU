@@ -56,12 +56,27 @@ module map_table (
         end
     end
 
-    // Output assignment: drive read ports from internal table
+    // output assignment for dispatch
     always_comb begin
+        read_resp = '0;
+
         for (int i = 0; i < `N; i++) begin
+            // Default values from current table
             read_resp.rs1_entries[i]  = map_table_reg[read_req.rs1_addrs[i]];
             read_resp.rs2_entries[i]  = map_table_reg[read_req.rs2_addrs[i]];
             read_resp.told_entries[i] = map_table_reg[read_req.told_addrs[i]];
+
+            // Check earlier writes (0..i-1) for same-cycle updates
+            for (int j = 0; j < i; j++) begin
+                if (write_reqs[j].valid) begin
+                    if (write_reqs[j].addr == read_req.rs1_addrs[i])
+                        read_resp.rs1_entries[i].phys_reg = write_reqs[j].phys_reg;
+                    if (write_reqs[j].addr == read_req.rs2_addrs[i])
+                        read_resp.rs2_entries[i].phys_reg = write_reqs[j].phys_reg;
+                    if (write_reqs[j].addr == read_req.told_addrs[i])
+                        read_resp.told_entries[i].phys_reg = write_reqs[j].phys_reg;
+                end
+            end
         end
     end
 
