@@ -151,7 +151,7 @@ module arch_map_table #(
     end
 
     // Output entire table for mispredict recovery
-    assign table_snapshot = arch_map_table_reg;
+    assign table_snapshot = arch_map_table_next;
 
     // Debug output
     assign table_snapshot_next = arch_map_table_next;

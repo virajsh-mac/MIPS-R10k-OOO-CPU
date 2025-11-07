@@ -81,13 +81,13 @@ module stage_retire #(
             // Record debug info
             retire_commits_dbg[w].NPC    = entry.PC + 4;
             retire_commits_dbg[w].data   = regfile_entries[entry.phys_rd];
-            retire_commits_dbg[w].reg_idx = entry.arch_rd;
+            retire_commits_dbg[w].reg_idx = entry.branch ? `ZERO_REG : entry.arch_rd;
             retire_commits_dbg[w].halt   = entry.halt;
             retire_commits_dbg[w].illegal = (entry.exception == ILLEGAL_INST);
             retire_commits_dbg[w].valid  = 1'b1;
 
             // Commit this entry (it's complete)
-            if (entry.arch_rd != '0) begin
+            if (entry.arch_rd != '0 && !entry.branch) begin
                 arch_write_enables[w]  = 1'b1;
                 arch_write_addrs[w]    = entry.arch_rd;
                 arch_write_phys_regs[w] = entry.phys_rd;

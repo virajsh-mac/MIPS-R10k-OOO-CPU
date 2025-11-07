@@ -14,10 +14,10 @@ module conditional_branch (
         case (func)
             3'b000:  take = signed'(rs1) == signed'(rs2);  // BEQ
             3'b001:  take = signed'(rs1) != signed'(rs2);  // BNE
-            3'b100:  take = signed'(rs1) < signed'(rs2);  // BLT
-            3'b101:  take = signed'(rs1) >= signed'(rs2);  // BGE
-            3'b110:  take = rs1 < rs2;  // BLTU
-            3'b111:  take = rs1 >= rs2;  // BGEU
+            3'b010:  take = signed'(rs1) < signed'(rs2);  // BLT
+            3'b011:  take = signed'(rs1) >= signed'(rs2);  // BGE
+            3'b100:  take = rs1 < rs2;  // BLTU
+            3'b101:  take = rs1 >= rs2;  // BGEU
             default: take = `FALSE;
         endcase
     end
