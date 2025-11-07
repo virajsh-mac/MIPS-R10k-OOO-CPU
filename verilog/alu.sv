@@ -22,6 +22,7 @@ module alu (
             SRL: result = opa >> opb[4:0];
             SLL: result = opa << opb[4:0];
             SRA: result = signed'(opa) >>> opb[4:0];  // arithmetic from logical shift
+            HALT: result = 32'h0;  // HALT doesn't produce a meaningful result
             // here to prevent latches:
             default: result = 32'hfacebeec;
         endcase
