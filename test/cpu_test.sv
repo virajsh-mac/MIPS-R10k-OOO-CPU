@@ -797,13 +797,21 @@ module testbench;
         // MAP TABLES
         $display("\n--- MAP TABLES ---");
         $display("Architected Map Table (speculative):");
-        for (integer i = 0; i < 8; i++) begin  // Show first 8 registers
-            $display("  r%0d -> P%0d", i, arch_table_snapshot[i].phys_reg);
+        for (integer i = 0; i < `ARCH_REG_SZ; i += 4) begin
+            $display("  r%0d->P%0d  r%0d->P%0d  r%0d->P%0d  r%0d->P%0d",
+                     i, arch_table_snapshot[i].phys_reg,
+                     i+1, arch_table_snapshot[i+1].phys_reg,
+                     i+2, arch_table_snapshot[i+2].phys_reg,
+                     i+3, arch_table_snapshot[i+3].phys_reg);
         end
 
-        $display("Working Map Table:");
-        for (integer i = 0; i < 8; i++) begin  // Show first 8 registers
-            $display("  r%0d -> P%0d%s", i, map_table_snapshot[i].phys_reg, map_table_snapshot[i].ready ? "+" : "");
+        $display("Working Map Table (speculative):");
+        for (integer i = 0; i < `ARCH_REG_SZ; i += 4) begin
+            $display("  r%0d->P%0d%s  r%0d->P%0d%s  r%0d->P%0d%s  r%0d->P%0d%s",
+                     i, map_table_snapshot[i].phys_reg, map_table_snapshot[i].ready ? "+" : "",
+                     i+1, map_table_snapshot[i+1].phys_reg, map_table_snapshot[i+1].ready ? "+" : "",
+                     i+2, map_table_snapshot[i+2].phys_reg, map_table_snapshot[i+2].ready ? "+" : "",
+                     i+3, map_table_snapshot[i+3].phys_reg, map_table_snapshot[i+3].ready ? "+" : "");
         end
 
         // FREE LIST
