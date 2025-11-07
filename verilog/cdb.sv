@@ -12,7 +12,7 @@ module cdb (
     output FU_GRANTS grants,
 
     // Grant bus output to EX for metadata selection to complete
-    output logic [`N-1:0][`NUM_FU_TOTAL-1:0] gnt_bus_out,
+    output logic [`N-1:0][`NUM_FU_TOTAL-1:0] grant_bus_out,
 
     // CDB inputs (structured)
     input CDB_FU_OUTPUTS fu_outputs,
@@ -71,7 +71,6 @@ module cdb (
     // grants_flat order: [mult, mem, alu, branch] (same as request concatenation)
     assign {grants.mult, grants.mem, grants.alu, grants.branch} = grants_flat;
     assign cdb_output = cdb;
-    //assign gnt_bus_next = gnt_bus;
 
     always_ff @(posedge clock) begin
         if (reset) begin
@@ -85,14 +84,14 @@ module cdb (
         end
     end
 
-    // Connect gnt_bus to output
-    assign gnt_bus_out = gnt_bus;
+    // Connect grant_bus to output
+    assign grant_bus_out = gnt_bus;
 
     // Debug assignments
     assign requests_dbg = requests;
     assign fu_outputs_dbg = fu_outputs;
     assign grants_flat_dbg = grants_flat;
-    assign gnt_bus_dbg = gnt_bus;
+    assign gnt_bus_dbg = gnt_bus;  // Keep gnt_bus name for debug consistency
     assign early_tags_dbg = early_tags;
 
 endmodule

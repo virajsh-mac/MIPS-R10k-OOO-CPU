@@ -18,11 +18,6 @@ module stage_dispatch (
     input logic   [   $clog2(`RS_BRANCH_SZ+1)-1:0] rs_branch_free_slots,
     input logic   [      $clog2(`RS_MEM_SZ+1)-1:0] rs_mem_free_slots,
 
-    // RS allocation grants (unused in current impl)
-    input logic [`N-1:0][`RS_ALU_SZ-1:0] rs_alu_granted,
-    input logic [`N-1:0][`RS_MULT_SZ-1:0] rs_mult_granted,
-    input logic [`N-1:0][`RS_BRANCH_SZ-1:0] rs_branch_granted,
-    input logic [`N-1:0][`RS_MEM_SZ-1:0] rs_mem_granted,
 
     // To fetch: dispatch count (0 = stall)
     output logic [$clog2(`N)-1:0] dispatch_count,

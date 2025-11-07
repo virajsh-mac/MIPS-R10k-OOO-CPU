@@ -200,13 +200,13 @@ module testbench;
         .rob_update_packet_dbg(rob_update_packet),
 
         // Debug output from PRF
-        .regfile_entries(regfile_entries),
+        .regfile_entries_dbg(regfile_entries),
 
         // Debug output from architecture map table
-        .arch_table_snapshot(arch_table_snapshot),
+        .arch_table_snapshot_dbg(arch_table_snapshot),
 
         // Debug output from RS_ALU
-        .rs_alu_entries(rs_alu_entries),
+        .rs_alu_entries_dbg(rs_alu_entries),
 
         // Additional RS debug outputs
         .rs_mult_entries_dbg(rs_mult_entries),
@@ -257,8 +257,8 @@ module testbench;
         .ff_pc          (fake_pc),
         .ff_nvalid      (fake_nvalid),
         .ff_consumed    (fake_consumed),
-        .branch_taken_o (ff_branch_taken),
-        .branch_target_o(ff_branch_target)
+        .branch_taken_out (ff_branch_taken),
+        .branch_target_out(ff_branch_target)
     );
 
 

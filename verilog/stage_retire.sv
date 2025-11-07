@@ -33,8 +33,8 @@ module stage_retire #(
     output COMMIT_PACKET [N-1:0] retire_commits_dbg,
 
     // to Fake fetch for branching
-    output logic branch_taken_o,
-    output ADDR  branch_target_o,
+    output logic branch_taken_out,
+    output ADDR  branch_target_out,
 
     // to read committed data from PRF
     input DATA [`PHYS_REG_SZ_R10K-1:0] regfile_entries
@@ -60,8 +60,8 @@ module stage_retire #(
         retire_commits_dbg = '0;
 
         // branch info for fake fetch
-        branch_taken_o  = 1'b0;
-        branch_target_o = '0;
+        branch_taken_out  = 1'b0;
+        branch_target_out = '0;
 
 
         // Walk oldest -> youngest and commit until first incomplete
@@ -101,8 +101,8 @@ module stage_retire #(
 
                 // to fake fetch (No EBR)
                 if (entry.branch_taken) begin
-                    branch_taken_o  = 1'b1;
-                    branch_target_o = entry.branch_target;
+                    branch_taken_out  = 1'b1;
+                    branch_target_out = entry.branch_target;
                 end
 
                 // Only consider mispredict if branch had completed

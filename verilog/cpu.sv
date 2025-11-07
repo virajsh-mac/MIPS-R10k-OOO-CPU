@@ -33,8 +33,8 @@ module cpu (
     input  ADDR                     ff_pc,                    // Current PC from testbench
     input  logic [$clog2(`N+1)-1:0] ff_nvalid,                // Number of valid instructions from testbench
     output logic [$clog2(`N+1)-1:0] ff_consumed,              // Number consumed by CPU
-    output logic                    branch_taken_o,           // Branch taken signal to testbench
-    output ADDR                     branch_target_o,          // Branch target to testbench
+    output logic                    branch_taken_out,         // Branch taken signal to testbench
+    output ADDR                     branch_target_out,        // Branch target to testbench
 
 
     // Additional debug outputs for OOO processor debugging
@@ -60,13 +60,13 @@ module cpu (
     output ROB_UPDATE_PACKET rob_update_packet_dbg,
 
     // PRF Debug output
-    output DATA [`PHYS_REG_SZ_R10K-1:0] regfile_entries,
+    output DATA [`PHYS_REG_SZ_R10K-1:0] regfile_entries_dbg,
 
     // architecture map table Debug output
-    output MAP_ENTRY [`ARCH_REG_SZ-1:0] arch_table_snapshot,
+    output MAP_ENTRY [`ARCH_REG_SZ-1:0] arch_table_snapshot_dbg,
 
     // rs_alu Debug output
-    output RS_ENTRY [`RS_ALU_SZ-1:0] rs_alu_entries,
+    output RS_ENTRY [`RS_ALU_SZ-1:0] rs_alu_entries_dbg,
 
     // Additional RS debug outputs
     output RS_ENTRY [  `RS_MULT_SZ-1:0] rs_mult_entries_dbg,
@@ -164,7 +164,7 @@ module cpu (
     RS_CLEAR_SIGNALS                        rs_clear_signals;
 
     // Individual RS entries outputs (needed for rs_banks)
-    RS_ENTRY            [   `RS_ALU_SZ-1:0] rs_alu_entries;
+    RS_ENTRY            [   `RS_ALU_SZ-1:0] rs_alu_entries_dbg;
     RS_ENTRY            [  `RS_MULT_SZ-1:0] rs_mult_entries;
     RS_ENTRY            [`RS_BRANCH_SZ-1:0] rs_branch_entries;
     RS_ENTRY            [   `RS_MEM_SZ-1:0] rs_mem_entries;
@@ -213,7 +213,7 @@ module cpu (
     MEM_BLOCK                    Dmem_store_data = '0;
 
     // Arch map table signals
-    MAP_ENTRY [`ARCH_REG_SZ-1:0] arch_table_snapshot;
+    MAP_ENTRY [`ARCH_REG_SZ-1:0] arch_table_snapshot_dbg;
 
     // CDB requests: single-cycle FUs request during issue, multi-cycle during execute
     assign cdb_requests.alu    = issue_cdb_requests.alu;  // From issue stage
@@ -230,7 +230,7 @@ module cpu (
     assign freelist_free_slots = freelist_0.free_slots;
 
     // TODO Debug for PRF remove when synthesizing/ not needed anymore
-    DATA [`PHYS_REG_SZ_R10K-1:0] regfile_entries;
+    DATA [`PHYS_REG_SZ_R10K-1:0] regfile_entries_dbg;
 
     // debug for architecture map table
     MAP_ENTRY [`ARCH_REG_SZ-1:0] arch_table_snapshot_dbg_next;
@@ -393,12 +393,6 @@ module cpu (
         .rs_branch_free_slots(rs_branch.free_slots),
         .rs_mem_free_slots   (rs_mem.free_slots),
 
-        // From RS Banks: granted allocations (from current cycle)
-        .rs_alu_granted(rs_granted.alu),
-        .rs_mult_granted(rs_granted.mult),
-        .rs_branch_granted(rs_granted.branch),
-        .rs_mem_granted(rs_granted.mem),
-
         // To Fetch
         .dispatch_count(dispatch_count),
 
@@ -474,7 +468,7 @@ module cpu (
         .mispredict(mispredict),
 
         // Outputs to issue/dispatch
-        .entries        (rs_alu_entries),
+        .entries        (rs_alu_entries_dbg),
         .granted_entries(rs_granted.alu)
     );
 
@@ -583,7 +577,7 @@ module cpu (
     ISSUE_ENTRIES issue_entries_debug;
 
     // Create structured RS banks from individual RS module outputs
-    assign rs_banks.alu    = rs_alu_entries;
+    assign rs_banks.alu    = rs_alu_entries_dbg;
     assign rs_banks.mult   = rs_mult_entries;
     assign rs_banks.branch = rs_branch_entries;
     assign rs_banks.mem    = rs_mem_entries;
@@ -657,7 +651,7 @@ module cpu (
         .ex_comp (ex_comp),
 
         // From CDB for grant selection
-        .gnt_bus(cdb_0.gnt_bus_out),
+        .gnt_bus(cdb_0.grant_bus_out),
 
         // Debug outputs
         .fu_results_dbg(fu_results_dbg),
@@ -720,7 +714,7 @@ module cpu (
 
         // Mispredict recovery
         .table_snapshot(),
-        .table_restore(arch_table_snapshot),
+        .table_restore(arch_table_snapshot_dbg),
         .table_restore_en(bp_recover_en)
     );
 
@@ -744,7 +738,7 @@ module cpu (
         .read_entries(),
 
         // Mispredict recovery: output snapshot for map_table restoration
-        .table_snapshot(arch_table_snapshot),
+        .table_snapshot(arch_table_snapshot_dbg),
         .table_restore('0),  // Not used - arch table doesn't restore
         .table_restore_en(1'b0),  // Arch table never restores
 
@@ -790,7 +784,7 @@ module cpu (
         // Write interface - directly from CDB
         .cdb_writes(cdb_output),
 
-        .regfile_entries(regfile_entries)
+        .regfile_entries(regfile_entries_dbg)
     );
 
     //////////////////////////////////////////////////
@@ -880,11 +874,11 @@ module cpu (
         .retire_commits_dbg(retire_commits_dbg),
 
         // To fake fetch
-        .branch_taken_o(branch_taken_o),
-        .branch_target_o(branch_target_o),
+        .branch_taken_out(branch_taken_out),
+        .branch_target_out(branch_target_out),
 
         // From PRF for committed data
-        .regfile_entries(regfile_entries)
+        .regfile_entries(regfile_entries_dbg)
     );
 
     //////////////////////////////////////////////////
@@ -914,7 +908,7 @@ module cpu (
     // Execute stage debug outputs
     assign ex_valid_dbg           = ex_valid;
     assign ex_comp_dbg            = ex_comp;
-    assign fu_gnt_bus_dbg         = cdb_0.gnt_bus_out;
+    assign fu_gnt_bus_dbg         = cdb_0.grant_bus_out;
     assign mult_request_dbg       = mult_request;
 
     // Additional RS debug outputs
