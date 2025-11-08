@@ -53,7 +53,8 @@ module stage_execute (
     output logic [`NUM_FU_ALU-1:0] alu_executing_dbg,
     output logic [`NUM_FU_MULT-1:0] mult_executing_dbg,
     output logic [`NUM_FU_BRANCH-1:0] branch_executing_dbg,
-    output logic [`NUM_FU_MEM-1:0] mem_executing_dbg
+    output logic [`NUM_FU_MEM-1:0] mem_executing_dbg,
+    output ALU_FUNC [`NUM_FU_ALU-1:0] alu_func_dbg
 );
 
     // =========================================================================
@@ -296,7 +297,7 @@ module stage_execute (
     // ALU outputs to CDB
     always_comb begin
         for (int i = 0; i < `NUM_FU_ALU; i++) begin
-            fu_outputs.alu[i].valid = issue_entries.alu[i].valid;
+            fu_outputs.alu[i].valid = issue_entries.alu[i].valid && (issue_entries.alu[i].dest_tag != '0);
             fu_outputs.alu[i].tag   = issue_entries.alu[i].dest_tag;
             fu_outputs.alu[i].data  = fu_results.alu[i];
         end
@@ -333,7 +334,7 @@ module stage_execute (
     // MULT outputs to CDB (only when done)
     always_comb begin
         for (int i = 0; i < `NUM_FU_MULT; i++) begin
-            fu_outputs.mult[i].valid = mult_done[i];
+            fu_outputs.mult[i].valid = mult_done[i] && (issue_entries.mult[i].dest_tag != '0);
             fu_outputs.mult[i].tag   = issue_entries.mult[i].dest_tag;
             fu_outputs.mult[i].data  = fu_results.mult[i];
             // mult_request[i] is driven by mult module structurally - no procedural assignment needed
@@ -372,7 +373,8 @@ module stage_execute (
     always_comb begin
         if (issue_entries.branch[0].valid &&
             (issue_entries.branch[0].op_type.func == JAL ||
-             issue_entries.branch[0].op_type.func == JALR)) begin
+             issue_entries.branch[0].op_type.func == JALR) &&
+            (issue_entries.branch[0].dest_tag != '0)) begin
             fu_outputs.branch[0].valid = 1'b1;
             fu_outputs.branch[0].tag   = issue_entries.branch[0].dest_tag;
             fu_outputs.branch[0].data  = issue_entries.branch[0].PC + 4;  // Return address for JAL/JALR
@@ -534,5 +536,6 @@ module stage_execute (
     assign mult_executing_dbg = {fu_outputs.mult[0].valid};
     assign branch_executing_dbg = {fu_outputs.branch[0].valid};
     assign mem_executing_dbg = {fu_outputs.mem[0].valid};
+    assign alu_func_dbg = alu_funcs;
 
 endmodule

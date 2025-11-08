@@ -36,7 +36,7 @@ import "DPI-C" function string decode_inst(int inst);
 // import "DPI-C" function void close_pipeline_output_file();
 
 
-`define TB_MAX_CYCLES 800
+`define TB_MAX_CYCLES 3000
 
 
 module testbench;
@@ -127,6 +127,9 @@ module testbench;
     // Freelist debug output (available physical registers)
     logic [`PHYS_REG_SZ_R10K-1:0] freelist_available;
 
+    // Freelist restore mask debug
+    logic [`PHYS_REG_SZ_R10K-1:0] freelist_restore_mask;
+
     // CDB debug outputs
     CDB_ENTRY [`N-1:0] cdb_output;
     logic [`N-1:0][`NUM_FU_TOTAL-1:0] cdb_gnt_bus;
@@ -152,6 +155,7 @@ module testbench;
 
     // Execute stage functional unit validity
     logic [`NUM_FU_ALU-1:0] alu_executing;
+    ALU_FUNC [`NUM_FU_ALU-1:0] alu_func;
     logic [`NUM_FU_MULT-1:0] mult_executing;
     logic [`NUM_FU_BRANCH-1:0] branch_executing;
     logic [`NUM_FU_MEM-1:0] mem_executing;
@@ -218,6 +222,7 @@ module testbench;
 
         // Freelist debug output
         .freelist_available_dbg(freelist_available),
+        .freelist_restore_mask_dbg(freelist_restore_mask),
 
         // CDB debug outputs
         .cdb_output_dbg(cdb_output),
@@ -248,6 +253,7 @@ module testbench;
         .branch_take_dbg(branch_take),
         .branch_target_dbg(branch_target),
         .alu_executing_dbg(alu_executing),
+        .alu_func_dbg(alu_func),
         .mult_executing_dbg(mult_executing),
         .branch_executing_dbg(branch_executing),
         .mem_executing_dbg(mem_executing),
@@ -556,10 +562,10 @@ module testbench;
         $display("Fake PC: 0x%08h | Consumed: %0d", fake_pc, fake_consumed);
 
         for (integer i = 0; i < `N; i++) begin
-            if (i < dispatch_count) begin
+            // if (i < dispatch_count) begin
                 $display("DISP[%0d]: PC=0x%08h | Inst=0x%08h | Uses_RD=%b | RD=%0d", i, fetch_disp_packet.PC[i],
                          fetch_disp_packet.inst[i], fetch_disp_packet.uses_rd[i], fetch_disp_packet.rd_idx[i]);
-            end
+            // end
         end
 
         // RESERVATION STATIONS
@@ -659,7 +665,7 @@ module testbench;
         // FU Results
         $display("\nFunctional Unit Results:");
         for (integer i = 0; i < `NUM_FU_ALU; i++) begin
-            $display("  ALU[%0d]: 0x%08h", i, fu_results.alu[i]);
+            $display("  ALU[%0d]: func=%0d | result=0x%08h", i, alu_func[i], fu_results.alu[i]);
         end
         for (integer i = 0; i < `NUM_FU_MULT; i++) begin
             $display("  MULT[%0d]: 0x%08h (start=%b done=%b req=%b)", i, fu_results.mult[i], mult_start[i], mult_done[i],
@@ -872,6 +878,8 @@ module testbench;
                 $display("");
             end
         end
+
+        $display("Freelist Restore Mask: %h", freelist_restore_mask);
 
         // PHYSICAL REGISTER FILE (show non-zero values)
         $display("\n--- PHYSICAL REGISTER FILE (non-zero values) ---");

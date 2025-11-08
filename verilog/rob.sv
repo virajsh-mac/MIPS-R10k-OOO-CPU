@@ -105,16 +105,6 @@ module rob (
         end
     end
 
-
-    // Expose head window: N-1 = oldest, 0 = youngest (matches stage_retire)
-    // always_comb begin
-    //     for (int i = 0; i < `N; i++) begin
-    //         head_entries[`N-1 - i] = rob_entries[(head_idx + i) % `ROB_SZ];
-    //         head_idxs[`N-1 - i]    = ROB_IDX'((head_idx + i) % `ROB_SZ);
-    //         head_valids[`N-1 - i]  = rob_entries[(head_idx + i) % `ROB_SZ].valid;
-    //     end
-    // end
-
     assign free_slots = free_count;
 
     always_ff @(posedge clock) begin
@@ -131,20 +121,46 @@ module rob (
         end
     end
 
-`ifndef SYNTH
-always_ff @(posedge clock) begin
-  if (!reset) begin
-    $display("%0t | head=%0d tail=%0d retire_count=%0d dispatched=%0d",
-             $time, head_idx, tail_idx, retire_count, $countones(entry_packet_valid_bits));
-    for (int i = 0; i < `N; i++) begin
-      $display("  H[%0d] idx=%0d valid=%0b complete=%0b",
-               i,
-               ((head_idx + i) % `ROB_SZ),
-               rob_entries[((head_idx + i) % `ROB_SZ)].valid,
-               rob_entries[((head_idx + i) % `ROB_SZ)].complete);
-    end
-  end
-end
-`endif
+// `ifndef SYNTH
+// always_ff @(posedge clock) begin
+//   if (!reset) begin
+//     $display("\n=================================================================================");
+//     $display("ROB STATE - Cycle @%0t", $time);
+//     $display("=================================================================================");
+//     $display("Head=%0d Tail=%0d Free=%0d | Retire_count=%0d Dispatched=%0d",
+//              head_idx, tail_idx, free_count, retire_count, $countones(entry_packet_valid_bits));
+//     $display("---------------------------------------------------------------------------------");
+//     $display("Idx | Valid | Complete | PC      | Inst     | Rd | PReg | Val      | Branch | Taken | Target   | Mispred | Halt");
+//     $display("---------------------------------------------------------------------------------");
+
+//     for (int i = 0; i < `ROB_SZ; i++) begin
+//       automatic ROB_ENTRY entry = rob_entries[i];
+//       automatic string head_marker = (i == head_idx) ? "H->" : (i == tail_idx) ? "T->" : "   ";
+//       if (entry.valid) begin
+//         $display("%s%2d | %5b | %8b | %08h | %08h | %2d | P%2d | %08h | %6b | %5b | %08h | %7b | %4b",
+//                  head_marker, i,
+//                  entry.valid,
+//                  entry.complete,
+//                  entry.PC,
+//                  entry.inst,
+//                  entry.arch_rd,
+//                  entry.phys_rd,
+//                  entry.value,
+//                  entry.branch,
+//                  entry.branch_taken,
+//                  entry.branch_target,
+//                  entry.mispredict,
+//                  entry.halt);
+//       end else begin
+//         $display("%s%2d | %5b | %8b | -------- | -------- | -- | --- | -------- | ------ | ----- | -------- | ------- | ----",
+//                  head_marker, i,
+//                  entry.valid,
+//                  entry.complete);
+//       end
+//     end
+//     $display("=================================================================================\n");
+//   end
+// end
+// `endif
 
 endmodule

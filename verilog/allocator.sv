@@ -26,14 +26,16 @@
 */
 
 module allocator #(
-    parameter NUM_RESOURCES = 64,
-    parameter NUM_REQUESTS = 3,
-    parameter logic [NUM_RESOURCES-1:0] INITIAL_AVAIL_MASK = '1
+    parameter int NUM_RESOURCES = 64,
+    parameter int NUM_REQUESTS = 3
 ) (
     input                           reset,
     input                           clock,
     input logic [ NUM_REQUESTS-1:0] req,
     input logic [NUM_RESOURCES-1:0] clear,
+    input logic                     mispredict,
+    input logic [NUM_RESOURCES-1:0] initial_mask,
+    input logic [NUM_RESOURCES-1:0] restore_mask,
 
     output logic [NUM_REQUESTS-1:0][NUM_RESOURCES-1:0] grant,
     output logic [NUM_RESOURCES-1:0] resource_status
@@ -106,19 +108,18 @@ module allocator #(
     end
 
 
-    // Sequential logic: update resource status based on allocations and releases
+    // Sequential logic: update resource status based on allocations, releases, and restores
     always_ff @(posedge clock) begin
         if (reset) begin
-            // On reset, set resources to initial availability mask
-            resource_status <= INITIAL_AVAIL_MASK;
+            resource_status <= initial_mask;
+        end else if (mispredict) begin
+            resource_status <= restore_mask;
         end else begin
             // Update resource status:
             // - OR with clear: resources being cleared become available (1)
             // - XOR with resource_allocated: resources being allocated become unavailable (0)
             // Note: XOR flips the bit when allocating; the OR with clear handles clearing
             //       This preserves the original parking lot logic behavior
-            // TODO changed from XOR to OR as this prevents stalling for 1 cycle instructions (ALU, BRANCH, ETC)
-            // need to check if this works for mult as it is not a 1 cycle instruction
             resource_status <= (resource_status | clear) ^ resource_allocated;
         end
     end

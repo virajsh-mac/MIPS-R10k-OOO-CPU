@@ -39,7 +39,9 @@ module stage_complete #(
                     end
                 end
             end
+            
             rob_update_packet_dbg = rob_update_packet;  // Mirror to debug output
+
         end
     end
 

@@ -68,6 +68,9 @@ module stage_issue (
         .clock(clock),
         .req  (rs_ready_alu),
         .clear(fu_grants.alu),
+        .mispredict(1'b0),
+        .initial_mask('1),
+        .restore_mask('1),
         .grant(grants_alu)
     );
 
@@ -79,6 +82,9 @@ module stage_issue (
         .clock(clock),
         .req  (rs_ready_mult),
         .clear(fu_grants.mult),
+        .mispredict(1'b0),
+        .initial_mask('1),
+        .restore_mask('1),
         .grant(grants_mult)
     );
 
@@ -90,6 +96,9 @@ module stage_issue (
         .clock(clock),
         .req  (rs_ready_branch),
         .clear(fu_grants.branch),
+        .mispredict(1'b0),
+        .initial_mask('1),
+        .restore_mask('1),
         .grant(grants_branch)
     );
 
@@ -101,6 +110,9 @@ module stage_issue (
         .clock(clock),
         .req  (rs_ready_mem),
         .clear(fu_grants.mem),
+        .mispredict(1'b0),
+        .initial_mask('1),
+        .restore_mask('1),
         .grant(grants_mem)
     );
 

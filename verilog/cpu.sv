@@ -78,6 +78,7 @@ module cpu (
 
     // Freelist debug output (available physical registers)
     output logic [`PHYS_REG_SZ_R10K-1:0] freelist_available_dbg,
+    output logic [`PHYS_REG_SZ_R10K-1:0] freelist_restore_mask_dbg,
 
     // CDB debug outputs
     output CDB_ENTRY [`N-1:0] cdb_output_dbg,
@@ -108,6 +109,7 @@ module cpu (
     output logic [`NUM_FU_BRANCH-1:0] branch_take_dbg,
     output ADDR [`NUM_FU_BRANCH-1:0] branch_target_dbg,
     output logic [`NUM_FU_ALU-1:0] alu_executing_dbg,
+    output ALU_FUNC [`NUM_FU_ALU-1:0] alu_func_dbg,
     output logic [`NUM_FU_MULT-1:0] mult_executing_dbg,
     output logic [`NUM_FU_BRANCH-1:0] branch_executing_dbg,
     output logic [`NUM_FU_MEM-1:0] mem_executing_dbg
@@ -124,6 +126,9 @@ module cpu (
 
     // Outputs from ID stage (decode)
     FETCH_DISP_PACKET                                                                fetch_disp_packet;
+
+    // From arch map table
+    MAP_ENTRY [`ARCH_REG_SZ-1:0]                                                     arch_table_snapshot;
 
     // Outputs from Dispatch stage
     logic                   [                 $clog2(`N)-1:0]                        dispatch_count;
@@ -143,6 +148,7 @@ module cpu (
     PHYS_TAG                [                         `N-1:0]                        allocated_phys;
     logic                   [                         `N-1:0]                        freelist_alloc_req;
     logic                   [          `PHYS_REG_SZ_R10K-1:0]                        freelist_free_mask;
+    logic                   [          `PHYS_REG_SZ_R10K-1:0]                        freelist_restore_mask;
     logic                   [                         `N-1:0][`PHYS_REG_SZ_R10K-1:0] freelist_granted_regs;
     logic                   [$clog2(`PHYS_REG_SZ_R10K+1)-1:0]                        freelist_free_slots;
 
@@ -666,6 +672,7 @@ module cpu (
         .branch_take_dbg(branch_take_dbg),
         .branch_target_dbg(branch_target_dbg),
         .alu_executing_dbg(alu_executing_dbg),
+        .alu_func_dbg(alu_func_dbg),
         .mult_executing_dbg(mult_executing_dbg),
         .branch_executing_dbg(branch_executing_dbg),
         .mem_executing_dbg(mem_executing_dbg)
@@ -755,6 +762,8 @@ module cpu (
     freelist freelist_0 (
         .clock(clock),
         .reset(reset),
+        .mispredict(mispredict),
+        .restore_mask(freelist_restore_mask),
 
         // From dispatch: allocation requests
         .alloc_req(freelist_alloc_req),
@@ -857,6 +866,9 @@ module cpu (
         .head_valids (rob_head_valids),
         .head_idxs   (rob_head_idxs),
 
+        // From arch map table for freelist restore
+        .arch_table_snapshot(arch_table_snapshot),
+
         // To ROB: flush younger if head is a mispredicted branch
         .rob_mispredict (rob_mispredict),
         .rob_mispred_idx(rob_mispred_idx),
@@ -866,6 +878,9 @@ module cpu (
 
         // To freelist: bitmap of PRs to free (all committed lanes' Told this cycle)
         .free_mask(freelist_free_mask),
+
+        // To freelist: restore mask on mispredict
+        .freelist_restore_mask(freelist_restore_mask),
 
         // To archMapTable: N write ports (commit multiple per cycle)
         .arch_write_enables  (arch_write_enables),
@@ -921,6 +936,7 @@ module cpu (
 
     // Freelist debug output (available physical registers)
     assign freelist_available_dbg = freelist_0.available_regs;
+    assign freelist_restore_mask_dbg = freelist_restore_mask;
 
     // CDB debug outputs
     assign cdb_output_dbg         = cdb_output;

@@ -69,6 +69,9 @@ module rs #(
         .clock(clock),
         .req  (alloc_valid),
         .clear(clear_mask),
+        .mispredict(1'b0),  // RS doesn't use selective restore, just reset
+        .initial_mask('1),  // All RS slots free initially
+        .restore_mask('1),  // Restore to all free on mispredict (via reset)
         .grant(granted_entries)
     );
 

@@ -121,8 +121,6 @@ module stage_dispatch (
                 default:    break;
             endcase
 
-            
-
             // This instruction can be dispatched
             num_to_dispatch++;
             rob_slots_used++;

@@ -4,7 +4,8 @@ module stage_retire #(
     parameter  int N          = `N,
     parameter  int ARCH_COUNT = `ARCH_REG_SZ,
     parameter  int PHYS_REGS  = `PHYS_REG_SZ_R10K,
-    localparam int PRW        = (PHYS_REGS <= 2) ? 1 : $clog2(PHYS_REGS)
+    localparam int PRW        = (PHYS_REGS <= 2) ? 1 : $clog2(PHYS_REGS),
+    localparam logic [PHYS_REGS-1:0] INITIAL_AVAIL_MASK = {{PHYS_REGS - `ARCH_REG_SZ{1'b1}}, {`ARCH_REG_SZ{1'b0}}}
 ) (
     input logic clock,
     input logic reset,
@@ -37,7 +38,13 @@ module stage_retire #(
     output ADDR  branch_target_out,
 
     // to read committed data from PRF
-    input DATA [`PHYS_REG_SZ_R10K-1:0] regfile_entries
+    input DATA [`PHYS_REG_SZ_R10K-1:0] regfile_entries,
+
+    // From arch map table for freelist restore on mispredict
+    input MAP_ENTRY [`ARCH_REG_SZ-1:0] arch_table_snapshot,
+
+    // To freelist: restore mask on mispredict
+    output logic [PHYS_REGS-1:0] freelist_restore_mask
 
 );
     // debug output
@@ -47,7 +54,11 @@ module stage_retire #(
     logic recover;
     logic mispred_dir, mispred_tgt, mispred;
 
+    // Freelist checkpoint for mispredict restore
+    logic [PHYS_REGS-1:0] freelist_checkpoint_mask, freelist_checkpoint_mask_next;
+
     always_comb begin
+        freelist_checkpoint_mask_next = freelist_checkpoint_mask;
         {rob_mispredict, rob_mispred_idx, bp_recover_en, free_mask} = '0;
         arch_write_enables = '0;
         arch_write_addrs = '0;
@@ -66,11 +77,6 @@ module stage_retire #(
 
         // Walk oldest -> youngest and commit until first incomplete
         for (int w = 0; w < N; w++) begin
-            if (!head_valids[w]) begin
-                // empty slot, skip
-                continue;
-            end
-
             entry = head_entries[w];
 
             // Stop at first incomplete instruction (in-order boundary)
@@ -92,8 +98,12 @@ module stage_retire #(
                 arch_write_addrs[w]    = entry.arch_rd;
                 arch_write_phys_regs[w] = entry.phys_rd;
 
-                if ((entry.prev_phys_rd != '0) && (entry.prev_phys_rd < PHYS_REGS))
+                freelist_checkpoint_mask_next[arch_write_phys_regs[w]] = 1'b0;
+
+                if ((entry.prev_phys_rd != '0) && (entry.prev_phys_rd < PHYS_REGS)) begin
                     free_mask[entry.prev_phys_rd] = 1'b1;
+                    freelist_checkpoint_mask_next[entry.prev_phys_rd] = 1'b1;
+                end
             end
 
             // If this entry is a branch, check for mispredict (compare prediction vs actual)
@@ -121,10 +131,18 @@ module stage_retire #(
                     break;
                 end
             end
-
         end
     end
 
+    always_ff @(posedge clock) begin
+        if (reset) begin
+            freelist_checkpoint_mask <= INITIAL_AVAIL_MASK;  // Arch regs busy, extras free
+        end else begin
+            freelist_checkpoint_mask <= freelist_checkpoint_mask_next;
+        end
+    end
+
+    assign freelist_restore_mask = freelist_checkpoint_mask_next;
 
 endmodule
 
