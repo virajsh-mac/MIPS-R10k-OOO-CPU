@@ -67,25 +67,6 @@
 // number of mult stages (2, 4) (you likely don't need 8)
 `define MULT_STAGES 4
 
-// cache parameters
-`define ICACHE_ASSOC 2           // 2-way associative I-cache
-`define ICACHE_LINES 32          // Number of lines per way/set or total number of lines
-`define ICACHE_LINE_BYTES 8      // 
-`define VICTIM_CACHE_SZ 4        // Small victim cache
-
-`define ISET_INDEX_BITS $clog2(`ICACHE_LINES / `ICACHE_ASSOC)              // indexing into each cache line
-`define IBLOCK_OFFSET_BITS $clog2(`ICACHE_LINE_BYTES)      // indexing into bytes in a cache line/block
-`define ITAG_BITS 32 - `ISET_INDEX_BITS - `IBLOCK_OFFSET_BITS
-
-`define DCACHE_ASSOC 2           // 2-way associative D-cache
-`define DCACHE_LINES 32
-`define DCACHE_LINE_BYTES 8      // 8 bytes/line 8 * 32 (2 words; 256 bytes total)
-`define DCACHE_VICTIM_SZ 4       // Small victim cache
-
-`define DSET_INDEX_BITS $clog2(`DCACHE_LINES / `DCACHE_ASSOC)   // indexing into each cache line
-`define DBLOCK_OFFSET_BITS $clog2(`DCACHE_LINE_BYTES)           // indexing into bytes in a cache line/block
-`define DTAG_BITS 32 - `DSET_INDEX_BITS - `DBLOCK_OFFSET_BITS
-
 // Load/Store Queue (not implemented in base design)
 `define LSQ_SZ 8
 
@@ -129,6 +110,8 @@ typedef logic [`RS_IDX_BITS-1:0] RS_IDX;
 // ---- Memory Definitions ---- //
 //////////////////////////////////
 
+`define CACHE_MODE TRUE
+
 // you are not allowed to change this definition for your final processor
 // the project 3 processor has a massive boost in performance just from having no mem latency
 // see if you can beat it's CPI in project 4 even with a 100ns latency!
@@ -142,14 +125,29 @@ typedef logic [`RS_IDX_BITS-1:0] RS_IDX;
 `define NUM_MEM_TAGS 15  // max number of oustanding mem requests
 typedef logic [3:0] MEM_TAG;
 
-// icache definitions
-`define ICACHE_LINES 32
-`define ICACHE_LINE_BITS $clog2(`ICACHE_LINES)
-
 `define MEM_SIZE_IN_BYTES (64*1024)
 `define MEM_64BIT_LINES (`MEM_SIZE_IN_BYTES/8)
 
-`define CACHE_MODE TRUE
+// cache parameters
+`define ICACHE_ASSOC 2           // 2-way associative I-cache
+`define ICACHE_LINES 32          // total number of lines in I-cache
+`define ICACHE_LINE_BYTES 8      // bytes in a cache line/mem_block
+`define VICTIM_CACHE_SZ 4        // Small victim cache
+// log2(32 / 2) = log2(16) = 4
+`define ISET_INDEX_BITS $clog2(`ICACHE_LINES / `ICACHE_ASSOC)  // indexing into each cache line
+// log2(8) = 3
+`define IBLOCK_OFFSET_BITS $clog2(`ICACHE_LINE_BYTES)          // indexing into bytes in a cache line/block
+// 16 - 4 - 3 = 9, 16 because our memory size is 2^16 bytes
+`define ITAG_BITS 16 - `ISET_INDEX_BITS - `IBLOCK_OFFSET_BITS
+
+`define DCACHE_ASSOC 2           // 2-way associative D-cache
+`define DCACHE_LINES 32          // total number of lines in D-cache
+`define DCACHE_LINE_BYTES 8      // 8 bytes/line 8 * 32 (2 words; 256 bytes total)
+`define DCACHE_VICTIM_SZ 4       // Small victim cache
+
+`define DSET_INDEX_BITS $clog2(`DCACHE_LINES / `DCACHE_ASSOC)   // indexing into each cache line
+`define DBLOCK_OFFSET_BITS $clog2(`DCACHE_LINE_BYTES)           // indexing into bytes in a cache line/block
+`define DTAG_BITS 16 - `DSET_INDEX_BITS - `DBLOCK_OFFSET_BITS
 
 // A memory or cache block
 typedef union packed {
@@ -159,17 +157,27 @@ typedef union packed {
     logic [63:0]      dbbl_level;
 } MEM_BLOCK;
 
-typedef struct packed {
-    logic [`ITAG_BITS-1:0] tag;
-    logic [`ISET_INDEX_BITS-1:0] set_index;
-    logic [`IBLOCK_OFFSET_BITS-1:0] block_offset;
-} I_SASS_ADDR; // ICache Breakdown of Set Associative cache address
 
 typedef struct packed {
-    logic [`DTAG_BITS-1:0] tag;
-    logic [`DSET_INDEX_BITS-1:0] set_index;
+    logic valid;
+    MEM_BLOCK cache_line;   // Cached data block
+} CACHE_DATA;
+
+typedef struct packed {
+    logic [15:0]                    zeros;        // [31:16] 16 bits
+    logic [`ITAG_BITS-1:0]          tag;          // [15:8]  8 bits
+    logic [`ISET_INDEX_BITS-1:0]    index;        // [7:4]   4 bits
+    logic                           bank;         // [3]     1 bit
+    logic [`IBLOCK_OFFSET_BITS-1:0] block_offset; // [2:0]   3 bit
+} I_ADDR; // ICache Breakdown of I-cache address
+
+typedef struct packed {
+    logic [15:0]                    zeros;
+    logic [`DTAG_BITS-1:0]          tag;
+    logic [`DSET_INDEX_BITS-1:0]    index;
+    logic                           bank
     logic [`DBLOCK_OFFSET_BITS-1:0] block_offset;
-} D_SASS_ADDR; // DCache Breakdown of Set Associative cache address
+} D_ADDR; // DCache Breakdown of D-cache address
 
 typedef enum logic [1:0] {
     BYTE   = 2'h0,
@@ -184,12 +192,6 @@ typedef enum logic [1:0] {
     MEM_LOAD  = 2'h1,
     MEM_STORE = 2'h2
 } MEM_COMMAND;
-
-// icache tag struct
-typedef struct packed {
-    logic [12-`ICACHE_LINE_BITS:0] tags;
-    logic                          valid;
-} ICACHE_TAG;
 
 // CDB entry
 typedef struct packed {

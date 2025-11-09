@@ -9,6 +9,11 @@
 
 `include "verilog/sys_defs.svh"
 
+typedef struct packed {
+    logic [12-`ICACHE_LINE_BITS:0] tags;
+    logic                          valid;
+} ICACHE_TAG;
+
 /**
  * A quick overview of the cache and memory:
  *
@@ -55,8 +60,8 @@ module icache_blocking (
 );
 
     // Note: cache tags, not memory tags
-    logic [12-`ICACHE_LINE_BITS:0] current_tag,   last_tag;
-    logic [`ICACHE_LINE_BITS -1:0] current_index, last_index;
+    logic [12-`$clog2(`ICACHE_LINES):0] current_tag,   last_tag;
+    logic [`$clog2(`ICACHE_LINES) -1:0] current_index, last_index;
     logic                          got_mem_data;
     logic                          icache_we;
 
