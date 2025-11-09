@@ -176,7 +176,7 @@ typedef struct packed {
     logic [15:0]                    zeros;
     logic [`DTAG_BITS-1:0]          tag;
     logic [`DSET_INDEX_BITS-1:0]    index;
-    logic                           bank
+    logic                           bank;
     logic [`DBLOCK_OFFSET_BITS-1:0] block_offset;
 } D_ADDR; // DCache Breakdown of D-cache address
 
