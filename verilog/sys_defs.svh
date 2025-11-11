@@ -136,7 +136,9 @@ typedef logic [3:0] MEM_TAG;
 `define IBLOCK_OFFSET_BITS $clog2(`ICACHE_LINE_BYTES)          // indexing into bytes in a cache line/block
 // 16 - 3 = 13, 16 because our memory size is 2^16 bytes
 `define ITAG_BITS 16 - `IBLOCK_OFFSET_BITS
+`define PREFETCH_SIZE 4
 `define LFSR_SEED 9
+`define PREFETCH_WIDTH 2         // Number of instructions to prefetch per cycle
 
 `define DCACHE_ASSOC 2           // 2-way associative D-cache
 `define DCACHE_LINES 32          // total number of lines in D-cache
@@ -696,5 +698,17 @@ typedef struct packed {
     logic   illegal;
     logic   valid;
 } COMMIT_PACKET;
+
+// Icache miss packet (from fetch stage)
+typedef struct packed {
+    logic [`N-1:0] valid;  // Valid bits for cache misses
+    ADDR  [`N-1:0] addrs;  // Addresses that missed in cache
+} ICACHE_MISS_PACKET;
+
+// MSHR request packet (includes both cache misses and prefetch requests)
+typedef struct packed {
+    logic [`N + `PREFETCH_WIDTH - 1:0] valid;  // Valid bits for each request
+    ADDR  [`N + `PREFETCH_WIDTH - 1:0] addrs;  // Addresses to request from memory
+} MSHR_REQUEST_PACKET;
 
 `endif  // __SYS_DEFS_SVH__

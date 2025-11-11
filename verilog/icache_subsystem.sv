@@ -5,13 +5,13 @@ module icache_subsystem (
     input reset,
 
     // Memory
-    input MEM_TAG       Imem2proc_transaction_tag,  // Tag of current mem request (0 = rejected)
-    input MEM_BLOCK     Imem2proc_data,             // Mem requested data coming back
-    input MEM_TAG       Imem2proc_data_tag,         // Tag for returned data (0 = no data)
-    input logic         mem_request_success,        // Mem reading request was successful
-    output logic        mem_req_valid,
-    output ADDR         mem_req_addr,
-    output MEM_COMMAND  mem_req_command,
+    input  MEM_TAG     Imem2proc_transaction_tag,  // Tag of current mem request (0 = rejected)
+    input  MEM_BLOCK   Imem2proc_data,             // Mem requested data coming back
+    input  MEM_TAG     Imem2proc_data_tag,         // Tag for returned data (0 = no data)
+    input  logic       mem_request_success,        // Mem reading request was successful
+    output logic       mem_req_valid,
+    output ADDR        mem_req_addr,
+    output MEM_COMMAND mem_req_command,
 
     // Fetch
     input  ADDR       [1:0] read_addr,
@@ -23,27 +23,43 @@ endmodule
 
 
 // ============================================================================
+// Prefetcher Module
+// ============================================================================
+// Sequential prefetcher that predicts next N cache lines based on access patterns
+// Monitors available MSHR slots and cache fullness to avoid resource conflicts
+module prefetcher #(
+    parameter PREFETCH_WIDTH = `PREFETCH_WIDTH
+) (
+    input clock,
+    input reset,
+
+    // Icache misses from fetch stage
+    input ICACHE_MISS_PACKET icache_miss,
+    input logic              icache_full,  // High when Icache is full
+
+
+    // MSHR status
+    input logic [$clog2(`NUM_MEM_TAGS):0] mshr_free_slots,  // Number of free slots in MSHR
+
+    // MSHR requests output (misses + prefetches)
+    output MSHR_REQUEST_PACKET mshr_req
+);
+
+    // on the first cycle fetch the entire size of the MSHR
+    // after that if there is a miss
+    // and there isnt already a open request for that address in the MSHR
+    // invalidate everything in the MSHR that doesnt have a open request
+    // insert the misses on top of the entries in the MSHR that have open requests
+    // prefetch the prefetch width on top of the miss
+    // Size the mshr to be superscalar width above the maximum number of requests to memory
+    // never prefetch above the maximum number of requests to memory
+
+endmodule
+
+
+// ============================================================================
 // ICache (2-way banked, fully associative per bank)
 // ============================================================================
-// Two memDP modules for odd/even banking to support 2 simultaneous reads
-// Each bank is fully associative (16 lines per bank = 32 total lines)
-// Uses LFSR for pseudo-random eviction policy within each bank
-// Prioritize victim cache eviction read over fetch read, might change later
-// when read hit in victim cache/prefetcher, it empties that line in victim cache and reinstate to icache
-// if icache was full, it evict a random one to victim cache, that's practically a swap.
-// what if I just don't promote when icache is already full?
-// but when I write to full icache again, it may overwrite that just used victim cache line
-// and being in victim cache is more line to be overwritten than being in a icache bank
-// because icache bank has 16 lines, victim cache only has 4 and is sharing with dcache
-// therefore, we should do the swap
-// there could be promotion write and reinstatement write
-// each write request means it's a hit this cycle, which means only one of them can be valid
-// so we don't have to decide priority between them.
-// I still need to decide the prioirty between MSHR write and victim/prefetcher write
-// those could happen in the same cycle
-// if delay MSHR, there needs to be a structure to save it
-// if delay victim/prefetcher, i also need a buffer to save it
-// sicne a buffer is required, I might as well prioritize fetch stage read over eviction read
 module icache (
     input clock,
     input reset,
@@ -56,22 +72,22 @@ module icache (
     input  I_ADDR             write_addr,
     input  CACHE_DATA         write_in,
 
-    // Victim cache
-    output ADDR               evict_addr,
-    output CACHE_DATA         evict_out,
-
-    output logic        [1:0] hit
+    output logic        [1:0] hit,
+    output logic              full
 );
-    logic [`ICACHE_LINES-1:0]                 valids, valids_next;
-    logic [`ICACHE_LINES-1:0][`ITAG_BITS-1:0] tags, tags_next;
-    MEM_BLOCK [`ICACHE_LINES-1:0]             cache_lines;
+    localparam MEM_WIDTH = `ICACHE_LINES + `PREFETCH_SIZE;
+    localparam I_INDEX_BITS = $clog2(MEM_WIDTH);
+
+    logic [MEM_WIDTH-1:0]                 valids, valids_next;
+    logic [MEM_WIDTH-1:0][`ITAG_BITS-1:0] tags, tags_next;
+    MEM_BLOCK [MEM_WIDTH-1:0]             cache_lines;
 
     memDP #(
         .WIDTH   ($BITS(MEM_BLOCK)),
         .DEPTH   (1'b1),
         .READ_PORTS (1),
         .BYPASS_EN  (0)
-    ) cache_bank[`ICACHE_LINES-1:0] (
+    ) cache_bank[MEM_WIDTH-1:0] (
         .clock(clock),
         .reset(reset),
         .re   (1'b1),
@@ -82,11 +98,11 @@ module icache (
         .wdata(write_in.cache_line)
     );
 
-    logic [1:0][`ICACHE_LINES-1:0]            read_addr_one_hot;
-    logic [1:0][$clog2(`ICACHE_LINES)-1:0]    read_addr_index;
+    logic [1:0][MEM_WIDTH-1:0]            read_addr_one_hot;
+    logic [1:0][$clog2(MEM_WIDTH)-1:0]    read_addr_index;
 
     one_hot_to_index #(
-        .OUTPUT_WIDTH (`ICACHE_LINES)
+        .OUTPUT_WIDTH (MEM_WIDTH)
     ) one_hot_to_index_inst[1:0] (
         .one_hot(read_addr_one_hot),
         .index(read_addr_index)
@@ -95,7 +111,7 @@ module icache (
     wor MEM_BLOCK [1:0]                       cache_lines_out;
 
     // Fetch Read logic
-    for (genvar i = 0; i < `ICACHE_LINES; i++) begin : read_cache // Anding and Or-reducing
+    for (genvar i = 0; i < MEM_WIDTH; i++) begin : read_cache // Anding and Or-reducing
         assign read_addr_one_hot[0][i] = read_addr[0].tag == tags[i] && valids[i];  // Find read index by matching tag for cache read port 0
         assign read_addr_one_hot[1][i] = read_addr[1].tag == tags[i] && valids[i];
 
@@ -113,22 +129,22 @@ module icache (
     assign cache_out[1].valid = (valids[read_addr_index[1]] & |read_addr_one_hot[1]) ||
                                 (write_addr.valid && write_addr.tag == read_addr[1].tag);     // forwarding
 
-    logic [`ICACHE_LINES-1:0]  cache_write_one_hot;
+    logic [MEM_WIDTH-1:0]  cache_write_one_hot;
 
     // Write logic
     psel_gen #(
-        .WIDTH(`ICACHE_LINES),
+        .WIDTH(MEM_WIDTH),
         .REQS(1)
     ) psel_bank (
         .req(~valids),
         .gn(cache_write_one_hot)
     );
 
-    logic [`I_INDEX_BITS-1:0] evict_index;
-    logic [`ICACHE_LINES-1:0] cache_write_enable_mask;
+    logic [I_INDEX_BITS-1:0] evict_index;
+    logic [MEM_WIDTH-1:0] cache_write_enable_mask;
 
     LFSR #(
-        .NUM_BITS(`I_INDEX_BITS)
+        .NUM_BITS(I_INDEX_BITS)
     ) LFSR0 (
         .clock(clock),
         .reset(reset),
@@ -136,17 +152,25 @@ module icache (
         .data_out(evict_index)
     );
 
-    assign cache_write_enable_mask = (|cache_write_one_hot) ? cache_write_one_hot : evict_index;
+    logic [MEM_WIDTH-1:0] evict_index_one_hot;
 
-    assign evict_out[0].cache_line = cache_lines[evict_index];
-    assign evict_out[1].valid = ~|cache_write_one_hot;
+    index_to_onehot #(
+        .INPUT_WIDTH(I_INDEX_BITS)
+    ) evict_index_to_onehot_inst (
+        .idx(evict_index),
+        .one_hot(evict_index_one_hot)
+    );
+
+    assign cache_write_enable_mask = (|cache_write_one_hot) ? cache_write_one_hot : evict_index_one_hot;
+
+    assign hit = ;
 
     // Valid and tags logic
     always_comb begin
         valids_next = valids;
         tags_next = tags;
-        for (int i = 0; i < `ICACHE_LINES; i++) begin
-            if (cache_write_enable_mask[i]) begin
+        for (int i = 0; i < MEM_WIDTH; i++) begin
+            if (cache_write_enable_mask[i] && write_in.valid) begin
                 valids_next[i] = 1'b1;
                 tags_next[i] = write_addr.tag;
             end
@@ -169,8 +193,8 @@ endmodule
 module one_hot_to_index #(
     parameter int INPUT_WIDTH = 1
 ) (
-    input  logic [INPUT_WIDTH-1:0] one_hot,
-    output wor   [((INPUT_WIDTH <= 1) ? 1 : $clog2(INPUT_WIDTH))-1:0] index
+    input logic [INPUT_WIDTH-1:0] one_hot,
+    output wor [((INPUT_WIDTH <= 1) ? 1 : $clog2(INPUT_WIDTH))-1:0] index
 );
 
     localparam INDEX_WIDTH = (INPUT_WIDTH <= 1) ? 1 : $clog2(INPUT_WIDTH);
@@ -182,22 +206,22 @@ module one_hot_to_index #(
 
 endmodule
 
-module LFSR #(parameter NUM_BITS) (
-   input clock,
-   input reset,
+module LFSR #(
+    parameter NUM_BITS
+) (
+    input clock,
+    input reset,
 
-   input [NUM_BITS-1:0] seed_data,
-   output [NUM_BITS-1:0] data_out
+    input  [NUM_BITS-1:0] seed_data,
+    output [NUM_BITS-1:0] data_out
 );
 
     logic [NUM_BITS-1:0] LFSR;
     logic                r_XNOR;
 
     always @(posedge clock) begin
-        if (reset)
-           LFSR <= seed_data;
-        else
-           LFSR <= {LFSR[NUM_BITS-1:1], r_XNOR};
+        if (reset) LFSR <= seed_data;
+        else LFSR <= {LFSR[NUM_BITS-1:1], r_XNOR};
     end
 
     always @(*) begin
