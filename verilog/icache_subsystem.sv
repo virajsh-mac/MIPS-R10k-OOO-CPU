@@ -66,19 +66,34 @@ module icache_subsystem (
 endmodule
 
 module victim_cache (
-    // for when you icache is evicting something from MSHR trying to write to a full bank, takes priority
-    input ADDR write_addr,
-    input cache_data write_data,
+    // lookup suite
+    input logic lookup_en,
+    input ADDR lookup_addr,
 
-    // fetch stage read
-    input ADDR read_addr,
-    output cache_data write_data,
+    // Insert suite
+    input logic insert_en,
+    input ADDR insert_addr,
+    input cache_data insert_data,
 
-    output hit,
-    output ADDR reinstate_addr,
-    output cache_data reinstate_data;
+    // swap suite
+    input logic swap_en,
+    input ADDR swap_addr,
+    input cache_data swap_data,
+
+
+    // output
+    output logic vc_full,
+
+    output cache_data reinstate_data,
+    out ADDR reinstate_addr
+
+    output logic vc_hit,
     // TODO: if hit, needs to output cache line back to icache
 )
+
+
+
+
     // TODO finish victim cache
     memDP #(
         .WIDTH   ($BITS(MEM_BLOCK)),
