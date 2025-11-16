@@ -170,8 +170,8 @@ typedef logic [`ITAG_BITS-1:0]      I_TAG;
 
 typedef struct packed {
     logic valid;
-    ADDR  addr;
-} ADDR_PACKET;
+    I_ADDR  addr;
+} I_ADDR_PACKET;
 
 typedef struct packed {
     logic valid;
@@ -181,7 +181,7 @@ typedef struct packed {
 typedef struct packed {
     logic   valid;
     MEM_TAG mem_tag;
-    I_TAG   i_addr;
+    I_TAG   i_tag;
 } MSHR_PACKET;
 
 typedef struct packed {

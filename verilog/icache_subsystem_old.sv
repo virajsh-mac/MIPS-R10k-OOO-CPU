@@ -120,12 +120,12 @@ module i_mshr #(
         data_back_addr = '0;
 
         // Pop FIFO
-        if (data_back_tag != 0 && 
+        if (data_back_tag != '0 && 
             data_back_tag == mshr_entries[head_pointer].mem_tag &&
             mshr_entries[head_pointer].valid) begin
             next_head_pointer = (head_pointer + '1) % `NUM_MEM_TAGS;
             mshr_entries[head_pointer].valid = '0;
-            data_back_addr.vaid = '1;
+            data_back_addr.valid = '1;
             data_back_addr.addr = mshr_entries[head_pointer].addr;
         end
 
