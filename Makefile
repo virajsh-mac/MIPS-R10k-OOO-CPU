@@ -268,7 +268,8 @@ CPU_TESTBENCH = test/pipeline_print.c \
 # verilog/cpu.sv is implicit
 CPU_SOURCES = verilog/cpu.sv \
 			  verilog/regfile.sv \
-              verilog/icache.sv \
+              verilog/icache_subsystem.sv \
+              verilog/lfsr.sv \
               verilog/memDP.sv \
 			  verilog/mult.sv \
 			  verilog/rob.sv \
