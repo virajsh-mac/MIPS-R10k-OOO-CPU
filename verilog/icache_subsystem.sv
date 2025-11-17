@@ -5,17 +5,17 @@ module icache_subsystem (
     input reset,
 
     // Fetch
-    input  ADDR       [1:0] read_addrs,  // read_addr[0] is older instructions
-    output CACHE_DATA [1:0] cache_outs,
+    input  I_ADDR_PACKET [1:0]  read_addrs,  // read_addr[0] is older instructions
+    output CACHE_DATA [1:0]     cache_outs,
 
     // Mem.sv IOs
-    input MEM_TAG   current_req_tag,
-    input MEM_BLOCK mem_data,
-    input MEM_TAG   mem_data_tag,
+    input MEM_TAG               current_req_tag,
+    input MEM_BLOCK             mem_data,
+    input MEM_TAG               mem_data_tag,
 
     // Arbitor IOs
-    output I_ADDR_PACKET mem_req_addr,
-    input  logic         mem_req_accepted
+    output I_ADDR_PACKET        mem_req_addr,
+    input  logic                mem_req_accepted
 );
 
     // Internal wires
@@ -35,7 +35,7 @@ module icache_subsystem (
         .full         (icache_full),
         // Icache write mem_data, when mem_data_tag matches head of MSHR
         .write_addr   (icache_write_addr),
-        .mem_data     (mem_data)
+        .write_data   (mem_data)
     );
 
     prefetcher prefetcher_inst (
@@ -51,7 +51,7 @@ module icache_subsystem (
         .clock          (clock),
         .reset          (reset),
         // Prefetch snooping
-        .snooping_addr  (prefetcher_snooping_addr),
+        .snooping_addr  (prefetcher_snooping_addr.addr),
         .addr_found     (snooping_found_mshr),
         // When mem_req_accepted
         .new_entry      (new_mshr_entry),
@@ -135,7 +135,9 @@ module i_mshr #(
             next_head = (head + '1) % `NUM_MEM_TAGS;
             next_mshr_entries[head].valid = '0;
             mem_data_i_addr.valid = '1;
-            mem_data_i_addr.addr = {16'b0, mshr_entries[head].i_tag, 3'b0};  // TODO: iffy about syntax
+            mem_data_i_addr.addr = '{zeros: 16'b0, 
+                                     tag: mshr_entries[head].i_tag, 
+                                     block_offset: 3'b0};
         end
 
         // New memory request, push new MSHR Entry
@@ -169,7 +171,7 @@ module prefetcher (
     output I_ADDR_PACKET prefetcher_snooping_addr
 );
     I_ADDR_PACKET last_icache_miss_mem_req, next_last_icache_miss_mem_req;
-    ADDR addr_incrementor, next_addr_incrementor;
+    I_ADDR addr_incrementor, next_addr_incrementor;
 
     always_comb begin
         prefetcher_snooping_addr = '0;
@@ -278,9 +280,15 @@ module icache (
     );
 
     // Cache write logic
-    assign cache_write_evict_one_hot[cache_write_evict_index] = 1'b1;
+    for (genvar k = 0; k < MEM_DEPTH; k++) begin
+        assign cache_write_evict_one_hot[k] = (cache_write_evict_index == k);
+    end
+    
     assign cache_write_enable_mask = |cache_write_no_evict_one_hot ? cache_write_no_evict_one_hot : cache_write_evict_one_hot;
-    assign cache_line_write = {write_addr.valid, write_addr.addr.tag, write_data}
+    
+    assign cache_line_write = '{valid: write_addr.valid,
+                                tag: write_addr.addr.tag,
+                                data: write_data};
 
     // Prefetch snooping logic
     for (genvar i = 0; i < MEM_DEPTH; i++) begin
@@ -292,7 +300,7 @@ module icache (
 
     // Cache read logic
     for (genvar j = 0; j <= 1; j++) begin
-        for (genvar i = 0; i <=1; i ++) begin
+        for (genvar i = 0; i < MEM_DEPTH; i++) begin
             assign cache_reads_one_hot[j][i] = (read_addrs[j].addr.tag == cache_lines[i].tag) &
                                                 read_addrs[j].valid &
                                                 cache_lines[i].valid;
