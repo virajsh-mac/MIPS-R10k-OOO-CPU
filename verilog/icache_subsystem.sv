@@ -290,7 +290,6 @@ module icache (
         .index          (cache_reads_index)
     );
 
-
     // prefetch snooping logic
     for (genvar i = 0; i < MEM_DEPTH; i++) begin
         assign snooping_one_hot[i] = snooping_addr.addr.tag == tags[i] & snooping_addr.valid & valids[i];
@@ -303,7 +302,7 @@ module icache (
             assign cache_reads_one_hot[j] = read_addrs[j].addr.tag & read_addrs[j].addr.valid & valids[i];
             assign cache_outs[j].cache_line = cache_lines[i] & {(`MEM_BLOCK_BITS){cache_reads_one_hot[j][i]}}
         end
-        assign cache_outs[j].valid = 
+        assign cache_outs[j].valid = valids_next[cache_reads_index];
     end
 
     // cache write logic

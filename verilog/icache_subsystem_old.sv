@@ -265,8 +265,8 @@ module icache (
         assign cache_lines_out[1] = cache_lines[i] & {$bits(MEM_BLOCK){read_addr_one_hot[1][i]}};
     end
 
-    assign cache_out[0].cache_line = write_data.valid && write_addr.tag == read_addr[0].tag ? // forwarding
-                        write_data.cache_line : cache_lines_out[0];
+    assign cache_out[0].cache_line = write_data.vali && write_addr.tag == read_addr[0].tag ? // forwarding
+                        write_data.cache_line : cached_lines_out[0];
     assign cache_out[1].cache_line = write_data.valid && write_addr.tag == read_addr[1].tag ? // forwarding
                         write_data.cache_line : cache_lines_out[1];
 
