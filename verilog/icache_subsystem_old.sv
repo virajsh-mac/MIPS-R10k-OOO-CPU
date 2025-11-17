@@ -29,13 +29,13 @@ module icache_subsystem (
         .cache_out                (cache_out),
     
         // Prefetcher IOs
-        .searching_addr           (prefetcher_mem_req.addr),
-        .found_addr               (found_in_icache),
+        .snooping_addr           (prefetcher_mem_req.addr),
+        .addr_found               (found_in_icache),
         .full                     (icache_full),
 
         // Write to icache
         .write_addr               (current_mem_data_addr),
-        .write_in                 (icache_wirte_in)
+        .write_data                 (icache_wirte_in)
     );
 
     MSHR_PACKET new_mshr_entry;
@@ -51,8 +51,8 @@ module icache_subsystem (
         .reset           (reset),
 
         // Prefetch snooping
-        .searching_addr  (prefetcher_mem_req.addr),
-        .found_addr      (found_in_mshr),
+        .snooping_addr  (prefetcher_mem_req.addr),
+        .addr_found      (found_in_mshr),
         
         // New accepted mem request
         .new_entry       (new_mshr_entry),
@@ -91,8 +91,8 @@ module i_mshr #(
     input             reset,
 
     // Prefetch snooping
-    input  I_ADDR     searching_addr,
-    output logic      found_addr,
+    input  I_ADDR     snooping_addr,
+    output logic      addr_found,
 
     // New accepted mem request
     input MSHR_PACKET new_entry,
@@ -110,9 +110,9 @@ module i_mshr #(
     // Pre-fetch snoop logic
     logic [`NUM_MEM_TAGS-1:0] addr_search_one_hot;
     for (genvar i = 0; i < `NUM_MEM_TAGS; i++) begin
-        assign addr_search_one_hot[i] = searching_addr.tag == mshr_entries[i].addr.tag;
+        assign addr_search_one_hot[i] = snooping_addr.tag == mshr_entries[i].addr.tag;
     end
-    assign found_addr = |addr_search_one_hot;
+    assign addr_found = |addr_search_one_hot;
 
     always_comb begin
         next_head_pointer = head_pointer;
@@ -205,14 +205,14 @@ module icache (
     output CACHE_DATA   [1:0] cache_out,
 
     // Prefetcher read
-    input  I_ADDR             searching_addr,
-    output logic              found_addr,
+    input  I_ADDR             snooping_addr,
+    output logic              addr_found,
+    output logic              full
 
     // Write to icache
     input  I_ADDR             write_addr,
-    input  CACHE_DATA         write_in,
+    input  CACHE_DATA         write_data,
 
-    output logic              full
 );
     localparam MEM_WIDTH = `ICACHE_LINES + `PREFETCH_STREAM_BUFFER_SIZE;
     localparam I_INDEX_BITS = $clog2(MEM_WIDTH);
@@ -234,27 +234,27 @@ module icache (
         .rdata        (cache_lines),
         .we           (cache_write_enable_mask),
         .waddr        (1'b0),
-        .wdata        (write_in.cache_line)
+        .wdata        (write_data.cache_line)
     );
 
     logic [1:0][MEM_WIDTH-1:0]            read_addr_one_hot;
     logic [1:0][$clog2(MEM_WIDTH)-1:0]    read_addr_index;
 
     one_hot_to_index #(
-        .OUTPUT_WIDTH   (MEM_WIDTH)
+        .INPUT_WIDTH   (MEM_WIDTH)
     ) one_hot_to_index_inst[1:0] (
         .one_hot        (read_addr_one_hot),
         .index          (read_addr_index)
     );
 
-    wor MEM_BLOCK [1:0]                    cache_lines_out;
+    wor MEM_BLOCK [1:0]                    cache_lines_out; // gonna just be output
 
     // Pre-fetch snoop logic
     logic [MEM_WIDTH-1:0] addr_search_one_hot;
     for (genvar i = 0; i < MEM_WIDTH; i++) begin
-        assign addr_search_one_hot[i] = searching_addr.tag == tags[i];
+        assign addr_search_one_hot[i] = snooping_addr.tag == tags[i];
     end
-    assign found_addr = |addr_search_one_hot;
+    assign addr_found = |addr_search_one_hot;
 
     // Fetch Read logic
     for (genvar i = 0; i < MEM_WIDTH; i++) begin : read_cache // Anding and Or-reducing
@@ -265,15 +265,15 @@ module icache (
         assign cache_lines_out[1] = cache_lines[i] & {$bits(MEM_BLOCK){read_addr_one_hot[1][i]}};
     end
 
-    assign cache_out[0].cache_line = write_in.valid && write_addr.tag == read_addr[0].tag ? // forwarding
-                        write_in.cache_line : cache_lines_out[0];
-    assign cache_out[1].cache_line = write_in.valid && write_addr.tag == read_addr[1].tag ? // forwarding
-                        write_in.cache_line : cache_lines_out[1];
+    assign cache_out[0].cache_line = write_data.valid && write_addr.tag == read_addr[0].tag ? // forwarding
+                        write_data.cache_line : cache_lines_out[0];
+    assign cache_out[1].cache_line = write_data.valid && write_addr.tag == read_addr[1].tag ? // forwarding
+                        write_data.cache_line : cache_lines_out[1];
 
     assign cache_out[0].valid = (valids[read_addr_index[0]] & |read_addr_one_hot[0]) ||
-                                (write_in.valid && write_addr.tag == read_addr[0].tag);     // forwarding
+                                (write_data.valid && write_addr.tag == read_addr[0].tag);     // forwarding
     assign cache_out[1].valid = (valids[read_addr_index[1]] & |read_addr_one_hot[1]) ||
-                                (write_in.valid && write_addr.tag == read_addr[1].tag);     // forwarding
+                                (write_data.valid && write_addr.tag == read_addr[1].tag);     // forwarding
 
     logic [MEM_WIDTH-1:0]  cache_write_one_hot;
 
@@ -307,7 +307,7 @@ module icache (
         .one_hot         (evict_index_one_hot)
     );
 
-    assign cache_write_enable_mask = write_in.valid ? 
+    assign cache_write_enable_mask = write_data.valid ? 
         ((|cache_write_one_hot) ? cache_write_one_hot : evict_index_one_hot) : 
         '0;
 
@@ -317,7 +317,7 @@ module icache (
         valids_next = valids;
         tags_next = tags;
         for (int i = 0; i < MEM_WIDTH; i++) begin
-            if (cache_write_enable_mask[i] && write_in.valid) begin
+            if (cache_write_enable_mask[i] && write_data.valid) begin
                 valids_next[i] = 1'b1;
                 tags_next[i] = write_addr.tag;
             end

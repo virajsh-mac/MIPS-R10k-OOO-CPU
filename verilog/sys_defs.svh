@@ -129,6 +129,7 @@ typedef logic [3:0] MEM_TAG;
 `define MEM_64BIT_LINES (`MEM_SIZE_IN_BYTES/8)
 
 // cache parameters
+`define MEM_BLOCK_BITS 32
 `define ICACHE_LINES 32          // total number of lines in I-cache
 `define ICACHE_LINE_BYTES 8      // bytes in a cache line/mem_block
 `define VICTIM_CACHE_SZ 4        // Small victim cache
