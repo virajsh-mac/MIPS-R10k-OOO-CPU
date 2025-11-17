@@ -156,6 +156,8 @@ typedef union packed {
     logic [63:0]      dbbl_level;
 } MEM_BLOCK;
 
+typedef logic [`ITAG_BITS-1:0]      I_TAG;  
+
 typedef struct packed {
     logic valid;
     I_TAG tag;
@@ -172,8 +174,6 @@ typedef struct packed {
     logic [`ITAG_BITS-1:0]          tag;          // [15:8]  8 bits
     logic [`IBLOCK_OFFSET_BITS-1:0] block_offset; // [2:0]   3 bit
 } I_ADDR; // ICache Breakdown of I-cache address
-
-typedef logic [`ITAG_BITS-1:0]      I_TAG;  
 
 typedef struct packed {
     logic valid;
@@ -721,3 +721,4 @@ typedef struct packed {
     logic   valid;
 } COMMIT_PACKET;
 
+`endif

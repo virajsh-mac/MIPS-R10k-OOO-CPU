@@ -266,7 +266,7 @@ module icache (
         .WIDTH(MEM_DEPTH),
         .REQS(1'b1)
     ) psel_gen_inst (
-        .req(cache_lines.valid),
+        .req(valid_bits),
         .gn(cache_write_no_evict_one_hot)
     );
 
