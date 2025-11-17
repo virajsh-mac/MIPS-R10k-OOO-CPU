@@ -243,6 +243,7 @@ module icache (
     logic [1:0][I_CACHE_INDEX_BITS-1:0]   cache_reads_index;
 
     logic [MEM_DEPTH-1:0]                 snooping_one_hot;
+    logic [MEM_DEPTH-1:0]                 valid_bits;
 
     memDP #(
         .WIDTH(MEM_WIDTH),
@@ -297,6 +298,11 @@ module icache (
                                       cache_lines[i].valid;
     end
     assign addr_found = |snooping_one_hot;
+
+    for (genvar i = 0; i < MEM_DEPTH; i++) begin
+        assign valid_bits[i] = cache_lines[i].valid;
+    end
+    assign full = &valid_bits;
 
     // Cache read logic
     for (genvar j = 0; j <= 1; j++) begin
