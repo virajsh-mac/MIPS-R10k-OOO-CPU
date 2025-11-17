@@ -127,19 +127,20 @@ module i_mshr #(
     always_comb begin
         next_head = head;
         next_tail = tail;
+        mem_data_i_addr = '0;
 
         // Data returned from Memory, Pop MSHR Entry
         if (mem_data_tag != '0 & mshr_entries[head].valid & mem_data_tag == mshr_entries[head].mem_tag) begin
-            next_head = (head_pointer + '1) % `NUM_MEM_TAGS;
-            next_mshr_entries[head_pointer].valid = '0;
+            next_head = (head + '1) % `NUM_MEM_TAGS;
+            next_mshr_entries[head].valid = '0;
             mem_data_i_addr.valid = '1;
-            mem_data_i_addr.addr = {16'b0, mshr_entries[head].mem_tag, 3'b0};  // TODO: iffy about syntax
+            mem_data_i_addr.addr = {16'b0, mshr_entries[head].i_tag, 3'b0};  // TODO: iffy about syntax
         end
 
         // New memory request, push new MSHR Entry
         if (new_entry.valid) begin
-            next_mshr_entries[tail_pointer] = new_entry;
-            next_tail_pointer = (tail_pointer + '1) % `NUM_MEM_TAGS;
+            next_mshr_entries[tail] = new_entry;
+            next_tail = (tail + '1) % `NUM_MEM_TAGS;
         end
     end
 
@@ -170,21 +171,21 @@ module prefetcher (
     ADDR addr_incrementor, next_addr_incrementor;
 
     always_comb begin
-        mem_req = '0;
+        prefetcher_snooping_addr = '0;
         next_addr_incrementor = addr_incrementor;
         next_last_icache_miss_mem_req = last_icache_miss_mem_req;
 
         // New or first icache miss yet to successfully request
-        if (icache_miss_addr.valid & (icache_miss_addr.addr != next_last_icache_miss_mem_req | ~last_requested_icache_miss.valid)) begin
+        if (icache_miss_addr.valid & (icache_miss_addr.addr != last_icache_miss_mem_req.addr | ~last_icache_miss_mem_req.valid)) begin
             // Send mem snooping request
             prefetcher_snooping_addr.valid = '1;
             prefetcher_snooping_addr.addr  = icache_miss_addr.addr;
             if (mem_req_accepted) begin
-                next_last_icache_miss_mem_req.vaid = '1;
+                next_last_icache_miss_mem_req.valid = '1;
                 next_last_icache_miss_mem_req.addr = icache_miss_addr.addr;
-                addr_incrementor_next = icache_miss_addr.addr;
+                next_addr_incrementor = icache_miss_addr.addr;
             end
-        end else if (~icache_full & last_requested_icache_miss.valid) begin
+        end else if (~icache_full & last_icache_miss_mem_req.valid) begin
             // Send lookahead snooping request
             prefetcher_snooping_addr.valid = '1;
             prefetcher_snooping_addr.addr  = addr_incrementor + 'h4;
@@ -240,7 +241,7 @@ module icache (
     logic [1:0][MEM_DEPTH-1:0]            cache_reads_one_hot;
     logic [1:0][I_INDEX_BITS-1:0]         cache_reads_index;
 
-    logic [MEM_WIDTH-1:0]                 snooping_one_hot;
+    logic [MEM_DEPTH-1:0]                 snooping_one_hot;
 
 
     memDP #(
@@ -268,7 +269,7 @@ module icache (
     );
 
     LFSR #(
-        .NUM_BITS (MEM_DEPTH)
+        .NUM_BITS (I_INDEX_BITS)
     ) LFSR_inst (
         .clock(clock),
         .reset(reset),
@@ -299,10 +300,10 @@ module icache (
     // cache read logic
     for (genvar j = 0; j <= 1; j++) begin
         for (genvar i = 0; i < MEM_DEPTH; i++) begin
-            assign cache_reads_one_hot[j] = read_addrs[j].addr.tag & read_addrs[j].addr.valid & valids[i];
-            assign cache_outs[j].cache_line = cache_lines[i] & {(`MEM_BLOCK_BITS){cache_reads_one_hot[j][i]}}
+            assign cache_reads_one_hot[j][i] = read_addrs[j].addr.tag == tags[i] & read_addrs[j].valid & valids[i];
+            assign cache_outs[j].cache_line = cache_lines[i] & {(`MEM_BLOCK_BITS){cache_reads_one_hot[j][i]}};
         end
-        assign cache_outs[j].valid = valids_next[cache_reads_index];
+        assign cache_outs[j].valid = valids_next[cache_reads_index[j]];
     end
 
     // cache write logic
@@ -315,7 +316,7 @@ module icache (
         for (int i = 0; i < MEM_DEPTH; i++) begin
             if (cache_write_enable_mask[i] & write_addr.valid) begin
                 valids_next[i] = 1'b1;
-                tags_next[i] = write_addr.tag;
+                tags_next[i] = write_addr.addr.tag;
             end
         end
     end
