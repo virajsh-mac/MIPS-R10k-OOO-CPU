@@ -62,7 +62,7 @@ module icache_subsystem (
 
     // Oldest miss address logic
     always_comb begin
-        oldest_miss_addr.valid = '0;
+        oldest_miss_addr = '0;
         if (read_addrs[0].valid & ~cache_outs[0].valid) begin
             oldest_miss_addr.valid = '1;
             oldest_miss_addr.addr  = read_addrs[0].addr;
@@ -74,7 +74,7 @@ module icache_subsystem (
 
     // Mem request address logic
     always_comb begin
-        mem_req_addr.valid = '0;
+        mem_req_addr = '0;  // Default assignment to prevent latch
         if (~snooping_found_icache & ~snooping_found_mshr) begin
             mem_req_addr = prefetcher_snooping_addr;
         end
@@ -82,7 +82,7 @@ module icache_subsystem (
 
     // New MSHR entry logic
     always_comb begin
-        new_mshr_entry.valid = '0;
+        new_mshr_entry = '0;  // Default assignment to prevent latch
         if (mem_req_accepted) begin
             new_mshr_entry.valid   = '1;
             new_mshr_entry.mem_tag = current_req_tag;
@@ -216,7 +216,7 @@ module icache (
 
     // Fetch Stage read
     input I_ADDR_PACKET [1:0] read_addrs,
-    output wor CACHE_DATA [1:0] cache_outs,
+    output CACHE_DATA [1:0] cache_outs,
 
     // Prefetch snooping
     input  I_ADDR_PACKET snooping_addr,  // to decide whether to send mem request
@@ -232,6 +232,7 @@ module icache (
     localparam I_CACHE_INDEX_BITS = $clog2(MEM_DEPTH);
     localparam MEM_WIDTH = 1 + `ITAG_BITS + `MEM_BLOCK_BITS;
 
+    wor CACHE_DATA [1:0]                  cache_outs_temp;
     I_CACHE_LINE [MEM_DEPTH-1:0]          cache_lines;
     I_CACHE_LINE                          cache_line_write;
     logic [MEM_DEPTH-1:0]                 cache_write_enable_mask;
@@ -267,7 +268,7 @@ module icache (
         .REQS(1'b1)
     ) psel_gen_inst (
         .req(valid_bits),
-        .gn(cache_write_no_evict_one_hot)
+        .gnt(cache_write_no_evict_one_hot)
     );
 
     // Write selection random eviction
@@ -276,7 +277,7 @@ module icache (
     ) LFSR_inst (
         .clock(clock),
         .reset(reset),
-        .seed_data(`LFSR_SEED),
+        .seed_data(I_CACHE_INDEX_BITS'(`LFSR_SEED)),
         .data_out(cache_write_evict_index)
     );
 
@@ -311,8 +312,9 @@ module icache (
                                                 read_addrs[j].valid &
                                                 cache_lines[i].valid;
 
-            assign cache_outs[j].data = cache_lines[i].data & cache_reads_one_hot[j][i];
+            assign cache_outs_temp[j].data = cache_lines[i].data & {`MEM_BLOCK_BITS{cache_reads_one_hot[j][i]}};
         end
     end
+    assign cache_outs = cache_outs_temp;
 
 endmodule

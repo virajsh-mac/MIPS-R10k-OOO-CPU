@@ -24,14 +24,14 @@ module memDP
     //                      Read interface                          //
     // ------------------------------------------------------------ //
     input        [READ_PORTS-1:0]                    re,     // Read enable
-    input        [READ_PORTS-1:0][$clog2(DEPTH)-1:0] raddr,  // Read address
+    input        [READ_PORTS-1:0][(DEPTH==1 ? 1 : $clog2(DEPTH))-1:0] raddr,  // Read address
     output logic [READ_PORTS-1:0][WIDTH        -1:0] rdata,  // Read data
 
     // ------------------------------------------------------------ //
     //                      Write interface                         //
     // ------------------------------------------------------------ //
     input                                            we,     // Write enable
-    input                       [$clog2(DEPTH)-1:0]  waddr,  // Write address
+    input                       [(DEPTH==1 ? 1 : $clog2(DEPTH))-1:0]  waddr,  // Write address
     input                       [WIDTH        -1:0]  wdata   // Write data
    );
 

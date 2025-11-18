@@ -221,6 +221,7 @@ build/regfile.cov:  $(REGFILE_FILES)
 synth/regfile.vg:   $(REGFILE_FILES)
 
 
+
 # TODO: add any files required for stage_issue here (besides test/stage_issue_test.sv and verilog/stage_issue.sv)
 STAGE_ISSUE_FILES = verilog/sys_defs.svh verilog/allocator.sv verilog/psel_gen.sv
 build/stage_issue.simv: $(STAGE_ISSUE_FILES)
@@ -343,6 +344,17 @@ $(MODULES:%=build/%.simv): build/%.simv: test/%_test.sv verilog/%.sv | build
 	@$(call PRINT_COLOR, 6, finished compiling $@)
 
 # This also generates many other files, see the tcl script's introduction for info on each of them
+# Special rule for icache_subsystem with its dependencies
+synth/icache_subsystem.vg: verilog/icache_subsystem.sv verilog/memDP.sv verilog/psel_gen.sv verilog/lfsr.sv $(TCL_SCRIPT) | synth
+	@$(call PRINT_COLOR, 5, synthesizing the icache_subsystem module)
+	@$(call PRINT_COLOR, 3, this might take a while...)
+	cd synth && \
+	MODULE=icache_subsystem SOURCES="$(filter-out $(TCL_SCRIPT) $(ALL_HEADERS),$^)" \
+	dc_shell-t -f $(notdir $(TCL_SCRIPT)) | tee icache_subsystem_synth.out
+	@$(call PRINT_COLOR, 6, finished synthesizing $@)
+
+# Generic synthesis rule for single-file modules
+
 synth/%.vg: verilog/%.sv $(TCL_SCRIPT) | synth
 	@$(call PRINT_COLOR, 5, synthesizing the $* module)
 	@$(call PRINT_COLOR, 3, this might take a while...)
