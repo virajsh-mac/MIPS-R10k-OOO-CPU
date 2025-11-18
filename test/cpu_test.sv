@@ -9,7 +9,7 @@
 `include "sys_defs.svh"
 
 // P4 TODO: Add your own debugging framework. Basic printing of data structures
-//          is an absolute necessity for the project. You can use C functions 
+//          is an absolute necessity for the project. You can use C functions
 //          like in test/pipeline_print.c or just do everything in verilog.
 //          Be careful about running out of space on CAEN printing lots of state
 //          for longer programs (alexnet, outer_product, etc.)
@@ -99,13 +99,13 @@ module testbench;
     // ----------------------------------------------------------------
     // Fake-Fetch wires (testbench <-> cpu)
     // ----------------------------------------------------------------
-    ADDR fake_pc;
-    DATA fake_instr[`N-1:0];
-    logic [$clog2(`N+1)-1:0] fake_nvalid;
-    logic [$clog2(`N+1)-1:0] fake_consumed;
+    // ADDR fake_pc;
+    // DATA fake_instr[`N-1:0];
+    // logic [$clog2(`N+1)-1:0] fake_nvalid;
+    // logic [$clog2(`N+1)-1:0] fake_consumed;
 
-    logic ff_branch_taken;
-    ADDR ff_branch_target;
+    // logic ff_branch_taken;
+    // ADDR ff_branch_target;
 
     // Debug Output PRF
     DATA [`PHYS_REG_SZ_R10K-1:0] regfile_entries;
@@ -259,17 +259,17 @@ module testbench;
         .mem_executing_dbg(mem_executing),
 
         // ---- Fake-Fetch interface ----
-`ifdef SYNTH
-        .ff_instr       ({fake_instr[2], fake_instr[1], fake_instr[0]}),
-`else
-        .ff_instr       (fake_instr),
-`endif
-        .ff_pc          (fake_pc),
-        .ff_nvalid      (fake_nvalid),
-        .ff_consumed    (fake_consumed),
-        .branch_taken_out (ff_branch_taken),
-        .branch_target_out(ff_branch_target)
-    );
+// `ifdef SYNTH
+//         .ff_instr       ({fake_instr[2], fake_instr[1], fake_instr[0]}),
+// `else
+//         .ff_instr       (fake_instr),
+// `endif
+//         .ff_pc          (fake_pc),
+//         .ff_nvalid      (fake_nvalid),
+//         .ff_consumed    (fake_consumed),
+//         .branch_taken_out (ff_branch_taken),
+//         .branch_target_out(ff_branch_target)
+//     );
 
 
     // Instruction Memory (for fake-fetch only - data operations disconnected)
@@ -300,18 +300,18 @@ module testbench;
     // ----------------------------------------------------------------
     // Fake-Fetch: PC register
     // ----------------------------------------------------------------
-    always_ff @(posedge clock) begin
-        if (reset) begin
-            fake_pc <= '0;
-        end else begin
-            if (ff_branch_taken) begin
-                fake_pc <= ff_branch_target;
-            end else begin
-                // Advance by 4*X where X = fake_consumed from CPU
-                fake_pc <= fake_pc + 32'(4 * fake_consumed);
-            end
-        end
-    end
+    // always_ff @(posedge clock) begin
+    //     if (reset) begin
+    //         fake_pc <= '0;
+    //     end else begin
+    //         if (ff_branch_taken) begin
+    //             fake_pc <= ff_branch_target;
+    //         end else begin
+    //             // Advance by 4*X where X = fake_consumed from CPU
+    //             fake_pc <= fake_pc + 32'(4 * fake_consumed);
+    //         end
+    //     end
+    // end
 
     // ----------------------------------------------------------------
     // Read a 32b instruction from unified memory at byte address 'addr'
@@ -327,17 +327,17 @@ module testbench;
     // ----------------------------------------------------------------
     // Build the N-wide bundle every cycle (sequential @ fake_pc + 4*i)
     // ----------------------------------------------------------------
-    int count;
-    always_comb begin
-        count = 0;
-        for (integer i = 0; i < `N; i++) begin
-            fake_instr[i] = get_inst32(fake_pc + 32'(4 * i));
-            if (fake_instr[i] != 32'b0) begin
-                count++;
-            end
-        end
-        fake_nvalid = count;  // simple model: always provide N; CPU decides how many to take
-    end
+    // int count;
+    // always_comb begin
+    //     count = 0;
+    //     for (integer i = 0; i < `N; i++) begin
+    //         fake_instr[i] = get_inst32(fake_pc + 32'(4 * i));
+    //         if (fake_instr[i] != 32'b0) begin
+    //             count++;
+    //         end
+    //     end
+    //     fake_nvalid = count;  // simple model: always provide N; CPU decides how many to take
+    // end
 
 
     initial begin

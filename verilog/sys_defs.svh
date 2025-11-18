@@ -42,7 +42,11 @@
 `define NUM_CATS 4                              // Number of OP_CATEGORY values (0-4)
 
 // branch prediction
-`define BRANCH_PRED_SZ 512  // Branch predictor size
+`define BP_GH 7                              // number of global history bits
+`define BP_PHT_BITS `BP_GH + 1               // PHT entries = GH + 1
+`define BP_BTB_BITS 7                        // BTB entries = 2^BTB_BITS
+`define BP_PC_WORD_ALIGN_BITS 2              // PC[1:0] are word-aligned (ignore)
+`define BP_BTB_TAG_BITS (32 - `BP_PC_WORD_ALIGN_BITS - `BP_BTB_BITS)  // Tag = upper PC bits above index + word-align
 
 // functional units
 `define NUM_FU_ALU 3      // Enough for superscalar width
@@ -631,6 +635,7 @@ typedef struct packed {
     logic          branch_taken;   // Resolved taken/not taken
     ADDR           pred_target;    // Predicted branch target
     logic          pred_taken;     // Predicted taken/not taken
+    logic [`BP_GH-1:0] ghr_snapshot;   // new: GHR snapshot
     logic          mispredict;     // Branch misprediction flag
     logic          halt;           // Is this a halt?
     logic          illegal;        // Is this illegal?
@@ -651,7 +656,6 @@ typedef BP_COUNTER_STATE saturating_counter2_t;
 typedef struct packed {
     logic valid;  // Valid prediction request
     ADDR  pc;     // PC to predict
-    logic used;   // Whether to shift GHR (from fetch)
 } BP_PREDICT_REQUEST;
 
 typedef struct packed {
@@ -670,7 +674,7 @@ typedef struct packed {
 typedef struct packed {
     logic              taken;         // Prediction result
     ADDR               target;        // Predicted target (if taken)
-    logic [`BP_GH-1:0] ghr_snapshot;  // GHR snapshot used for prediction
+    logic [`BP_GH-1:0] ghr_snapshot;  // GHR snapshot for mispredict recovery
 } BP_PREDICT_RESPONSE;
 
 // BTB entry structure
@@ -687,10 +691,11 @@ typedef struct packed {
     logic [`BP_BTB_TAG_BITS-1:0] btb_tag;
 } BP_INDICES;
 
-
+// From fetch stage to instruction buffer
 typedef struct packed {
     ADDR         pc;    // PC of this instruction
     logic [31:0] inst;  // raw 32-bit instruction
+    logic valid;
 
     // Branch prediction metadata (for branch instructions)
     logic              is_branch;        // 1 if this inst is a branch
@@ -736,6 +741,7 @@ typedef struct packed {
     INST           inst;           // Full instruction
     logic          pred_taken;     // Branch prediction taken
     ADDR           pred_target;    // Branch prediction target
+    logic [`BP_GH-1:0][`N-1:0] ghr_snapshot; // new: GHR snapshot
     logic          halt;           // Halt instruction flag
 } FETCH_DISP_ENTRY;
 

@@ -4,11 +4,11 @@ module stage_retire #(
     parameter  int N          = `N,
     parameter  int ARCH_COUNT = `ARCH_REG_SZ,
     parameter  int PHYS_REGS  = `PHYS_REG_SZ_R10K,
-    localparam int PRW        = (PHYS_REGS <= 2) ? 1 : $clog2(PHYS_REGS),
-    localparam logic [PHYS_REGS-1:0] INITIAL_AVAIL_MASK = {{PHYS_REGS - `ARCH_REG_SZ{1'b1}}, {`ARCH_REG_SZ{1'b0}}}
+    localparam int PRW        = (PHYS_REGS <= 2) ? 1 : $clog2(PHYS_REGS)
 ) (
     input logic clock,
     input logic reset,
+    input logic bp_enabled = 1'b1,
 
     // From ROB: head window (0 = oldest, N-1 = youngest)
     input ROB_ENTRY [N-1:0] head_entries,
@@ -16,11 +16,8 @@ module stage_retire #(
     input ROB_IDX   [N-1:0] head_idxs,     // ROB index per head slot
 
     // To ROB: flush younger if head is a mispredicted branch
-    output logic   rob_mispredict,
-    output ROB_IDX rob_mispred_idx,
-
-    // Global recovery pulse (tables react internally)
-    output logic bp_recover_en,
+    output logic   mispredict,      // Single consolidated mispredict signal
+    output ROB_IDX rob_mispred_idx, // ROB index of mispredicted branch
 
     // To freelist: bitmap of PRs to free (all committed lanes' Told this cycle)
     output logic [PHYS_REGS-1:0] free_mask,
@@ -35,47 +32,62 @@ module stage_retire #(
 
     // to Fake fetch for branching
     output logic branch_taken_out,
-    output ADDR  branch_target_out,
+    output ADDR branch_target_out,
+    output BP_TRAIN_REQUEST train_req_o,
+    output BP_RECOVER_REQUEST recover_req_o,
 
     // to read committed data from PRF
     input DATA [`PHYS_REG_SZ_R10K-1:0] regfile_entries,
 
-    // From arch map table for freelist restore on mispredict
-    input MAP_ENTRY [`ARCH_REG_SZ-1:0] arch_table_snapshot,
-
-    // To freelist: restore mask on mispredict
-    output logic [PHYS_REGS-1:0] freelist_restore_mask
+    // Debug outputs
+    output logic bp_enabled_dbg,
+    output logic branch_retired_dbg,
+    output logic branch_taken_dbg,
+    output logic is_branch_target_unknown_dbg,
+    output logic train_triggered_dbg,
+    output logic retire_valid_dbg
 
 );
-    // debug output - declared as output port above
+    // debug output
+    COMMIT_PACKET [N-1:0] retire_commits_dbg;
 
     ROB_ENTRY entry;
-    logic recover;
+    logic trained;
     logic mispred_dir, mispred_tgt, mispred;
 
-    // Freelist checkpoint for mispredict restore
-    logic [PHYS_REGS-1:0] freelist_checkpoint_mask, freelist_checkpoint_mask_next;
-
     always_comb begin
-        freelist_checkpoint_mask_next = freelist_checkpoint_mask;
-        {rob_mispredict, rob_mispred_idx, bp_recover_en, free_mask} = '0;
+        {mispredict, rob_mispred_idx, free_mask} = '0;
+        train_req_o = '{default: 0};
+        recover_req_o = '{default: 0};
+        trained = 1'b0;
         arch_write_enables = '0;
         arch_write_addrs = '0;
         arch_write_phys_regs = '0;
-        recover = 1'b0;
         mispred_dir = 1'b0;
         mispred_tgt = 1'b0;
         mispred = 1'b0;
         entry = '0;
         retire_commits_dbg = '0;
 
-        // branch info for fake fetch
-        branch_taken_out  = 1'b0;
-        branch_target_out = '0;
+        // Debug initializations
+        bp_enabled_dbg = bp_enabled;
+        branch_retired_dbg = 1'b0;
+        branch_taken_dbg = 1'b0;
+        is_branch_target_unknown_dbg = 1'b1;
+        train_triggered_dbg = 1'b0;
+        retire_valid_dbg = 1'b0;
 
+        // branch info for fake fetch
+        branch_taken_out = 1'b0;
+        branch_target_out = '0;
 
         // Walk oldest -> youngest and commit until first incomplete
         for (int w = 0; w < N; w++) begin
+            if (!head_valids[w]) begin
+                // empty slot, skip
+                continue;
+            end
+
             entry = head_entries[w];
 
             // Stop at first incomplete instruction (in-order boundary)
@@ -90,6 +102,7 @@ module stage_retire #(
             retire_commits_dbg[w].halt   = entry.halt;
             retire_commits_dbg[w].illegal = (entry.exception == ILLEGAL_INST);
             retire_commits_dbg[w].valid  = 1'b1;
+            retire_valid_dbg = 1'b1;
 
             // Commit this entry (it's complete)
             if (entry.arch_rd != '0 && !entry.branch) begin
@@ -97,16 +110,16 @@ module stage_retire #(
                 arch_write_addrs[w]    = entry.arch_rd;
                 arch_write_phys_regs[w] = entry.phys_rd;
 
-                freelist_checkpoint_mask_next[arch_write_phys_regs[w]] = 1'b0;
-
-                if ((entry.prev_phys_rd != '0) && (entry.prev_phys_rd < PHYS_REGS)) begin
-                    free_mask[entry.prev_phys_rd] = 1'b1;
-                    freelist_checkpoint_mask_next[entry.prev_phys_rd] = 1'b1;
-                end
+                if ((entry.prev_phys_rd != '0) && (entry.prev_phys_rd < PHYS_REGS)) free_mask[entry.prev_phys_rd] = 1'b1;
             end
 
             // If this entry is a branch, check for mispredict (compare prediction vs actual)
             if (entry.branch) begin
+
+                // Debug for branches
+                branch_retired_dbg = entry.branch;
+                branch_taken_dbg = entry.branch_taken;
+                is_branch_target_unknown_dbg = $isunknown(entry.branch_target);
 
                 // to fake fetch (No EBR)
                 if (entry.branch_taken) begin
@@ -115,16 +128,28 @@ module stage_retire #(
                 end
 
                 // Only consider mispredict if branch had completed
-                mispred_dir = (entry.pred_taken != entry.branch_taken);
-                mispred_tgt = (entry.branch_taken && (entry.pred_target != entry.branch_target));
-                mispred     = (mispred_dir || mispred_tgt);
+                mispred_dir               = (entry.pred_taken != entry.branch_taken);
+                mispred_tgt               = (entry.branch_taken && (entry.pred_target != entry.branch_target));
+                mispred                   = (mispred_dir || mispred_tgt);
+
+                // Train on retired branches
+                train_req_o.valid         = 1'b1;
+                train_req_o.pc            = entry.PC;
+                train_req_o.actual_taken  = entry.branch_taken;
+                train_req_o.actual_target = entry.branch_target;
+                train_req_o.ghr_snapshot  = entry.ghr_snapshot;
+                train_triggered_dbg       = 1'b1;
 
                 if (mispred) begin
-                    // Commit this branch (we already did commits for this entry above),
-                    rob_mispredict  = 1'b1;
-                    rob_mispred_idx = head_idxs[w];   // ROB index of the mispredicted branch
-                    bp_recover_en   = 1'b1;           
-                    recover         = 1'b1;
+                    // Single consolidated mispredict signal
+                    mispredict      = 1'b1;
+                    rob_mispred_idx = head_idxs[w];  // ROB index of the mispredicted branch
+
+                    // Set recovery request directly here (we have all the info we need)
+                    if (bp_enabled) begin
+                        recover_req_o.pulse        = 1'b1;
+                        recover_req_o.ghr_snapshot = entry.ghr_snapshot;
+                    end
 
                     // stop committing younger entries
                     break;
@@ -133,15 +158,5 @@ module stage_retire #(
         end
     end
 
-    always_ff @(posedge clock) begin
-        if (reset) begin
-            freelist_checkpoint_mask <= INITIAL_AVAIL_MASK;  // Arch regs busy, extras free
-        end else begin
-            freelist_checkpoint_mask <= freelist_checkpoint_mask_next;
-        end
-    end
-
-    assign freelist_restore_mask = freelist_checkpoint_mask_next;
 
 endmodule
-
