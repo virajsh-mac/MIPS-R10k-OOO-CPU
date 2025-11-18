@@ -250,7 +250,7 @@ module icache (
         .WIDTH(MEM_WIDTH),
         .DEPTH(1'b1),
         .READ_PORTS(1'b1),
-        .BYPASS_EN(1'b1)
+        .BYPASS_EN(1'b0)
     ) cache_line[MEM_DEPTH-1:0] (
         .clock(clock),
         .reset(reset),
