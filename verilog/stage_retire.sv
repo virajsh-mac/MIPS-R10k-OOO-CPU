@@ -47,8 +47,7 @@ module stage_retire #(
     output logic [PHYS_REGS-1:0] freelist_restore_mask
 
 );
-    // debug output
-    COMMIT_PACKET [N-1:0] retire_commits_dbg;
+    // debug output - declared as output port above
 
     ROB_ENTRY entry;
     logic recover;

@@ -658,21 +658,26 @@ typedef struct packed {
     DATA [`N-1:0]     result;         // Results
 } EX_COMPLETE_PACKET;
 
-// Fetch to Dispatch packet (superscalar bundle)
+// Fetch to Dispatch packet entry (single instruction)
 typedef struct packed {
-    REG_IDX [`N-1:0]        rs1_idx;        // Source register 1 indices
-    REG_IDX [`N-1:0]        rs2_idx;        // Source register 2 indices
-    REG_IDX [`N-1:0]        rd_idx;         // Destination register indices
-    logic [`N-1:0]          uses_rd;        // Whether instruction writes to rd
-    OP_TYPE [`N-1:0]        op_type;        // Operation type (category + func)
-    ALU_OPA_SELECT [`N-1:0] opa_select;     // ALU operand A select
-    ALU_OPB_SELECT [`N-1:0] opb_select;     // ALU operand B select
-    DATA [`N-1:0]           rs2_immediate;  // Immediate value for src2
-    ADDR [`N-1:0]           PC;             // Program counters
-    INST [`N-1:0]           inst;           // Full instructions
-    logic [`N-1:0]          pred_taken;     // Branch prediction taken
-    ADDR [`N-1:0]           pred_target;    // Branch prediction target
-    logic [`N-1:0]          halt;           // Halt instruction flag
+    REG_IDX        rs1_idx;        // Source register 1 index
+    REG_IDX        rs2_idx;        // Source register 2 index
+    REG_IDX        rd_idx;         // Destination register index
+    logic          uses_rd;        // Whether instruction writes to rd
+    OP_TYPE        op_type;        // Operation type (category + func)
+    ALU_OPA_SELECT opa_select;     // ALU operand A select
+    ALU_OPB_SELECT opb_select;     // ALU operand B select
+    DATA           rs2_immediate;  // Immediate value for src2
+    ADDR           PC;             // Program counter
+    INST           inst;           // Full instruction
+    logic          pred_taken;     // Branch prediction taken
+    ADDR           pred_target;    // Branch prediction target
+    logic          halt;           // Halt instruction flag
+} FETCH_DISP_ENTRY;
+
+// Fetch to Dispatch packet (superscalar bundle) - Array of Structs
+typedef struct packed {
+    FETCH_DISP_ENTRY [`N-1:0] entries;  // Array of instruction entries
 } FETCH_DISP_PACKET;
 
 // Map table communication packets

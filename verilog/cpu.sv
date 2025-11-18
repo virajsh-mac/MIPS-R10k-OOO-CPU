@@ -124,8 +124,7 @@ module cpu (
     // NOTE: organize this section by the module that outputs referenced wires
 
 
-    // Outputs from ID stage (decode)
-    FETCH_DISP_PACKET                                                                fetch_disp_packet;
+    // Note: No packet structure needed - decoder outputs go directly to dispatch
 
     // From arch map table
     MAP_ENTRY [`ARCH_REG_SZ-1:0]                                                     arch_table_snapshot;
@@ -170,7 +169,7 @@ module cpu (
     RS_CLEAR_SIGNALS                        rs_clear_signals;
 
     // Individual RS entries outputs (needed for rs_banks)
-    RS_ENTRY            [   `RS_ALU_SZ-1:0] rs_alu_entries_dbg;
+    // rs_alu_entries_dbg declared as output port above
     RS_ENTRY            [  `RS_MULT_SZ-1:0] rs_mult_entries;
     RS_ENTRY            [`RS_BRANCH_SZ-1:0] rs_branch_entries;
     RS_ENTRY            [   `RS_MEM_SZ-1:0] rs_mem_entries;
@@ -219,7 +218,7 @@ module cpu (
     MEM_BLOCK                    Dmem_store_data = '0;
 
     // Arch map table signals
-    MAP_ENTRY [`ARCH_REG_SZ-1:0] arch_table_snapshot_dbg;
+    // arch_table_snapshot_dbg declared as output port above
 
     // CDB requests: single-cycle FUs request during issue, multi-cycle during execute
     assign cdb_requests.alu    = issue_cdb_requests.alu;  // From issue stage
@@ -236,7 +235,7 @@ module cpu (
     assign freelist_free_slots = freelist_0.free_slots;
 
     // TODO Debug for PRF remove when synthesizing/ not needed anymore
-    DATA [`PHYS_REG_SZ_R10K-1:0] regfile_entries_dbg;
+    // regfile_entries_dbg declared as output port above
 
     // debug for architecture map table
     MAP_ENTRY [`ARCH_REG_SZ-1:0] arch_table_snapshot_dbg_next;
@@ -247,27 +246,29 @@ module cpu (
     //                Memory                        //
     //                                              //
     //////////////////////////////////////////////////
-    MEM_REQUEST_PACKET instr_mem_request, data_mem_request;
+    // MEM_REQUEST_PACKET DISABLED - icache disabled
+    // MEM_REQUEST_PACKET instr_mem_request, data_mem_request;
 
-    icache_subsystem icache_subsystem_inst (
-        .clock(clock),
-        .reset(reset),
+    // icache_subsystem DISABLED
+    // icache_subsystem icache_subsystem_inst (
+    //     .clock(clock),
+    //     .reset(reset),
 
-        // Memory
-        .Imem2proc_transaction_tag(mem2proc_transaction_tag),
-        .Imem2proc_data(mem2proc_data),
-        .Imem2proc_data_tag(mem2proc_data_tag),
-        .mem_request_success(),
-        .mem_req(instr_mem_request),
+    //     // Memory
+    //     .Imem2proc_transaction_tag(mem2proc_transaction_tag),
+    //     .Imem2proc_data(mem2proc_data),
+    //     .Imem2proc_data_tag(mem2proc_data_tag),
+    //     .mem_request_success(),
+    //     .mem_req(instr_mem_request),
 
-        // Fetch
-        .read_addr(),
-        .cache_out()
-    );
+    //     // Fetch
+    //     .read_addr(),
+    //     .cache_out()
+    // );
 
-    dcache_subsystem dcache_subsystem_inst (
-
-    );
+    // dcache_subsystem DISABLED - dcache disabled
+    // dcache_subsystem dcache_subsystem_inst (
+    // );
 
     // Arbiter
 
@@ -329,6 +330,13 @@ module cpu (
     logic          [`N-1:0] decode_halt;
     logic          [`N-1:0] decode_illegal;
 
+    // Enhanced decoder outputs for packet construction
+    REG_IDX [`N-1:0] decode_rs1_idx;
+    REG_IDX [`N-1:0] decode_rs2_idx;
+    REG_IDX [`N-1:0] decode_rd_idx;
+    logic   [`N-1:0] decode_uses_rd;
+    DATA    [`N-1:0] decode_immediate;
+
     // Instantiate decoders for each instruction in the bundle
     generate
         for (genvar i = 0; i < `N; i++) begin
@@ -341,7 +349,13 @@ module cpu (
                 .op_type   (decode_op_type[i]),
                 .csr_op    (decode_csr_op[i]),
                 .halt      (decode_halt[i]),
-                .illegal   (decode_illegal[i])
+                .illegal   (decode_illegal[i]),
+                // Enhanced outputs
+                .rs1_idx   (decode_rs1_idx[i]),
+                .rs2_idx   (decode_rs2_idx[i]),
+                .rd_idx    (decode_rd_idx[i]),
+                .uses_rd   (decode_uses_rd[i]),
+                .immediate (decode_immediate[i])
             );
         end
     endgenerate
@@ -361,51 +375,26 @@ module cpu (
         end
     end
 
-    // Build FETCH_DISP_PACKET from fake fetch inputs and decoder outputs
-    always_comb begin
-        for (int i = 0; i < `N; i++) begin
-            // Register indices from instruction (RISC-V bit fields)
-            fetch_disp_packet.rs1_idx[i] = ff_instr[i][19:15];  // rs1: bits 19-15
-            fetch_disp_packet.rs2_idx[i] = ff_instr[i][24:20];  // rs2: bits 24-20
-            fetch_disp_packet.rd_idx[i]  = ff_instr[i][11:7];   // rd: bits 11-7
-
-            // Use destination flag from decoder
-            fetch_disp_packet.uses_rd[i] = decode_has_dest[i] && (ff_instr[i][11:7] != `ZERO_REG);
-
-            // Operation info from decoder
-            fetch_disp_packet.op_type[i]    = decode_op_type[i];
-            fetch_disp_packet.opa_select[i] = decode_opa_select[i];
-            fetch_disp_packet.opb_select[i] = decode_opb_select[i];
-
-            // Extract immediate based on operand B select
-            case (decode_opb_select[i])
-                OPB_IS_I_IMM: fetch_disp_packet.rs2_immediate[i] = `RV32_signext_Iimm(ff_instr[i]);
-                OPB_IS_S_IMM: fetch_disp_packet.rs2_immediate[i] = `RV32_signext_Simm(ff_instr[i]);
-                OPB_IS_B_IMM: fetch_disp_packet.rs2_immediate[i] = `RV32_signext_Bimm(ff_instr[i]);
-                OPB_IS_U_IMM: fetch_disp_packet.rs2_immediate[i] = `RV32_signext_Uimm(ff_instr[i]);
-                OPB_IS_J_IMM: fetch_disp_packet.rs2_immediate[i] = `RV32_signext_Jimm(ff_instr[i]);
-                default:      fetch_disp_packet.rs2_immediate[i] = '0;
-            endcase
-
-            // PC and instruction info from fake fetch
-            fetch_disp_packet.PC[i]          = ff_pc + 32'(4 * unsigned'(i));
-            fetch_disp_packet.inst[i]        = ff_instr[i];
-
-            // No branch prediction for now
-            fetch_disp_packet.pred_taken[i]  = 1'b0;
-            fetch_disp_packet.pred_target[i] = '0;
-            fetch_disp_packet.halt[i]        = decode_halt[i];
-        end
-    end
+    // Connect decoder outputs directly to dispatch stage (no packet builder needed)
 
     // Dispatch stage
     stage_dispatch stage_dispatch_0 (
         .clock(clock),
         .reset(reset),
 
-        // From decode
-        .fetch_packet(fetch_disp_packet),
-        .fetch_valid (fetch_valid_mask),   // Convert count to bit mask
+        // From decode: individual signals
+        .decode_rs1_idx   (decode_rs1_idx),
+        .decode_rs2_idx   (decode_rs2_idx),
+        .decode_rd_idx    (decode_rd_idx),
+        .decode_uses_rd   (decode_uses_rd),
+        .decode_op_type   (decode_op_type),
+        .decode_opa_select(decode_opa_select),
+        .decode_opb_select(decode_opb_select),
+        .decode_immediate (decode_immediate),
+        .decode_halt      (decode_halt),
+        .ff_instr         (ff_instr),
+        .ff_pc            (ff_pc),
+        .fetch_valid      (fetch_valid_mask),   // Convert count to bit mask
 
         // From ROB/Freelist
         .free_slots_rob    (rob_free_slots),
@@ -960,8 +949,8 @@ module cpu (
     // CDB debug outputs
     assign cdb_output_dbg         = cdb_output;
 
-    // Dispatch packet debug output
-    assign fetch_disp_packet_dbg  = fetch_disp_packet;
+    // Dispatch packet debug output - removed (no packet structure)
+    // assign fetch_disp_packet_dbg  = fetch_disp_packet;
 
     // Issue clear signals debug output
     assign rs_clear_signals_dbg   = rs_clear_signals;

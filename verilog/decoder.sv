@@ -19,7 +19,14 @@ module decoder (
     output OP_TYPE        op_type,
     output logic          csr_op,      // used for CSR operations
     output logic          halt,        // non-zero on a halt
-    output logic          illegal      // non-zero on an illegal instruction
+    output logic          illegal,     // non-zero on an illegal instruction
+
+    // Enhanced outputs for packet construction
+    output REG_IDX rs1_idx,     // Source register 1 index
+    output REG_IDX rs2_idx,     // Source register 2 index
+    output REG_IDX rd_idx,      // Destination register index
+    output logic   uses_rd,     // Whether instruction actually uses destination
+    output DATA    immediate    // Pre-extracted immediate value
 );
 
     // Note: I recommend using an IDE's code folding feature on this block
@@ -33,6 +40,13 @@ module decoder (
         csr_op     = `FALSE;
         halt       = `FALSE;
         illegal    = `FALSE;
+
+        // Default register indices and immediate
+        rs1_idx    = inst[19:15];
+        rs2_idx    = inst[24:20];
+        rd_idx     = inst[11:7];
+        uses_rd    = has_dest && (rd_idx != `ZERO_REG);
+        immediate  = '0;
 
         if (valid) begin
             casez (inst)
@@ -241,6 +255,19 @@ module decoder (
                 end
             endcase  // casez (inst)
         end  // if (valid)
+
+        // Compute final uses_rd based on has_dest result
+        uses_rd = has_dest && (rd_idx != `ZERO_REG);
+
+        // Extract immediate based on opb_select
+        case (opb_select)
+            OPB_IS_I_IMM: immediate = `RV32_signext_Iimm(inst);
+            OPB_IS_S_IMM: immediate = `RV32_signext_Simm(inst);
+            OPB_IS_B_IMM: immediate = `RV32_signext_Bimm(inst);
+            OPB_IS_U_IMM: immediate = `RV32_signext_Uimm(inst);
+            OPB_IS_J_IMM: immediate = `RV32_signext_Jimm(inst);
+            default:      immediate = '0;
+        endcase
     end  // always
 
 endmodule  // decoder

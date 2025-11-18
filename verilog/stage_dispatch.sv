@@ -5,9 +5,19 @@ module stage_dispatch (
     input logic clock,
     reset,
 
-    // From decode: instruction bundle
-    input FETCH_DISP_PACKET fetch_packet,
-    input logic [`N-1:0]    fetch_valid,
+    // From decode: individual signals
+    input REG_IDX [`N-1:0]        decode_rs1_idx,
+    input REG_IDX [`N-1:0]        decode_rs2_idx,
+    input REG_IDX [`N-1:0]        decode_rd_idx,
+    input logic [`N-1:0]          decode_uses_rd,
+    input OP_TYPE [`N-1:0]        decode_op_type,
+    input ALU_OPA_SELECT [`N-1:0] decode_opa_select,
+    input ALU_OPB_SELECT [`N-1:0] decode_opb_select,
+    input DATA [`N-1:0]           decode_immediate,
+    input logic [`N-1:0]          decode_halt,
+    input DATA                    ff_instr       [`N-1:0],
+    input ADDR                    ff_pc,
+    input logic [`N-1:0]          fetch_valid,
 
     // Structural hazard inputs
     input logic   [          $clog2(`ROB_SZ+1)-1:0] free_slots_rob,
@@ -66,19 +76,19 @@ module stage_dispatch (
     // Create RS entry from instruction and map table data
     function RS_ENTRY create_rs_entry(int idx);
         create_rs_entry.valid          = 1'b1;
-        create_rs_entry.opa_select     = fetch_packet.opa_select[idx];
-        create_rs_entry.opb_select     = fetch_packet.opb_select[idx];
-        create_rs_entry.op_type        = fetch_packet.op_type[idx];
+        create_rs_entry.opa_select     = decode_opa_select[idx];
+        create_rs_entry.opb_select     = decode_opb_select[idx];
+        create_rs_entry.op_type        = decode_op_type[idx];
         create_rs_entry.src1_tag       = local_reg1_tag[idx];
         create_rs_entry.src1_ready     = local_reg1_ready[idx];
         create_rs_entry.src2_tag       = local_reg2_tag[idx];
         create_rs_entry.src2_ready     = local_reg2_ready[idx];
-        create_rs_entry.src2_immediate = fetch_packet.rs2_immediate[idx];
+        create_rs_entry.src2_immediate = decode_immediate[idx];
         create_rs_entry.dest_tag       = allocated_phys[idx];
         create_rs_entry.rob_idx        = rob_alloc_idxs[idx];
-        create_rs_entry.PC             = fetch_packet.PC[idx];
-        create_rs_entry.pred_taken     = fetch_packet.pred_taken[idx];
-        create_rs_entry.pred_target    = fetch_packet.pred_target[idx];
+        create_rs_entry.PC             = ff_pc + 32'(4 * idx);
+        create_rs_entry.pred_taken     = 1'b0;  // No branch prediction
+        create_rs_entry.pred_target    = '0;    // No prediction target
     endfunction
 
     always_comb begin
@@ -110,10 +120,10 @@ module stage_dispatch (
             if (rob_slots_used >= free_slots_rob) break;
 
             // Check freelist space (only if instruction uses a destination register)
-            if (fetch_packet.uses_rd[i] && freelist_slots_used >= freelist_free_slots) break;
+            if (decode_uses_rd[i] && freelist_slots_used >= freelist_free_slots) break;
 
             // Check RS bank space for this instruction's functional unit
-            case (fetch_packet.op_type[i].category)
+            case (decode_op_type[i].category)
                 CAT_ALU:    if (alu_used   >= rs_alu_free_slots)    break;
                 CAT_MULT:   if (mult_used  >= rs_mult_free_slots)   break;
                 CAT_BRANCH: if (branch_used>= rs_branch_free_slots) break;
@@ -124,10 +134,10 @@ module stage_dispatch (
             // This instruction can be dispatched
             num_to_dispatch++;
             rob_slots_used++;
-            if (fetch_packet.uses_rd[i]) freelist_slots_used++;
+            if (decode_uses_rd[i]) freelist_slots_used++;
 
             // Reserve RS slot for this instruction type
-            case (fetch_packet.op_type[i].category)
+            case (decode_op_type[i].category)
                 CAT_ALU:    alu_used++;
                 CAT_MULT:   mult_used++;
                 CAT_BRANCH: branch_used++;
@@ -145,9 +155,9 @@ module stage_dispatch (
 
         // Read register mappings from map table
         for (int i = 0; i < `N; i++) begin
-            maptable_read_req.rs1_addrs[i]  = fetch_packet.rs1_idx[i];
-            maptable_read_req.rs2_addrs[i]  = fetch_packet.rs2_idx[i];
-            maptable_read_req.told_addrs[i] = fetch_packet.rd_idx[i];
+            maptable_read_req.rs1_addrs[i]  = decode_rs1_idx[i];
+            maptable_read_req.rs2_addrs[i]  = decode_rs2_idx[i];
+            maptable_read_req.told_addrs[i] = decode_rd_idx[i];
         end
 
         // Store map table responses locally
@@ -158,12 +168,12 @@ module stage_dispatch (
             local_reg2_ready[i] = maptable_read_resp.rs2_entries[i].ready;
 
             // Halt instructions don't use source registers, so mark them ready
-            if (fetch_packet.halt[i]) begin
+            if (decode_halt[i]) begin
                 local_reg1_ready[i] = 1'b1;
                 local_reg2_ready[i] = 1'b1;
             end
 
-            if ((fetch_packet.opb_select[i] != OPB_IS_RS2) && !fetch_packet.halt[i]) begin
+            if ((decode_opb_select[i] != OPB_IS_RS2) && !decode_halt[i]) begin
                 local_reg2_ready[i] = 1'b1;
             end
             local_Told[i] = maptable_read_resp.told_entries[i].phys_reg;
@@ -194,19 +204,19 @@ module stage_dispatch (
             for (int i = 0; i < dispatch_count; i++) begin
                 if (fetch_valid[i]) begin
                     // First apply forwarding from previous renames to this instruction
-                    if (has_rename[fetch_packet.rs1_idx[i]]) begin
-                        local_reg1_tag[i] = dispatch_renames[fetch_packet.rs1_idx[i]];
+                    if (has_rename[decode_rs1_idx[i]]) begin
+                        local_reg1_tag[i] = dispatch_renames[decode_rs1_idx[i]];
                         local_reg1_ready[i] = 1'b0;
                     end
-                    if (has_rename[fetch_packet.rs2_idx[i]] && fetch_packet.opb_select[i] == OPB_IS_RS2) begin
-                        local_reg2_tag[i] = dispatch_renames[fetch_packet.rs2_idx[i]];
+                    if (has_rename[decode_rs2_idx[i]] && decode_opb_select[i] == OPB_IS_RS2) begin
+                        local_reg2_tag[i] = dispatch_renames[decode_rs2_idx[i]];
                         local_reg2_ready[i] = 1'b0;
                     end
 
                     // Then add this instruction's rename to the map for future instructions
-                    if (fetch_packet.uses_rd[i]) begin
-                        dispatch_renames[fetch_packet.rd_idx[i]] = allocated_phys[i];
-                        has_rename[fetch_packet.rd_idx[i]] = 1'b1;
+                    if (decode_uses_rd[i]) begin
+                        dispatch_renames[decode_rd_idx[i]] = allocated_phys[i];
+                        has_rename[decode_rd_idx[i]] = 1'b1;
                     end
                 end
             end
@@ -214,9 +224,9 @@ module stage_dispatch (
 
         // Setup register remapping writes
         for (int i = 0; i < `N; i++) begin
-            if (i < dispatch_count && fetch_valid[i] && fetch_packet.uses_rd[i])  begin
+            if (i < dispatch_count && fetch_valid[i] && decode_uses_rd[i])  begin
                 maptable_write_reqs[i].valid    = 1'b1;
-                maptable_write_reqs[i].addr     = fetch_packet.rd_idx[i];
+                maptable_write_reqs[i].addr     = decode_rd_idx[i];
                 maptable_write_reqs[i].phys_reg = allocated_phys[i];
             end else begin
                 maptable_write_reqs[i] = '0;
@@ -234,22 +244,22 @@ module stage_dispatch (
                 // ROB entry
                 rob_entry_packet[i] = '{
                     valid: 1'b1,
-                    PC: fetch_packet.PC[i],
-                    inst: fetch_packet.inst[i],
-                    arch_rd: fetch_packet.rd_idx[i],
+                    PC: ff_pc + 32'(4 * i),
+                    inst: ff_instr[i],
+                    arch_rd: decode_rd_idx[i],
                     phys_rd: allocated_phys[i],
                     prev_phys_rd: local_Told[i],
                     complete: 1'b0,
                     exception: NO_ERROR,
-                    branch: (fetch_packet.op_type[i].category == CAT_BRANCH),
-                    pred_target: fetch_packet.pred_target[i],
-                    pred_taken: fetch_packet.pred_taken[i],
-                    halt: fetch_packet.halt[i],
+                    branch: (decode_op_type[i].category == CAT_BRANCH),
+                    pred_target: '0,    // No prediction target
+                    pred_taken: 1'b0,   // No branch prediction
+                    halt: decode_halt[i],
                     default: '0
                 };
 
                 // Route to appropriate RS bank
-                case (fetch_packet.op_type[i].category)
+                case (decode_op_type[i].category)
                     CAT_ALU: begin
                         rs_alloc.alu.valid[alu_count]   = 1'b1;
                         rs_alloc.alu.entries[alu_count] = create_rs_entry(i);
@@ -273,7 +283,7 @@ module stage_dispatch (
                 endcase
 
                 // Request physical register allocation
-                free_alloc_valid[i] = fetch_packet.uses_rd[i];
+                free_alloc_valid[i] = decode_uses_rd[i];
             end
         end
     end

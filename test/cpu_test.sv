@@ -563,8 +563,8 @@ module testbench;
 
         for (integer i = 0; i < `N; i++) begin
             // if (i < dispatch_count) begin
-                $display("DISP[%0d]: PC=0x%08h | Inst=0x%08h | Uses_RD=%b | RD=%0d", i, fetch_disp_packet.PC[i],
-                         fetch_disp_packet.inst[i], fetch_disp_packet.uses_rd[i], fetch_disp_packet.rd_idx[i]);
+                $display("DISP[%0d]: PC=0x%08h | Inst=0x%08h | Uses_RD=%b | RD=%0d", i, fetch_disp_packet.entries[i].PC,
+                         fetch_disp_packet.entries[i].inst, fetch_disp_packet.entries[i].uses_rd, fetch_disp_packet.entries[i].rd_idx);
             // end
         end
 
