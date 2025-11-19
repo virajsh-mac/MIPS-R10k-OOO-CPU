@@ -33,6 +33,9 @@ module icache_subsystem (
     output logic [$clog2(`NUM_MEM_TAGS)-1:0] mshr_next_tail_dbg,
     output logic                             mshr_pop_condition_dbg,
     output logic                             mshr_push_condition_dbg,
+    output logic                             mshr_pop_cond_has_data_dbg,
+    output logic                             mshr_pop_cond_head_valid_dbg,
+    output logic                             mshr_pop_cond_tag_match_dbg,
     output logic                mem_write_icache_dbg,
     output I_ADDR_PACKET        mem_write_addr_dbg,
     output MEM_BLOCK            mem_data_dbg,
@@ -101,7 +104,10 @@ module icache_subsystem (
         .next_head_dbg  (mshr_next_head_dbg),
         .next_tail_dbg  (mshr_next_tail_dbg),
         .pop_condition_dbg(mshr_pop_condition_dbg),
-        .push_condition_dbg(mshr_push_condition_dbg)
+        .push_condition_dbg(mshr_push_condition_dbg),
+        .pop_cond_has_data_dbg(mshr_pop_cond_has_data_dbg),
+        .pop_cond_head_valid_dbg(mshr_pop_cond_head_valid_dbg),
+        .pop_cond_tag_match_dbg(mshr_pop_cond_tag_match_dbg)
     );
 
     // Oldest miss address logic
@@ -152,7 +158,7 @@ endmodule
 
 
 module i_mshr #(
-    parameter MSHR_WIDTH = `NUM_MEM_TAGS
+    parameter MSHR_WIDTH = `NUM_MEM_TAGS + `N
 ) (
     input clock,
     input reset,
@@ -175,23 +181,27 @@ module i_mshr #(
     output logic [$clog2(`NUM_MEM_TAGS)-1:0] next_head_dbg,
     output logic [$clog2(`NUM_MEM_TAGS)-1:0] next_tail_dbg,
     output logic                             pop_condition_dbg,
-    output logic                             push_condition_dbg
+    output logic                             push_condition_dbg,
+    output logic                             pop_cond_has_data_dbg,
+    output logic                             pop_cond_head_valid_dbg,
+    output logic                             pop_cond_tag_match_dbg
 );
 
-    // MSHR Internal logic
-    localparam I_CACHE_INDEX_BITS = $clog2(`NUM_MEM_TAGS);
-    MSHR_PACKET [`NUM_MEM_TAGS-1:0] mshr_entries, next_mshr_entries;
+    // MSHR Internals
+    localparam I_CACHE_INDEX_BITS = $clog2(MSHR_WIDTH);
+    MSHR_PACKET [MSHR_WIDTH-1:0] mshr_entries, next_mshr_entries;
     logic [I_CACHE_INDEX_BITS-1:0] head, next_head, tail, next_tail;
 
     // Snooping logic
-    logic [`NUM_MEM_TAGS-1:0] snooping_one_hot;
-    for (genvar i = 0; i < `NUM_MEM_TAGS; i++) begin
+    logic [MSHR_WIDTH-1:0] snooping_one_hot;
+    for (genvar i = 0; i < MSHR_WIDTH; i++) begin
         assign snooping_one_hot[i] = mshr_entries[i].i_tag == snooping_addr.tag;
     end
     assign addr_found = |snooping_one_hot;
 
     // MSHR logic
     logic pop_condition, push_condition;
+    logic pop_cond_has_data, pop_cond_head_valid, pop_cond_tag_match;
     
     always_comb begin
         next_head = head;
@@ -200,11 +210,15 @@ module i_mshr #(
         next_mshr_entries = mshr_entries;
 
         // Data returned from Memory, Pop MSHR Entry
-        pop_condition = (mem_data_tag != '0) && mshr_entries[head].valid && (mem_data_tag == mshr_entries[head].mem_tag);
+        pop_cond_has_data = (mem_data_tag != '0);
+        pop_cond_head_valid = mshr_entries[head].valid;
+        pop_cond_tag_match = (mem_data_tag == mshr_entries[head].mem_tag);
+        pop_condition = pop_cond_has_data && pop_cond_head_valid && pop_cond_tag_match;
+        
         if (pop_condition) begin
-            next_head = (head + '1) % `NUM_MEM_TAGS;
+            next_head = I_CACHE_INDEX_BITS'((head + 1'b1) % MSHR_WIDTH);
             next_mshr_entries[head].valid = '0;
-            mem_data_i_addr.valid = '1;
+            mem_data_i_addr.valid = 1'b1;
             mem_data_i_addr.addr = '{zeros: 16'b0, 
                                      tag: mshr_entries[head].i_tag, 
                                      block_offset: 3'b0};
@@ -214,15 +228,15 @@ module i_mshr #(
         push_condition = new_entry.valid;
         if (push_condition) begin
             next_mshr_entries[tail] = new_entry;
-            next_tail = (tail + '1) % `NUM_MEM_TAGS;
+            next_tail = I_CACHE_INDEX_BITS'((tail + 1'b1) % MSHR_WIDTH);
         end
     end
 
     always_ff @(posedge clock) begin
         if (reset) begin
-            head <= '0;
-            tail <= '0;
-            mshr_entries <= '0;
+            head <= 1'b0;
+            tail <= 1'b0;
+            mshr_entries <= 1'b0;
         end else begin
             head <= next_head;
             tail <= next_tail;
@@ -238,6 +252,9 @@ module i_mshr #(
     assign next_tail_dbg = next_tail;
     assign pop_condition_dbg = pop_condition;
     assign push_condition_dbg = push_condition;
+    assign pop_cond_has_data_dbg = pop_cond_has_data;
+    assign pop_cond_head_valid_dbg = pop_cond_head_valid;
+    assign pop_cond_tag_match_dbg = pop_cond_tag_match;
 
 endmodule
 
