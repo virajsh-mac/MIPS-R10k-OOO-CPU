@@ -155,6 +155,19 @@ module stage_fetch (
             fetch_packet[first_branch_idx].bp_pred_target  = bp_response.target;
             fetch_packet[first_branch_idx].bp_ghr_snapshot = bp_response.ghr_snapshot;
         end
+
+        // -----------------------------
+        // Debug signals for fetch
+        // -----------------------------
+        for (int i = 0; i < 4; i++) begin
+            dbg_fetch_pc[i]              = fetch_packet[i].pc;
+            dbg_fetch_inst[i]            = fetch_packet[i].inst;
+            dbg_fetch_valid[i]           = fetch_packet[i].valid;
+            dbg_fetch_is_branch[i]       = fetch_packet[i].is_branch;
+            dbg_fetch_bp_pred_taken[i]   = fetch_packet[i].bp_pred_taken;
+            dbg_fetch_bp_pred_target[i]  = fetch_packet[i].bp_pred_target;
+            dbg_fetch_bp_ghr_snapshot[i] = fetch_packet[i].bp_ghr_snapshot;
+        end
     end
 
     always_comb begin
