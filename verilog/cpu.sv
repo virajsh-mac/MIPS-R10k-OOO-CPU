@@ -915,8 +915,16 @@ module cpu (
     // TODO: Move the wires to the wire stage afterward
 
     // wires for Retire Stage
-    logic                    branch_taken_out,         // Branch taken signal to testbench
-    ADDR                     branch_target_out,        // Branch target to testbench
+
+    logic v;
+
+    logic bp_enabled;
+    logic bp_enabled_dbg;
+    logic branch_retired_dbg;
+    logic branch_taken_dbg;
+    logic is_branch_target_unknown_dbg;
+    logic train_triggered_dbg;
+    logic retire_valid_dbg;
 
     stage_retire stage_retire_0 (
         .clock(clock),
@@ -928,34 +936,36 @@ module cpu (
         .head_valids (rob_head_valids),
         .head_idxs   (rob_head_idxs),
 
-        // From arch map table for freelist restore
-        .arch_table_snapshot(arch_table_snapshot),
-
         // To ROB: flush younger if head is a mispredicted branch
         .rob_mispredict (mispredict),
         .rob_mispred_idx(rob_mispred_idx),
 
-        // Global recovery pulse (tables react internally)
-        .bp_recover_en(bp_recover_en),
-
         // To freelist: bitmap of PRs to free (all committed lanes' Told this cycle)
         .free_mask(freelist_free_mask),
-
-        // To freelist: restore mask on mispredict
-        .freelist_restore_mask(freelist_restore_mask),
 
         // To archMapTable: N write ports (commit multiple per cycle)
         .arch_write_enables  (arch_write_enables),
         .arch_write_addrs    (arch_write_addrs),
         .arch_write_phys_regs(arch_write_phys_regs),
+
         .retire_commits_dbg(retire_commits_dbg),
 
+
         // To fetch
-        .branch_taken_out(branch_taken_out),
+        .branch_taken_out(mispredict),
         .branch_target_out(pc_override),
+        .train_req_o            (train_req),
+        .recover_req_o          (recover_req),
 
         // From PRF for committed data
-        .regfile_entries(regfile_entries_dbg)
+        .regfile_entries(regfile_entries_dbg),
+
+        .bp_enabled_dbg                 (bp_enabled_dbg),
+        .branch_retired_dbg             (branch_retired_dbg),
+        .branch_taken_dbg               (branch_taken_dbg),
+        .is_branch_target_unknown_dbg   (is_branch_target_unknown_dbg),
+        .train_triggered_dbg            (train_triggered_dbg),
+        .retire_valid_dbg               (retire_valid_dbg)
     );
 
     //////////////////////////////////////////////////
