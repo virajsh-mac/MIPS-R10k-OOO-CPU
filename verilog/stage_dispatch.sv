@@ -245,7 +245,7 @@ module stage_dispatch (
                     branch: (decode_op_type[i].category == CAT_BRANCH),
                     pred_target: '0,  // No prediction target
                     pred_taken: 1'b0,  // No branch prediction
-                    ghr_snapshot: fetch_packet.ghr_snapshot[i],
+                    ghr_snapshot: dispatch_window[i].ghr_snapshot,
                     halt: decode_halt[i],
                     default: '0
                 };
