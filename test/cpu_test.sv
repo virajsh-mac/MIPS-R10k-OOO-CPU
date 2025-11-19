@@ -161,6 +161,10 @@ module testbench;
     logic [$clog2(`NUM_MEM_TAGS)-1:0] mshr_head;
     logic [$clog2(`NUM_MEM_TAGS)-1:0] mshr_tail;
     MSHR_PACKET [`NUM_MEM_TAGS-1:0]   mshr_entries;
+    logic [$clog2(`NUM_MEM_TAGS)-1:0] mshr_next_head;
+    logic [$clog2(`NUM_MEM_TAGS)-1:0] mshr_next_tail;
+    logic                mshr_pop_condition;
+    logic                mshr_push_condition;
     logic                mem_write_icache;
     I_ADDR_PACKET        mem_write_addr;
     MEM_BLOCK            mem_data_from_mem;
@@ -291,6 +295,10 @@ module testbench;
         .mshr_head_dbg(mshr_head),
         .mshr_tail_dbg(mshr_tail),
         .mshr_entries_dbg(mshr_entries),
+        .mshr_next_head_dbg(mshr_next_head),
+        .mshr_next_tail_dbg(mshr_next_tail),
+        .mshr_pop_condition_dbg(mshr_pop_condition),
+        .mshr_push_condition_dbg(mshr_push_condition),
         .mem_write_icache_dbg(mem_write_icache),
         .mem_write_addr_dbg(mem_write_addr),
         .mem_data_dbg(mem_data_from_mem),
@@ -475,10 +483,10 @@ module testbench;
 
 
             // Optional: print CDB broadcasts
-            for (integer i = 0; i < `N; i++) begin
-                $display("  CDB[%0d]: valid=%b, tag=%0d, data=%h", i, cdb_output[i].valid,
-                         cdb_output[i].tag, cdb_output[i].data);
-            end
+            // for (integer i = 0; i < `N; i++) begin
+            //     $display("  CDB[%0d]: valid=%b, tag=%0d, data=%h", i, cdb_output[i].valid,
+            //              cdb_output[i].tag, cdb_output[i].data);
+            // end
 
 
             // stop the processor
@@ -604,18 +612,18 @@ module testbench;
         // ICACHE SUBSYSTEM DEBUG
         $display("\n--- ICACHE SUBSYSTEM ---");
         
-        $display("\nRead Addresses from Fetch:");
-        for (integer k = 0; k < 2; k++) begin
-            $display("  Port[%0d]: Valid=%b", k, icache_read_addrs[k].valid);
-            if (icache_read_addrs[k].valid) begin
-                $display("    Full PC: 0x%04h", 
-                         {icache_read_addrs[k].addr.zeros, icache_read_addrs[k].addr.tag, icache_read_addrs[k].addr.block_offset});
-                $display("    Addr breakdown - zeros: 0x%04h, tag: 0x%02h, block_offset: 0x%01h",
-                         icache_read_addrs[k].addr.zeros, 
-                         icache_read_addrs[k].addr.tag, 
-                         icache_read_addrs[k].addr.block_offset);
-            end
-        end
+        // $display("\nRead Addresses from Fetch:");
+        // for (integer k = 0; k < 2; k++) begin
+        //     $display("  Port[%0d]: Valid=%b", k, icache_read_addrs[k].valid);
+        //     if (icache_read_addrs[k].valid) begin
+        //         $display("    Full PC: 0x%04h", 
+        //                  {icache_read_addrs[k].addr.zeros, icache_read_addrs[k].addr.tag, icache_read_addrs[k].addr.block_offset});
+        //         $display("    Addr breakdown - zeros: 0x%04h, tag: 0x%02h, block_offset: 0x%01h",
+        //                  icache_read_addrs[k].addr.zeros, 
+        //                  icache_read_addrs[k].addr.tag, 
+        //                  icache_read_addrs[k].addr.block_offset);
+        //     end
+        // end
 
         $display("\nICache Status:");
         $display("  Port[0]: %s | Port[1]: %s | Full: %b", 
@@ -623,48 +631,55 @@ module testbench;
                  icache_hits[1] ? "HIT " : (icache_misses[1] ? "MISS" : "IDLE"),
                  icache_full);
 
-        $display("\nCache Outputs to Fetch:");
-        for (integer co_idx = 0; co_idx < 2; co_idx++) begin
-            $display("  Port[%0d]: Valid=%b", co_idx, icache_cache_outs[co_idx].valid);
-            if (icache_cache_outs[co_idx].valid) begin
-                $display("    Data (MEM_BLOCK):");
-                $display("      Word[0]: 0x%08h | Word[1]: 0x%08h", 
-                         icache_cache_outs[co_idx].data.word_level[0],
-                         icache_cache_outs[co_idx].data.word_level[1]);
-                $display("      Full 64-bit: 0x%016h", icache_cache_outs[co_idx].data.dbbl_level);
-            end
-        end
-        
-        $display("\nOldest Miss Address:");
-        $display("  Valid: %b", oldest_miss_addr.valid);
-        if (oldest_miss_addr.valid) begin
-            $display("  Full PC: 0x%04h", 
-                     {oldest_miss_addr.addr.zeros, oldest_miss_addr.addr.tag, oldest_miss_addr.addr.block_offset});
-            $display("  Addr breakdown - zeros: 0x%04h, tag: 0x%02h, block_offset: 0x%01h",
-                     oldest_miss_addr.addr.zeros, 
-                     oldest_miss_addr.addr.tag, 
-                     oldest_miss_addr.addr.block_offset);
-        end
+        // $display("\nCache Outputs to Fetch:");
+        // for (integer co_idx = 0; co_idx < 2; co_idx++) begin
+        //     $display("  Port[%0d]: Valid=%b", co_idx, icache_cache_outs[co_idx].valid);
+        //     if (icache_cache_outs[co_idx].valid) begin
+        //         $display("    Data (MEM_BLOCK):");
+        //         $display("      Word[0]: 0x%08h | Word[1]: 0x%08h", 
+        //                  icache_cache_outs[co_idx].data.word_level[0],
+        //                  icache_cache_outs[co_idx].data.word_level[1]);
+        //         $display("      Full 64-bit: 0x%016h", icache_cache_outs[co_idx].data.dbbl_level);
+        //     end
+        // end
 
-        $display("\nPrefetcher:");
-        $display("  Valid: %b", prefetch_addr.valid);
-        if (prefetch_addr.valid) begin
-            $display("  Full PC: 0x%04h", 
-                     {prefetch_addr.addr.zeros, prefetch_addr.addr.tag, prefetch_addr.addr.block_offset});
-            $display("  Addr breakdown - zeros: 0x%04h, tag: 0x%02h, block_offset: 0x%01h",
-                     prefetch_addr.addr.zeros, 
-                     prefetch_addr.addr.tag, 
-                     prefetch_addr.addr.block_offset);
-        end
+        // $display("\nOldest Miss Address:");
+        // $display("  Valid: %b", oldest_miss_addr.valid);
+        // if (oldest_miss_addr.valid) begin
+        //     $display("  Full PC: 0x%04h", 
+        //              {oldest_miss_addr.addr.zeros, oldest_miss_addr.addr.tag, oldest_miss_addr.addr.block_offset});
+        //     $display("  Addr breakdown - zeros: 0x%04h, tag: 0x%02h, block_offset: 0x%01h",
+        //              oldest_miss_addr.addr.zeros, 
+        //              oldest_miss_addr.addr.tag, 
+        //              oldest_miss_addr.addr.block_offset);
+        // end
+
+        // $display("\nPrefetcher:");
+        // $display("  Valid: %b", prefetch_addr.valid);
+        // if (prefetch_addr.valid) begin
+        //     $display("  Full PC: 0x%04h", 
+        //              {prefetch_addr.addr.zeros, prefetch_addr.addr.tag, prefetch_addr.addr.block_offset});
+        //     $display("  Addr breakdown - zeros: 0x%04h, tag: 0x%02h, block_offset: 0x%01h",
+        //              prefetch_addr.addr.zeros, 
+        //              prefetch_addr.addr.tag, 
+        //              prefetch_addr.addr.block_offset);
+        // end
 
         $display("\nMSHR (Miss Status Holding Register):");
-        $display("  Head: %0d | Tail: %0d | Addr Found in MSHR: %b", mshr_head, mshr_tail, mshr_addr_found);
-        for (integer j = 0; j < `NUM_MEM_TAGS; j++) begin
-            if (mshr_entries[j].valid) begin
-                $display("  MSHR[%0d]: valid=1 | mem_tag=%0d | i_tag=0x%02h", 
-                         j, mshr_entries[j].mem_tag, mshr_entries[j].i_tag);
-            end
-        end
+        $display("  Head: %0d (next=%0d) | Tail: %0d (next=%0d)", mshr_head, mshr_next_head, mshr_tail, mshr_next_tail);
+        $display("  Pop Condition: %b | Push Condition: %b", mshr_pop_condition, mshr_push_condition);
+        $display("  MSHR[head=%0d] Details:", mshr_head);
+        $display("    Valid: %b", mshr_entries[mshr_head].valid);
+        $display("    Mem Tag: %0d", mshr_entries[mshr_head].mem_tag);
+        $display("    I Tag: 0x%02h", mshr_entries[mshr_head].i_tag);
+        
+        // $display("  All MSHR Entries:");
+        // for (integer j = 0; j < `NUM_MEM_TAGS; j++) begin
+        //     if (mshr_entries[j].valid) begin
+        //         $display("  MSHR[%0d]: valid=1 | mem_tag=%0d | i_tag=0x%02h", 
+        //                  j, mshr_entries[j].mem_tag, mshr_entries[j].i_tag);
+        //     end
+        // end
 
         $display("\nMemory Interface:");
         $display("  Memory Data Tag: %0d (0 = no data)", mem_data_tag_from_mem);
@@ -680,25 +695,35 @@ module testbench;
         end
         
         $display("\nICache Write Operations:");
-        $display("  ICache Write Addr Valid: %b", icache_write_addr.valid);
-        if (icache_write_addr.valid) begin
-            $display("  ICache Write PC: 0x%04h (tag=0x%02h)",
-                     {icache_write_addr.addr.zeros, icache_write_addr.addr.tag, icache_write_addr.addr.block_offset},
-                     icache_write_addr.addr.tag);
-            $display("  ICache Write Data:");
-            $display("    Word[0]: 0x%08h | Word[1]: 0x%08h", 
-                     icache_write_data.word_level[0], icache_write_data.word_level[1]);
-            $display("    WFI check - Word[0]: %b | Word[1]: %b",
-                     (icache_write_data.word_level[0] == 32'h10500073),
-                     (icache_write_data.word_level[1] == 32'h10500073));
-            $display("  Cache Line Being Written:");
-            $display("    Valid: %b | Tag: 0x%02h", 
-                     icache_line_write.valid, icache_line_write.tag);
-            $display("    Data Word[0]: 0x%08h | Word[1]: 0x%08h",
-                     icache_line_write.data.word_level[0], icache_line_write.data.word_level[1]);
-            $display("  Write Enable Mask: 0x%09h (which cache line index)", icache_write_enable_mask);
-            $display("  Write Index: %0d", $clog2(icache_write_enable_mask));
-        end
+        $display("  Write Addr Valid: %b | Tag: 0x%02h", icache_write_addr.valid, icache_write_addr.addr.tag);
+        // $display("    Addr.zeros: 0x%04h", icache_write_addr.addr.zeros);
+        // $display("    Addr.block_offset: 0x%01h", icache_write_addr.addr.block_offset);
+        // if (icache_write_addr.valid) begin
+        //     $display("    Full PC: 0x%04h",
+        //              {icache_write_addr.addr.zeros, icache_write_addr.addr.tag, icache_write_addr.addr.block_offset});
+        // end
+        
+        // $display("  Write Data to ICache (from Memory):");
+        // $display("    Word[0]: 0x%08h | Word[1]: 0x%08h", 
+        //          icache_write_data.word_level[0], icache_write_data.word_level[1]);
+        // $display("    Full 64-bit: 0x%016h", icache_write_data.dbbl_level);
+        // $display("    WFI check - Word[0]: %b | Word[1]: %b",
+        //          (icache_write_data.word_level[0] == 32'h10500073),
+        //          (icache_write_data.word_level[1] == 32'h10500073));
+        
+        // if (icache_write_addr.valid) begin
+        //     $display("  Cache Line Being Written:");
+        //     $display("    Valid: %b | Tag: 0x%02h", 
+        //              icache_line_write.valid, icache_line_write.tag);
+        //     $display("    Data Word[0]: 0x%08h | Word[1]: 0x%08h",
+        //              icache_line_write.data.word_level[0], icache_line_write.data.word_level[1]);
+        //     $display("  Write Enable Mask: 0x%09h", icache_write_enable_mask);
+        //     if (|icache_write_enable_mask) begin
+        //         $display("  Write to Cache Line Index: %0d", $clog2(icache_write_enable_mask));
+        //     end else begin
+        //         $display("  Write to Cache Line Index: NONE (mask is 0)");
+        //     end
+        // end
 
         // $display("\nFetch Packet Output (4-wide bundle):");
         // $display("  IB Bundle Valid: %b", ib_bundle_valid);

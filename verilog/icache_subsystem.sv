@@ -29,6 +29,10 @@ module icache_subsystem (
     output logic [$clog2(`NUM_MEM_TAGS)-1:0] mshr_head_dbg,
     output logic [$clog2(`NUM_MEM_TAGS)-1:0] mshr_tail_dbg,
     output MSHR_PACKET [`NUM_MEM_TAGS-1:0]   mshr_entries_dbg,
+    output logic [$clog2(`NUM_MEM_TAGS)-1:0] mshr_next_head_dbg,
+    output logic [$clog2(`NUM_MEM_TAGS)-1:0] mshr_next_tail_dbg,
+    output logic                             mshr_pop_condition_dbg,
+    output logic                             mshr_push_condition_dbg,
     output logic                mem_write_icache_dbg,
     output I_ADDR_PACKET        mem_write_addr_dbg,
     output MEM_BLOCK            mem_data_dbg,
@@ -93,7 +97,11 @@ module icache_subsystem (
         // Debug outputs
         .head_dbg       (mshr_head_dbg),
         .tail_dbg       (mshr_tail_dbg),
-        .entries_dbg    (mshr_entries_dbg)
+        .entries_dbg    (mshr_entries_dbg),
+        .next_head_dbg  (mshr_next_head_dbg),
+        .next_tail_dbg  (mshr_next_tail_dbg),
+        .pop_condition_dbg(mshr_pop_condition_dbg),
+        .push_condition_dbg(mshr_push_condition_dbg)
     );
 
     // Oldest miss address logic
@@ -163,7 +171,11 @@ module i_mshr #(
     // Debug outputs
     output logic [$clog2(`NUM_MEM_TAGS)-1:0] head_dbg,
     output logic [$clog2(`NUM_MEM_TAGS)-1:0] tail_dbg,
-    output MSHR_PACKET [`NUM_MEM_TAGS-1:0]   entries_dbg
+    output MSHR_PACKET [`NUM_MEM_TAGS-1:0]   entries_dbg,
+    output logic [$clog2(`NUM_MEM_TAGS)-1:0] next_head_dbg,
+    output logic [$clog2(`NUM_MEM_TAGS)-1:0] next_tail_dbg,
+    output logic                             pop_condition_dbg,
+    output logic                             push_condition_dbg
 );
 
     // MSHR Internal logic
@@ -179,6 +191,8 @@ module i_mshr #(
     assign addr_found = |snooping_one_hot;
 
     // MSHR logic
+    logic pop_condition, push_condition;
+    
     always_comb begin
         next_head = head;
         next_tail = tail;
@@ -186,7 +200,8 @@ module i_mshr #(
         next_mshr_entries = mshr_entries;
 
         // Data returned from Memory, Pop MSHR Entry
-        if (mem_data_tag != '0 & mshr_entries[head].valid & mem_data_tag == mshr_entries[head].mem_tag) begin
+        pop_condition = (mem_data_tag != '0) && mshr_entries[head].valid && (mem_data_tag == mshr_entries[head].mem_tag);
+        if (pop_condition) begin
             next_head = (head + '1) % `NUM_MEM_TAGS;
             next_mshr_entries[head].valid = '0;
             mem_data_i_addr.valid = '1;
@@ -196,7 +211,8 @@ module i_mshr #(
         end
 
         // New memory request, push new MSHR Entry
-        if (new_entry.valid) begin
+        push_condition = new_entry.valid;
+        if (push_condition) begin
             next_mshr_entries[tail] = new_entry;
             next_tail = (tail + '1) % `NUM_MEM_TAGS;
         end
@@ -218,6 +234,10 @@ module i_mshr #(
     assign head_dbg = head;
     assign tail_dbg = tail;
     assign entries_dbg = mshr_entries;
+    assign next_head_dbg = next_head;
+    assign next_tail_dbg = next_tail;
+    assign pop_condition_dbg = pop_condition;
+    assign push_condition_dbg = push_condition;
 
 endmodule
 
