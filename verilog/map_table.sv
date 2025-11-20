@@ -77,7 +77,20 @@ module map_table (
                         read_resp.told_entries[i].phys_reg = write_reqs[j].phys_reg;
                 end
             end
+
+            // Forward ready from CDB broadcasts
+            for (int c = 0; c < `N; c++) begin
+                if (cdb_broadcasts[c].valid) begin
+                    if (cdb_broadcasts[c].tag == read_resp.rs1_entries[i].phys_reg)
+                        read_resp.rs1_entries[i].ready = 1'b1;
+                    if (cdb_broadcasts[c].tag == read_resp.rs2_entries[i].phys_reg)
+                        read_resp.rs2_entries[i].ready = 1'b1;
+                    if (cdb_broadcasts[c].tag == read_resp.told_entries[i].phys_reg)
+                        read_resp.told_entries[i].ready = 1'b1;
+                end
+            end
         end
+
     end
 
     // Output entire table for mispredict recovery

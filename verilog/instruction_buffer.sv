@@ -58,7 +58,7 @@ module instr_buffer #(
     logic [$clog2(PUSH_WIDTH+1)-1:0] free_slots, free_slots_next;
 
     // Full and empty logic
-    assign full = (free_slots == 0);
+    assign full = (count >= (DEPTH - count));
     assign empty = (count == 0);
     assign available_slots = free_slots;
 
@@ -104,7 +104,7 @@ module instr_buffer #(
 
     // Sequential logic
     always_ff @(posedge clock) begin
-        if (reset) begin
+        if (reset || flush) begin
             ib_entries <= '0;
             head_ptr <= '0;
             tail_ptr <= '0;

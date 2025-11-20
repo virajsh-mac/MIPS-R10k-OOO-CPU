@@ -103,7 +103,7 @@ module stage_fetch (
         read_addrs[0].valid = 1'b0;
         read_addrs[1].valid = 1'b0;
 
-        if (!mispredict && !ib_full) begin
+        if (!ib_full) begin
             read_addrs[0].valid = 1'b1;
             read_addrs[1].valid = 1'b1;
         end
@@ -176,8 +176,14 @@ module stage_fetch (
     always_comb begin
         PC_next = PC;
 
-        if (branch_taken_out) begin
-            PC_next = branch_target_out;
+        if (mispredict) begin
+            if (branch_taken_out) begin
+                PC_next = branch_target_out;
+            end
+            else begin
+                // TODO this needs to be fixed
+                PC_next = PC + 32'h20; // sequential PC after mispredicted bundle
+            end
         end else if (!fetch_stall) begin
             if (found_branch && bp_response.taken) begin
                 PC_next = bp_response.target;
