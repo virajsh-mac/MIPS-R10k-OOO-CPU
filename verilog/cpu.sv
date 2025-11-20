@@ -343,7 +343,8 @@ module cpu (
     logic ib_full;
     logic                     ib_bundle_valid;
     FETCH_PACKET    [3:0]     fetch_packet;
-    ADDR  pc_override;
+    logic branch_taken_out;
+    ADDR  branch_target_out;
 
     ADDR         [3:0]     dbg_fetch_pc           ;
     logic [3:0][31:0]      dbg_fetch_inst         ;
@@ -367,8 +368,9 @@ module cpu (
         .bp_request   (bp_predict_request),
         .bp_response  (bp_predict_response),
 
-        .mispredict   (mispredict),
-        .pc_override  (pc_override),
+        .mispredict       (mispredict),
+        .branch_taken_out (branch_taken_out),
+        .branch_target_out(branch_target_out),
 
         .dbg_fetch_pc (dbg_fetch_pc),
         .dbg_fetch_inst(dbg_fetch_inst),
@@ -1056,8 +1058,8 @@ module cpu (
 
 
         // To fetch
-        //    .branch_taken_out(mispredict),
-        .branch_target_out(pc_override),
+        .branch_target_out(branch_target_out),
+        .branch_taken_out  (branch_taken_out),
         .train_req_o            (train_req),
         .recover_req_o          (recover_req),
 

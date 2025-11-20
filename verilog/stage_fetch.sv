@@ -24,9 +24,12 @@ module stage_fetch (
     output  BP_PREDICT_REQUEST       bp_request,
     input   BP_PREDICT_RESPONSE      bp_response,
 
-    // Retire on branch mispredict
-    input  logic                     mispredict,     // current read requests invalid
-    input  ADDR                      pc_override,     // overrides PC on mispredict
+    // Pipeline control
+    input  logic                     mispredict,        // stall fetch during mispredict recovery
+
+    // Resolved branch information from retire
+    input  logic                     branch_taken_out,
+    input  ADDR                      branch_target_out,
 
     output ADDR        [3:0]      dbg_fetch_pc           ,
     output logic [3:0][31:0]      dbg_fetch_inst         ,
@@ -173,8 +176,8 @@ module stage_fetch (
     always_comb begin
         PC_next = PC;
 
-        if (mispredict) begin
-            PC_next = pc_override;
+        if (branch_taken_out) begin
+            PC_next = branch_target_out;
         end else if (!fetch_stall) begin
             if (found_branch && bp_response.taken) begin
                 PC_next = bp_response.target;
