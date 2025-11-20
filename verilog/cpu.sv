@@ -328,7 +328,7 @@ module cpu (
     end
 
     // In this simplified model, memory always accepts valid requests
-    assign mem_req_accepted = (proc2mem_command == MEM_LOAD); // && (mem2proc_transaction_tag != 0)
+    assign mem_req_accepted = (proc2mem_command == MEM_LOAD) && (mem2proc_transaction_tag != 0);
 
     //////////////////////////////////////////////////
     //                                              //
