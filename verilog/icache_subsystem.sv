@@ -378,14 +378,12 @@ module icache (
     );
 
     // Write selection random eviction
-    LFSR #(
-        .NUM_BITS (I_CACHE_INDEX_BITS)
-    ) LFSR_inst (
-        .clock(clock),
-        .reset(reset),
-        .seed_data(I_CACHE_INDEX_BITS'(`LFSR_SEED)),
-        .data_out(cache_write_evict_index)
+    LFSR LFSR_inst (
+        .clk(clock),
+        .rst(reset),
+        .op(cache_write_evict_index)
     );
+
 
     // Cache write logic
     for (genvar k = 0; k < MEM_DEPTH; k++) begin
