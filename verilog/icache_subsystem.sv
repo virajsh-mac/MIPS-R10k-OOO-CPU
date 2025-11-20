@@ -286,17 +286,14 @@ module i_prefetcher (
                 next_last_icache_miss_mem_req.addr = icache_miss_addr.addr;
                 next_addr_incrementor = icache_miss_addr.addr;
             end 
-        end 
-        // TODO: WARNING PREFETCHER DISABLED BECAUSE ITS OVERRIDING THE OLDEST MISS 
-        // right now the prefetcher is the only thing sending out vaild memory requests
-        // else if (~icache_full & last_icache_miss_mem_req.valid) begin
-        //     // Send lookahead snooping request
-        //     prefetcher_snooping_addr.valid = '1;
-        //     prefetcher_snooping_addr.addr  = addr_incrementor + 'h4;
-        //     if (mem_req_accepted) begin
-        //         next_addr_incrementor = addr_incrementor + 'h4;
-        //     end
-        // end
+        end else if (~icache_full & last_icache_miss_mem_req.valid) begin
+            // Send lookahead snooping request
+            prefetcher_snooping_addr.valid = '1;
+            prefetcher_snooping_addr.addr  = addr_incrementor + 'h8;
+            if (mem_req_accepted) begin
+                next_addr_incrementor = addr_incrementor + 'h8;
+            end
+        end
     end
 
     always_ff @(posedge clock) begin
