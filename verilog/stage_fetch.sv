@@ -173,22 +173,23 @@ module stage_fetch (
         end
     end
 
+    // PC increment constants for clarity
+    localparam logic [31:0] BUNDLE_SIZE_BYTES = 32'h10;  // 4 instructions * 4 bytes each
+
     always_comb begin
-        PC_next = PC;
+        PC_next = PC;  // Default: stay at current PC (when stalled)
 
         if (mispredict) begin
-            if (branch_taken_out) begin
-                PC_next = branch_target_out;
-            end
-            else begin
-                // TODO this needs to be fixed
-                PC_next = PC + 32'h20; // sequential PC after mispredicted bundle
-            end
+            // Handle mispredicted branch recovery
+            PC_next = branch_target_out;
+
         end else if (!fetch_stall) begin
             if (found_branch && bp_response.taken) begin
+                // Branch predictor says taken - follow prediction
                 PC_next = bp_response.target;
             end else begin
-                PC_next = PC + 32'h10; // 4 * 4 bytes
+                // No branch or branch predicted not taken - advance by bundle size
+                PC_next = PC + BUNDLE_SIZE_BYTES;
             end
         end
     end

@@ -560,6 +560,13 @@ module testbench;
                               committed_insts[n].data);
                 end
 
+                // if (committed_insts[n].reg_idx == `ZERO_REG) begin
+                //     $fdisplay(wb_fileno, "@%-8d PC %4x:%-8s| ---", clock_count, pc, decode_inst(inst));
+                // end else begin
+                //     $fdisplay(wb_fileno, "@%-8d PC %4x:%-8s| r%02d=%-8x", clock_count, pc, decode_inst(inst), committed_insts[n].reg_idx,
+                //               committed_insts[n].data);
+                // end
+
                 // exit if we have an illegal instruction or a halt
                 if (committed_insts[n].illegal) begin
                     error_status = ILLEGAL_INST;

@@ -112,16 +112,9 @@ module stage_retire #(
             // If this entry is a branch, check for mispredict (compare prediction vs actual)
             if (entry.branch) begin
 
-                // Debug for branches
-                // branch_retired_dbg = entry.branch;
-                // branch_taken_dbg = entry.branch_taken;
-                // is_branch_target_unknown_dbg = $isunknown(entry.branch_target);
-
                 // to fetch stage
-                if (entry.branch_taken) begin
-                    branch_taken_out  = 1'b1;
-                    branch_target_out = entry.branch_target;
-                end
+                branch_taken_out = entry.branch_taken;
+                branch_target_out = entry.branch_target;
 
                 // Only consider mispredict if branch had completed
                 mispred_dir               = (entry.pred_taken != entry.branch_taken);
