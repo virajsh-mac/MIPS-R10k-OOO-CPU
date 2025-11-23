@@ -148,17 +148,6 @@ module cpu (
     output FETCH_PACKET [3:0]   fetch_packet_dbg,
     output logic                ib_bundle_valid_dbg,
 
-    // Instruction Buffer debug outputs
-    output logic [$clog2(32)-1:0]          ib_head_ptr_dbg,
-    output logic [$clog2(32)-1:0]          ib_tail_ptr_dbg,
-    output logic [$clog2(32+1)-1:0]        ib_count_dbg,
-    output logic [$clog2(4+1)-1:0]         ib_free_slots_dbg,
-    output logic [$clog2(4+1)-1:0]         ib_num_pushes_dbg,
-    output logic [$clog2(3+1)-1:0]         ib_num_pops_dbg,
-    output FETCH_PACKET [3:0]              ib_new_entries_dbg,
-    output FETCH_PACKET [2:0]              ib_popped_entries_dbg,
-    output FETCH_PACKET [31:0]             ib_buffer_entries_dbg
-
 );
 
     //////////////////////////////////////////////////
@@ -358,19 +347,9 @@ module cpu (
     BP_PREDICT_REQUEST    bp_predict_request;
     BP_PREDICT_RESPONSE   bp_predict_response;
 
-    logic ib_full;
-    logic                     ib_bundle_valid;
     FETCH_PACKET    [3:0]     fetch_packet;
-    logic branch_taken_out;
-    ADDR  branch_target_out;
-
-    ADDR         [3:0]     dbg_fetch_pc           ;
-    logic [3:0][31:0]      dbg_fetch_inst         ;
-    logic     [3:0]        dbg_fetch_valid        ;
-    logic        [3:0]     dbg_fetch_is_branch    ;
-    logic     [3:0]        dbg_fetch_bp_pred_taken;
-    ADDR     [3:0]         dbg_fetch_bp_pred_target;
-    logic [3:0][`BP_GH-1:0]dbg_fetch_bp_ghr_snapshot;
+    ADDR correct_branch_target;
+    logic [`IB_IDX_BITs-1:0] ib_free_slots;
 
     stage_fetch stage_fetch_0 (
         .clock        (clock),
@@ -379,24 +358,13 @@ module cpu (
         .read_addrs   (i_cache_read_addrs),
         .cache_data   (icache_data),
 
-        .ib_full         (ib_full),
-        .ib_bundle_valid (ib_bundle_valid),
         .fetch_packet (fetch_packet),
 
         .bp_request   (bp_predict_request),
         .bp_response  (bp_predict_response),
 
-        .mispredict       (mispredict),
-        .branch_taken_out (branch_taken_out),
-        .branch_target_out(branch_target_out),
-
-        .dbg_fetch_pc (dbg_fetch_pc),
-        .dbg_fetch_inst(dbg_fetch_inst),
-        .dbg_fetch_valid(dbg_fetch_valid),
-        .dbg_fetch_is_branch(dbg_fetch_is_branch),
-        .dbg_fetch_bp_pred_taken(dbg_fetch_bp_pred_taken),
-        .dbg_fetch_bp_pred_target(dbg_fetch_bp_pred_target),
-        .dbg_fetch_bp_ghr_snapshot(dbg_fetch_bp_ghr_snapshot)
+        .correct_branch_target ({mispredict, correct_branch_target}),
+        .ib_free_slots          (ib_free_slots)
     );
 
     // Branch Predictor singals
@@ -471,7 +439,6 @@ module cpu (
     // Instruction Buffer signals
     FETCH_PACKET [2:0] ib_dispatch_window;  // Window of instructions for decode/dispatch
     logic [1:0]        ib_window_valid_count; // Number of valid instructions in window
-    logic              ib_empty;
 
     instr_buffer instr_buffer_0 (
         .clock(clock),
@@ -480,27 +447,13 @@ module cpu (
 
         // Fetch interface (temporary fake fetch)
         .new_ib_entry(fetch_packet),
-        .num_pushes(ib_bundle_valid ? 3'b100 : 3'b0),
-        .full(ib_full),
-        .available_slots(),  // Not used in this simple setup
+        .num_pushes(),
+        .available_slots(ib_free_slots),
 
         // Dispatch interface
         .num_pops(dispatch_count),  // Dispatch count (0-3)
         .dispatch_window(ib_dispatch_window),
-        .window_valid_count(ib_window_valid_count),
-
-        .empty(ib_empty),
-
-        // Debug outputs
-        .head_ptr_dbg(ib_head_ptr_dbg),
-        .tail_ptr_dbg(ib_tail_ptr_dbg),
-        .count_dbg(ib_count_dbg),
-        .free_slots_dbg(ib_free_slots_dbg),
-        .num_pushes_dbg(ib_num_pushes_dbg),
-        .num_pops_dbg(ib_num_pops_dbg),
-        .new_entries_dbg(ib_new_entries_dbg),
-        .popped_entries_dbg(ib_popped_entries_dbg),
-        .buffer_entries_dbg(ib_buffer_entries_dbg)
+        .window_valid_count(ib_window_valid_count)
     );
 
     //////////////////////////////////////////////////
@@ -1076,8 +1029,9 @@ module cpu (
 
 
         // To fetch
-        .branch_target_out(branch_target_out),
-        .branch_taken_out  (branch_taken_out),
+        .branch_target_out(correct_branch_target),
+
+        // Branch predictor
         .train_req_o            (train_req),
         .recover_req_o          (recover_req),
 

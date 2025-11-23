@@ -1,66 +1,40 @@
 `include "sys_defs.svh"
 
-module instr_buffer #(
-    parameter DEPTH = 32,
-    parameter PUSH_WIDTH = 4,  // Number of push ports
-    parameter POP_WIDTH = 3    // Number of pop ports
-) (
+module instr_buffer (
     input  logic                 clock,
     input  logic                 reset,
 
     // Retire on branch mispredict
     input  logic                 flush,
 
-    output logic [$clog2(PUSH_WIDTH+1)-1:0]    available_slots, // number of available slots
-    output logic                               full,
-    output logic                               empty,
+    output logic [`IB_IDX_BITS:0]              available_slots, // total number of available slots
 
-    // Fetch stage - supports up to PUSH_WIDTH pushes per cycle
-    input logic [$clog2(PUSH_WIDTH+1)-1:0]     num_pushes,      // number of valid entries to push
-    input FETCH_PACKET [PUSH_WIDTH-1:0]        new_ib_entry,    // PUSH_WIDTH entries from fetch
+    // Fetch stage - supports up to `IB_PUSH_WIDTH pushes per cycle
+    input logic [$clog2(`IB_PUSH_WIDTH+1)-1:0]     num_pushes,      // number of valid entries to push
+    input FETCH_PACKET [`IB_PUSH_WIDTH-1:0]        new_ib_entries,    // `IB_PUSH_WIDTH entries from fetch
 
-    // Decode and Dispatch IO - supports up to POP_WIDTH pops per cycle
-    // Dispatch inspection window - shows next POP_WIDTH instructions available for decode/dispatch
-    input logic [$clog2(POP_WIDTH+1)-1:0]      num_pops,        // number of entries to pop
-    output FETCH_PACKET [POP_WIDTH-1:0]        dispatch_window, // Window of next available instructions
-    output logic [$clog2(POP_WIDTH+1)-1:0]     window_valid_count, // Number of valid instructions in window
-
-    // Debug outputs
-    output logic [$clog2(DEPTH)-1:0]           head_ptr_dbg,
-    output logic [$clog2(DEPTH)-1:0]           tail_ptr_dbg,
-    output logic [$clog2(DEPTH+1)-1:0]         count_dbg,
-    output logic [$clog2(PUSH_WIDTH+1)-1:0]   free_slots_dbg,
-    output logic [$clog2(PUSH_WIDTH+1)-1:0]   num_pushes_dbg,
-    output logic [$clog2(POP_WIDTH+1)-1:0]    num_pops_dbg,
-    output FETCH_PACKET [PUSH_WIDTH-1:0]      new_entries_dbg,
-    output FETCH_PACKET [POP_WIDTH-1:0]       popped_entries_dbg,
-    output FETCH_PACKET [DEPTH-1:0]           buffer_entries_dbg
+    // Decode and Dispatch IO - supports up to `N pops per cycle
+    // Dispatch inspection window - shows next `N instructions available for decode/dispatch
+    input logic [$clog2(`N+1)-1:0]      num_pops,        // number of entries to pop
+    output FETCH_PACKET [`N-1:0]        dispatch_window, // Window of next available instructions
+    output logic [$clog2(`N+1)-1:0]     window_valid_count // Number of valid instructions in window
 );
 
-    // Helper functions for cleaner code
-    function automatic logic [$clog2(DEPTH)-1:0] wrap_ptr(input logic [$clog2(DEPTH)-1:0] ptr, input logic [$clog2(DEPTH)-1:0] offset);
-        return (ptr + offset) % DEPTH;
-    endfunction
-
-    function automatic logic [$clog2(PUSH_WIDTH+1)-1:0] calc_free_slots(input logic [$clog2(PUSH_WIDTH+1)-1:0] current_free, input logic [$clog2(POP_WIDTH+1)-1:0] pops, input logic [$clog2(PUSH_WIDTH+1)-1:0] pushes);
-        // Optimized for timing: Simple arithmetic, no underflow check needed since we validate can_push/can_pop
-        automatic logic [$clog2(PUSH_WIDTH+1):0] temp = {1'b0, current_free} + pops - pushes;  // Extra bit prevents underflow
-        return (temp > PUSH_WIDTH) ? PUSH_WIDTH[$clog2(PUSH_WIDTH+1)-1:0] : temp[$clog2(PUSH_WIDTH+1)-1:0];
+    // Helper function for pointer wrapping
+    function automatic logic [`IB_IDX_BITS-1:0] wrap_ptr(input logic [`IB_IDX_BITS-1:0] ptr, input logic [`IB_IDX_BITS-1:0] offset);
+        return (ptr + offset) % `IB_SZ;
     endfunction
 
     // FIFO storage
-    FETCH_PACKET [DEPTH-1:0] ib_entries, ib_entries_next;
+    FETCH_PACKET [`IB_SZ-1:0] ib_entries, ib_entries_next;
 
-    // FIFO state - individual signals to avoid concatenation
-    logic [$clog2(DEPTH)-1:0] head_ptr, head_ptr_next;
-    logic [$clog2(DEPTH)-1:0] tail_ptr, tail_ptr_next;
-    logic [$clog2(DEPTH+1)-1:0] count, count_next;
-    logic [$clog2(PUSH_WIDTH+1)-1:0] free_slots, free_slots_next;
+    // FIFO state
+    logic [`IB_IDX_BITS-1:0] head_ptr, head_ptr_next;
+    logic [`IB_IDX_BITS-1:0] tail_ptr, tail_ptr_next;
+    logic [`IB_IDX_BITS:0] count, count_next;
 
-    // Full and empty logic
-    assign full = (count >= (DEPTH - count));
-    assign empty = (count == 0);
-    assign available_slots = free_slots;
+    // Available slots calculation
+    assign available_slots = `IB_SZ - count;
 
     // Next state logic
     always_comb begin
@@ -68,37 +42,30 @@ module instr_buffer #(
         head_ptr_next = head_ptr;
         tail_ptr_next = tail_ptr;
         count_next = count;
-        free_slots_next = free_slots;
 
         if (flush) begin
             // Flush: reset all pointers and counters
             head_ptr_next = '0;
             tail_ptr_next = '0;
             count_next = '0;
-            free_slots_next = (DEPTH > PUSH_WIDTH) ? PUSH_WIDTH[$clog2(PUSH_WIDTH+1)-1:0] : DEPTH[$clog2(PUSH_WIDTH+1)-1:0];
         end else begin
-            // Handle operations in priority order: pops first, then pushes
-            automatic logic can_pop = (num_pops > 0 && count >= num_pops);
-            automatic logic can_push = (num_pushes > 0 && (count - (can_pop ? num_pops : 0) + num_pushes) <= DEPTH);
-
-            if (can_pop) begin
+            // Handle pops first
+            if (num_pops > 0 && count >= num_pops) begin
                 head_ptr_next = wrap_ptr(head_ptr, num_pops);
                 count_next = count - num_pops;
             end
 
-            if (can_push) begin
+            // Handle pushes
+            if (num_pushes > 0 && (count_next + num_pushes) <= `IB_SZ) begin
                 // Push entries to FIFO
-                foreach (new_ib_entry[i]) begin
+                foreach (new_ib_entries[i]) begin
                     if (i < num_pushes) begin
-                        ib_entries_next[wrap_ptr(tail_ptr, i)] = new_ib_entry[i];
+                        ib_entries_next[wrap_ptr(tail_ptr, i)] = new_ib_entries[i];
                     end
                 end
                 tail_ptr_next = wrap_ptr(tail_ptr, num_pushes);
                 count_next = count_next + num_pushes;
             end
-
-            // Update free slots using helper function
-            free_slots_next = calc_free_slots(free_slots, can_pop ? num_pops : 0, can_push ? num_pushes : 0);
         end
     end
 
@@ -109,45 +76,23 @@ module instr_buffer #(
             head_ptr <= '0;
             tail_ptr <= '0;
             count <= '0;
-            free_slots <= (DEPTH > PUSH_WIDTH) ? PUSH_WIDTH[$clog2(PUSH_WIDTH+1)-1:0] : DEPTH[$clog2(PUSH_WIDTH+1)-1:0];
         end else begin
             ib_entries <= ib_entries_next;
             head_ptr <= head_ptr_next;
             tail_ptr <= tail_ptr_next;
             count <= count_next;
-            free_slots <= free_slots_next;
         end
     end
 
-    // Dispatch inspection window - continuously show next POP_WIDTH instructions available for decode/dispatch
+    // Dispatch inspection window - continuously show next `N instructions available for decode/dispatch
     always_comb begin
-        dispatch_window = '{POP_WIDTH{'0}};  // Initialize all to invalid
+        dispatch_window = '{`N{'0}};  // Initialize all to invalid
         window_valid_count = 0;
 
         foreach (dispatch_window[i]) begin
             if (count > i) begin
                 dispatch_window[i] = ib_entries[wrap_ptr(head_ptr, i)];
                 window_valid_count = window_valid_count + 1;
-            end
-        end
-    end
-
-    // Debug output assignments
-    assign head_ptr_dbg = head_ptr;
-    assign tail_ptr_dbg = tail_ptr;
-    assign count_dbg = count;
-    assign free_slots_dbg = free_slots;
-    assign num_pushes_dbg = num_pushes;
-    assign num_pops_dbg = num_pops;
-    assign new_entries_dbg = new_ib_entry;
-    assign buffer_entries_dbg = ib_entries;
-
-    // Debug output for popped entries (what's being removed this cycle)
-    always_comb begin
-        popped_entries_dbg = '{POP_WIDTH{'0}};  // Initialize all to invalid
-        for (int i = 0; i < POP_WIDTH; i++) begin
-            if (i < num_pops && count > i) begin
-                popped_entries_dbg[i] = ib_entries[wrap_ptr(head_ptr, i)];
             end
         end
     end

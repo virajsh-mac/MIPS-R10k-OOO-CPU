@@ -192,16 +192,6 @@ module testbench;
     FETCH_PACKET [3:0] fetch_packet_out;
     logic ib_bundle_valid;
 
-    // Instruction Buffer debug signals
-    logic [$clog2(32)-1:0] ib_head_ptr;
-    logic [$clog2(32)-1:0] ib_tail_ptr;
-    logic [$clog2(32+1)-1:0] ib_count;
-    logic [$clog2(4+1)-1:0] ib_free_slots;
-    logic [$clog2(4+1)-1:0] ib_num_pushes;
-    logic [$clog2(3+1)-1:0] ib_num_pops;
-    FETCH_PACKET [3:0] ib_new_entries;
-    FETCH_PACKET [2:0] ib_popped_entries;
-    FETCH_PACKET [31:0] ib_buffer_entries;
 
     MEM_TAG mem2proc_transaction_tag;  // Memory tag for current transaction
     MEM_BLOCK mem2proc_data;  // Data coming back from memory
@@ -347,32 +337,8 @@ module testbench;
 
         // Fetch stage debug outputs
         .fetch_packet_dbg(fetch_packet_out),
-        .ib_bundle_valid_dbg(ib_bundle_valid),
-
-        // Instruction Buffer debug outputs
-        .ib_head_ptr_dbg(ib_head_ptr),
-        .ib_tail_ptr_dbg(ib_tail_ptr),
-        .ib_count_dbg(ib_count),
-        .ib_free_slots_dbg(ib_free_slots),
-        .ib_num_pushes_dbg(ib_num_pushes),
-        .ib_num_pops_dbg(ib_num_pops),
-        .ib_new_entries_dbg(ib_new_entries),
-        .ib_popped_entries_dbg(ib_popped_entries),
-        .ib_buffer_entries_dbg(ib_buffer_entries)
+        .ib_bundle_valid_dbg(ib_bundle_valid)
     );
-
-    // ---- Fake-Fetch interface ----
-    // `ifdef SYNTH
-    //         .ff_instr       ({fake_instr[2], fake_instr[1], fake_instr[0]}),
-    // `else
-    //         .ff_instr       (fake_instr),
-    // `endif
-    //         .ff_pc          (fake_pc),
-    //         .ff_nvalid      (fake_nvalid),
-    //         .ff_consumed    (fake_consumed),
-    //         .branch_taken_out (ff_branch_taken),
-    //         .branch_target_out(ff_branch_target)
-
 
     // Instruction Memory (for fake-fetch only - data operations disconnected)
     mem memory (
@@ -399,22 +365,6 @@ module testbench;
     end
 
     // ----------------------------------------------------------------
-    // Fake-Fetch: PC register
-    // ----------------------------------------------------------------
-    // always_ff @(posedge clock) begin
-    //     if (reset) begin
-    //         fake_pc <= '0;
-    //     end else begin
-    //         if (ff_branch_taken) begin
-    //             fake_pc <= ff_branch_target;
-    //         end else begin
-    //             // Advance by 4*X where X = fake_consumed from CPU
-    //             fake_pc <= fake_pc + 32'(4 * fake_consumed);
-    //         end
-    //     end
-    // end
-
-    // ----------------------------------------------------------------
     // Read a 32b instruction from unified memory at byte address 'addr'
     // ----------------------------------------------------------------
     function DATA get_inst32(input ADDR addr);
@@ -424,22 +374,6 @@ module testbench;
             get_inst32 = blk.word_level[addr[2]];  // 0: low word, 1: high word
         end
     endfunction
-
-    // ----------------------------------------------------------------
-    // Build the N-wide bundle every cycle (sequential @ fake_pc + 4*i)
-    // ----------------------------------------------------------------
-    // int count;
-    // always_comb begin
-    //     count = 0;
-    //     for (integer i = 0; i < `N; i++) begin
-    //         fake_instr[i] = get_inst32(fake_pc + 32'(4 * i));
-    //         if (fake_instr[i] != 32'b0) begin
-    //             count++;
-    //         end
-    //     end
-    //     fake_nvalid = count;  // simple model: always provide N; CPU decides how many to take
-    // end
-
 
     initial begin
         $dumpfile("cpu_test.vcd");

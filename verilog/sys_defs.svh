@@ -41,6 +41,11 @@
 `define RS_IDX_BITS $clog2(`RS_SZ)              // 4 bits for RS index
 `define NUM_CATS 4                              // Number of OP_CATEGORY values (0-4)
 
+// Instruction buffer
+`define IB_SZ  64  // Instruction buffer size
+`define IB_IDX_BITS  $clog2(`IB_SZ)
+`define IB_PUSH_WIDTH    
+
 // branch prediction
 `define BP_GH 7                              // number of global history bits
 `define BP_PHT_BITS `BP_GH + 1               // PHT entries = GH + 1
@@ -695,7 +700,7 @@ typedef struct packed {
 typedef struct packed {
     ADDR         pc;    // PC of this instruction
     logic [31:0] inst;  // raw 32-bit instruction
-    logic valid;
+    logic        valid;
 
     // Branch prediction metadata (for branch instructions)
     logic              is_branch;        // 1 if this inst is a branch

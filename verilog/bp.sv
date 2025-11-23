@@ -16,13 +16,13 @@ module bp (
     // ---------- Predict request (Inputs from Instruction Fetch) ----------
     input BP_PREDICT_REQUEST predict_req_i,
 
-    // ---------- Predict response (Outputs to Instruction Fetch)----------
+    // ---------- Predict response (Outputs to Instruction Fetch) ----------
     output BP_PREDICT_RESPONSE predict_resp_o,
 
-    // ---------- Training request (Inputs from Rob/Retire Stage) -----
+    // ---------- Training request (Inputs from Rob/Retire Stage) ----------
     input BP_TRAIN_REQUEST train_req_i,
 
-    // ---------- Recovery request (Inputs from Rob/Retire Stage) -----------------
+    // ---------- Recovery request (Inputs from Rob/Retire Stage) ----------
     input BP_RECOVER_REQUEST recover_req_i,
 
     // ---------- Debug outputs ----------
