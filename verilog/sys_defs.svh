@@ -47,8 +47,8 @@
 `define IB_PUSH_WIDTH    
 
 // branch prediction
-`define BP_GH 7                              // number of global history bits
-`define BP_PHT_BITS `BP_GH + 1               // PHT entries = GH + 1
+`define BP_GHR_WIDTH_WIDTH 7                              // ghr width
+`define BP_PHT_BITS `BP_GHR_WIDTH + 1               // PHT entries = GH + 1
 `define BP_BTB_BITS 7                        // BTB entries = 2^BTB_BITS
 `define BP_PC_WORD_ALIGN_BITS 2              // PC[1:0] are word-aligned (ignore)
 `define BP_BTB_TAG_BITS (32 - `BP_PC_WORD_ALIGN_BITS - `BP_BTB_BITS)  // Tag = upper PC bits above index + word-align
@@ -640,7 +640,7 @@ typedef struct packed {
     logic          branch_taken;   // Resolved taken/not taken
     ADDR           pred_target;    // Predicted branch target
     logic          pred_taken;     // Predicted taken/not taken
-    logic [`BP_GH-1:0] ghr_snapshot;   // new: GHR snapshot
+    logic [`BP_GHR_WIDTH-1:0] ghr_snapshot;   // new: GHR snapshot
     logic          mispredict;     // Branch misprediction flag
     logic          halt;           // Is this a halt?
     logic          illegal;        // Is this illegal?
@@ -664,23 +664,24 @@ typedef struct packed {
 } BP_PREDICT_REQUEST;
 
 typedef struct packed {
-    logic              valid;          // Valid training update
-    ADDR               pc;             // PC of branch that was executed
+    logic              valid;
+    ADDR               target;        // Predicted target
+    logic [`BP_GHR_WIDTH-1:0] ghr_snapshot;  // GHR snapshot for mispredict recovery
+} BP_PREDICT_RESPONSE;
+
+typedef struct packed {
+    logic              valid;          // true when it was a branch
+    logic              mispredict; 
+    ADDR               pc;             // PC of branch
     logic              actual_taken;   // Actual outcome
     ADDR               actual_target;  // Actual target (if taken)
-    logic [`BP_GH-1:0] ghr_snapshot;   // GHR snapshot from prediction
+    logic [`BP_GHR_WIDTH-1:0] ghr_snapshot;
 } BP_TRAIN_REQUEST;
 
 typedef struct packed {
-    logic              pulse;         // Mispredict recovery pulse
-    logic [`BP_GH-1:0] ghr_snapshot;  // GHR snapshot to restore
+    logic              valid;         // Mispredict recovery pulse
+    logic [`BP_GHR_WIDTH-1:0] ghr_snapshot;  // GHR snapshot to restore
 } BP_RECOVER_REQUEST;
-
-typedef struct packed {
-    logic              taken;         // Prediction result
-    ADDR               target;        // Predicted target (if taken)
-    logic [`BP_GH-1:0] ghr_snapshot;  // GHR snapshot for mispredict recovery
-} BP_PREDICT_RESPONSE;
 
 // BTB entry structure
 typedef struct packed {
@@ -706,7 +707,7 @@ typedef struct packed {
     logic              is_branch;        // 1 if this inst is a branch
     logic              bp_pred_taken;    // predictor's taken/not-taken decision
     ADDR               bp_pred_target;   // predicted target (if taken)
-    logic [`BP_GH-1:0] bp_ghr_snapshot;  // GHR snapshot used for this prediction
+    logic [`BP_GHR_WIDTH-1:0] BP_GHR_WIDTHr_snapshot;  // GHR snapshot used for this prediction
 } FETCH_PACKET;
 
 
@@ -746,7 +747,7 @@ typedef struct packed {
     INST           inst;           // Full instruction
     logic          pred_taken;     // Branch prediction taken
     ADDR           pred_target;    // Branch prediction target
-    logic [`BP_GH-1:0][`N-1:0] ghr_snapshot; // new: GHR snapshot
+    logic [`BP_GHR_WIDTH-1:0][`N-1:0] ghr_snapshot; // new: GHR snapshot
     logic          halt;           // Halt instruction flag
 } FETCH_DISP_ENTRY;
 

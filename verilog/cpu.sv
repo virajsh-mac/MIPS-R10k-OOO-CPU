@@ -371,27 +371,6 @@ module cpu (
    BP_TRAIN_REQUEST train_req;
    BP_RECOVER_REQUEST recover_req;
 
-    // BP Debug signals
-    logic [`BP_GH-1:0]        ghr_dbg;
-    logic [`BP_PHT_BITS-1:0]  pht_idx_dbg;
-    BP_COUNTER_STATE          pht_entry_dbg;
-    logic                     btb_hit_dbg;
-    logic                     train_actual_taken_dbg;
-    logic [`BP_PHT_BITS-1:0]  train_pht_idx_dbg;
-    BP_COUNTER_STATE          train_pht_old_entry_dbg;
-    BP_COUNTER_STATE          train_pht_new_entry_dbg;
-    logic                     train_valid_dbg;
-    logic [`BP_GH-1:0]        next_ghr_dbg;
-    logic [`BP_GH-1:0]        recovery_next_dbg;
-    logic [`BP_GH-1:0]        recover_snapshot_dbg;
-    logic [`BP_GH-1:0]        train_snapshot_dbg;
-    logic                     recovery_active_dbg;
-    logic [`BP_GH-1:0]        ghr_next_ff_dbg;
-    logic                     recovery_active_comb_dbg;  // Combinational version
-    logic                     recover_pulse_comb_dbg;
-    logic                     train_valid_comb_dbg;
-    logic [`BP_GH-1:0]        ghr_next_value_comb_dbg;
-
     bp bp_0 (
         .clock(clock),
         .reset(reset),
@@ -406,28 +385,7 @@ module cpu (
         .train_req_i(train_req),
 
         // Recover request (from ROB retire stage)
-        .recover_req_i(recover_req),
-
-        // debugging stuff
-        .ghr_dbg(ghr_dbg),
-        .pht_idx_dbg(pht_idx_dbg),
-        .pht_entry_dbg(pht_entry_dbg),
-        .btb_hit_dbg(btb_hit_dbg),
-        .train_actual_taken_dbg(train_actual_taken_dbg),
-        .train_pht_idx_dbg(train_pht_idx_dbg),
-        .train_pht_old_entry_dbg(train_pht_old_entry_dbg),
-        .train_pht_new_entry_dbg(train_pht_new_entry_dbg),
-        .train_valid_dbg(train_valid_dbg),
-        .next_ghr_dbg(next_ghr_dbg),
-        .recovery_next_dbg(recovery_next_dbg),
-        .recover_snapshot_dbg(recover_snapshot_dbg),
-        .train_snapshot_dbg(train_snapshot_dbg),
-        .recovery_active_dbg(recovery_active_dbg),
-        .ghr_next_ff_dbg(ghr_next_ff_dbg),
-        .recovery_active_comb_dbg(recovery_active_comb_dbg),
-        .recover_pulse_comb_dbg(recover_pulse_comb_dbg),
-        .train_valid_comb_dbg(train_valid_comb_dbg),
-        .ghr_next_value_comb_dbg(ghr_next_value_comb_dbg)
+        .recover_req_i(recover_req)
     );
 
     //////////////////////////////////////////////////

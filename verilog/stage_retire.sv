@@ -30,10 +30,9 @@ module stage_retire #(
     // debug output which is used to count committed instructions at retire
     output COMMIT_PACKET [N-1:0] retire_commits_dbg,
 
-    // to Fake fetch for branching
+    // Fetch stage IOs
     output ADDR branch_target_out,
     output BP_TRAIN_REQUEST train_req_o,
-    output BP_RECOVER_REQUEST recover_req_o,
 
     // to read committed data from PRF
     input DATA [`PHYS_REG_SZ_R10K-1:0] regfile_entries,
@@ -57,7 +56,6 @@ module stage_retire #(
         freelist_checkpoint_mask_next = freelist_checkpoint_mask;
         {mispredict, rob_mispred_idx, free_mask} = '0;
         train_req_o = '{default: 0};
-        recover_req_o = '{default: 0};
         trained = 1'b0;
         arch_write_enables = '0;
         arch_write_addrs = '0;
@@ -129,10 +127,7 @@ module stage_retire #(
                     // Single consolidated mispredict signal
                     mispredict      = 1'b1;
                     rob_mispred_idx = head_idxs[w];  // ROB index of the mispredicted branch
-
-                    // Set recovery request directly here (we have all the info we need)
-                    recover_req_o.pulse        = 1'b1;
-                    recover_req_o.ghr_snapshot = entry.ghr_snapshot;
+                    train_req_o.mispredict;
 
                     // stop committing younger entries
                     break;

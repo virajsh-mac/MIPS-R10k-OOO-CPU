@@ -1,4 +1,4 @@
-`include "sys_defs.svh"
+ `include "sys_defs.svh"
 `include "ISA.svh"
 
 module stage_fetch (
@@ -12,6 +12,7 @@ module stage_fetch (
     // branch predictor
     output BP_PREDICT_REQUEST         bp_request,
     input  BP_PREDICT_RESPONSE        bp_response,
+    output logic                      bp_response_used,
 
     // retire when mispredict
     input I_ADDR_PACKET               correct_branch_target,
@@ -23,5 +24,20 @@ module stage_fetch (
 
     ADDR PC, PC_next;
     INST [3:0] inst;
+
+    // Logic for fetching this PC to IB and send out
+
+
+    // Logic for next PC calculation
+
+
+    // PC update
+    always_ff @(posedge clock) begin
+        if (reset) begin
+            PC <= '0;
+        end else begin
+            PC <= PC_next;
+        end
+    end 
 
 endmodule
