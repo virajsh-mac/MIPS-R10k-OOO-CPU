@@ -23,19 +23,12 @@ module cpu (
     output MEM_COMMAND proc2mem_command,  // Command sent to memory
     output ADDR        proc2mem_addr,     // Address sent to memory
     output MEM_BLOCK   proc2mem_data,     // Data sent to memory
+`ifndef CACHE_MODE
     output MEM_SIZE    proc2mem_size,     // Data size sent to memory
+`endif
 
     // Retire interface
     output COMMIT_PACKET [`N-1:0] committed_insts,
-
-    // Fake-fetch interface
-    input  DATA                     ff_instr       [`N-1:0],  // Instruction bundle from testbench
-    input  ADDR                     ff_pc,                    // Current PC from testbench
-    input  logic [$clog2(`N+1)-1:0] ff_nvalid,                // Number of valid instructions from testbench
-    output logic [$clog2(`N+1)-1:0] ff_consumed,              // Number consumed by CPU
-    output logic                    branch_taken_out,         // Branch taken signal to testbench
-    output ADDR                     branch_target_out,        // Branch target to testbench
-
 
     // Additional debug outputs for OOO processor debugging
     output logic [`N-1:0] rob_head_valids_dbg,
@@ -112,8 +105,47 @@ module cpu (
     output ALU_FUNC [`NUM_FU_ALU-1:0] alu_func_dbg,
     output logic [`NUM_FU_MULT-1:0] mult_executing_dbg,
     output logic [`NUM_FU_BRANCH-1:0] branch_executing_dbg,
-    output logic [`NUM_FU_MEM-1:0] mem_executing_dbg
+    output logic [`NUM_FU_MEM-1:0] mem_executing_dbg,
 
+    // ICache debug outputs
+    output I_ADDR_PACKET [1:0]  read_addrs_dbg,
+    output CACHE_DATA [1:0]     cache_outs_dbg,
+    output logic [1:0]          icache_hits_dbg,
+    output logic [1:0]          icache_misses_dbg,
+    output logic                icache_full_dbg,
+    output I_ADDR_PACKET        prefetch_addr_dbg,
+    output I_ADDR_PACKET        oldest_miss_addr_dbg,
+    output logic                mshr_addr_found_dbg,
+    output logic [$clog2(`NUM_MEM_TAGS + `N)-1:0] mshr_head_dbg,
+    output logic [$clog2(`NUM_MEM_TAGS + `N)-1:0] mshr_tail_dbg,
+    output MSHR_PACKET [`NUM_MEM_TAGS + `N-1:0]   mshr_entries_dbg,
+    output logic [$clog2(`NUM_MEM_TAGS + `N)-1:0] mshr_next_head_dbg,
+    output logic [$clog2(`NUM_MEM_TAGS + `N)-1:0] mshr_next_tail_dbg,
+    output logic                             mshr_pop_condition_dbg,
+    output logic                             mshr_push_condition_dbg,
+    output logic                             mshr_pop_cond_has_data_dbg,
+    output logic                             mshr_pop_cond_head_valid_dbg,
+    output logic                             mshr_pop_cond_tag_match_dbg,
+    output logic                mem_write_icache_dbg,
+    output I_ADDR_PACKET        mem_write_addr_dbg,
+    output MEM_BLOCK            mem_data_dbg,
+    output MEM_TAG              mem_data_tag_dbg,
+    output I_ADDR_PACKET        icache_write_addr_dbg,
+    output MEM_BLOCK            icache_write_data_dbg,
+    output I_CACHE_LINE         icache_line_write_dbg,
+    output logic [(`ICACHE_LINES + `PREFETCH_STREAM_BUFFER_SIZE)-1:0] icache_write_enable_mask_dbg,
+    // Prefetcher debug outputs
+    output I_ADDR_PACKET        prefetcher_last_icache_miss_mem_req_dbg,
+    output I_ADDR_PACKET        prefetcher_next_last_icache_miss_mem_req_dbg,
+    output I_ADDR               prefetcher_addr_incrementor_dbg,
+    output I_ADDR               prefetcher_next_addr_incrementor_dbg,
+    // Logic block debug outputs
+    output I_ADDR_PACKET        mem_req_addr_dbg,
+    output logic                snooping_found_icache_dbg,
+    output MSHR_PACKET          new_mshr_entry_dbg,
+
+    // Fetch stage debug outputs
+    output FETCH_PACKET [3:0]   fetch_packet_dbg
 );
 
     //////////////////////////////////////////////////
@@ -121,16 +153,15 @@ module cpu (
     //                Pipeline Wires                //
     //                                              //
     //////////////////////////////////////////////////
-    // NOTE: organize this section by the module that outputs referenced wires
 
-
-    // Note: No packet structure needed - decoder outputs go directly to dispatch
+    // Outputs from ID stage (decode)
+    FETCH_DISP_PACKET                                                                fetch_disp_packet;
 
     // From arch map table
     MAP_ENTRY [`ARCH_REG_SZ-1:0]                                                     arch_table_snapshot;
 
     // Outputs from Dispatch stage
-    logic                   [                 $clog2(`N)-1:0]                        dispatch_count;
+    logic                   [               $clog2(`N+1)-1:0]                        dispatch_count;
     logic                   [                         `N-1:0]                        fetch_valid_mask;
     RS_ALLOC_BANKS                                                                   rs_alloc_from_dispatch;
 
@@ -169,7 +200,6 @@ module cpu (
     RS_CLEAR_SIGNALS                        rs_clear_signals;
 
     // Individual RS entries outputs (needed for rs_banks)
-    // rs_alu_entries_dbg declared as output port above
     RS_ENTRY            [  `RS_MULT_SZ-1:0] rs_mult_entries;
     RS_ENTRY            [`RS_BRANCH_SZ-1:0] rs_branch_entries;
     RS_ENTRY            [   `RS_MEM_SZ-1:0] rs_mem_entries;
@@ -189,17 +219,11 @@ module cpu (
     PRF_READ_DATA prf_read_data_src1, prf_read_data_src2;
     logic [`NUM_FU_MULT-1:0] mult_request;
 
-    // PRF read data now comes from the regfile instantiation below
-    // For now, assume src2 data comes from CDB forwarding or immediates
-    //assign prf_read_data_src2 = '0;  // TODO: Implement proper src2 reading if needed
-
     // Retire stage signals
     ROB_ENTRY [`N-1:0] rob_head_entries;
     logic     [`N-1:0] rob_head_valids;
     ROB_IDX   [`N-1:0] rob_head_idxs;
-    logic              rob_mispredict;
     ROB_IDX            rob_mispred_idx;
-    logic              bp_recover_en;
     logic     [`N-1:0] arch_write_enables;
     REG_IDX   [`N-1:0] arch_write_addrs;
     PHYS_TAG  [`N-1:0] arch_write_phys_regs;
@@ -209,16 +233,6 @@ module cpu (
 
     // Global mispredict signal
     logic              mispredict;
-    assign mispredict = rob_mispredict;
-
-    // Memory interface placeholders (TODO: implement proper data memory stages)
-    logic                        Dmem_command_filtered = MEM_NONE;
-    MEM_SIZE                     Dmem_size = DOUBLE;
-    ADDR                         Dmem_addr = '0;
-    MEM_BLOCK                    Dmem_store_data = '0;
-
-    // Arch map table signals
-    // arch_table_snapshot_dbg declared as output port above
 
     // CDB requests: single-cycle FUs request during issue, multi-cycle during execute
     assign cdb_requests.alu    = issue_cdb_requests.alu;  // From issue stage
@@ -226,78 +240,99 @@ module cpu (
     assign cdb_requests.branch = issue_cdb_requests.branch;  // From issue stage
     assign cdb_requests.mem    = issue_cdb_requests.mem;  // From issue stage
 
-    // cdb_fu_outputs connected from execute stage via fu_outputs
-
     // Connect dispatch outputs to freelist inputs
     assign freelist_alloc_req  = free_alloc_valid;
 
     // Get free slots from freelist module
     assign freelist_free_slots = freelist_0.free_slots;
 
-    // TODO Debug for PRF remove when synthesizing/ not needed anymore
-    // regfile_entries_dbg declared as output port above
-
     // debug for architecture map table
     MAP_ENTRY [`ARCH_REG_SZ-1:0] arch_table_snapshot_dbg_next;
 
-
     //////////////////////////////////////////////////
     //                                              //
-    //                Memory                        //
+    //                icache                        //
     //                                              //
     //////////////////////////////////////////////////
-    // MEM_REQUEST_PACKET DISABLED - icache disabled
-    // MEM_REQUEST_PACKET instr_mem_request, data_mem_request;
 
-    // icache_subsystem DISABLED
-    // icache_subsystem icache_subsystem_inst (
-    //     .clock(clock),
-    //     .reset(reset),
 
-    //     // Memory
-    //     .Imem2proc_transaction_tag(mem2proc_transaction_tag),
-    //     .Imem2proc_data(mem2proc_data),
-    //     .Imem2proc_data_tag(mem2proc_data_tag),
-    //     .mem_request_success(),
-    //     .mem_req(instr_mem_request),
+    // I-cache <-> fetch
+    I_ADDR_PACKET          [1:0] i_cache_read_addrs ;
+    I_ADDR_PACKET           mem_req_addr;
+    CACHE_DATA             [1:0] icache_data ;
 
-    //     // Fetch
-    //     .read_addr(),
-    //     .cache_out()
-    // );
+    icache_subsystem icache_subsystem_inst (
+        .clock            (clock),
+        .reset            (reset),
+        // Fetch
+        .read_addrs       (i_cache_read_addrs),
+        .cache_outs       (icache_data),
+        // Mem.sv IOs
+        .current_req_tag  (mem2proc_transaction_tag),
+        .mem_data         (mem2proc_data),
+        .mem_data_tag     (mem2proc_data_tag),
 
-    // dcache_subsystem DISABLED - dcache disabled
-    // dcache_subsystem dcache_subsystem_inst (
-    // );
+        // Arbitor IOs
+        .mem_req_addr     (mem_req_addr),
+        .mem_req_accepted (mem_req_accepted),
 
-    // Arbiter
+        // Debug outputs
+        .read_addrs_dbg       (read_addrs_dbg),
+        .cache_outs_dbg       (cache_outs_dbg),
+        .icache_hits_dbg      (icache_hits_dbg),
+        .icache_misses_dbg    (icache_misses_dbg),
+        .icache_full_dbg      (icache_full_dbg),
+        .prefetch_addr_dbg    (prefetch_addr_dbg),
+        .oldest_miss_addr_dbg (oldest_miss_addr_dbg),
+        .mshr_addr_found_dbg  (mshr_addr_found_dbg),
+        .mshr_head_dbg        (mshr_head_dbg),
+        .mshr_tail_dbg        (mshr_tail_dbg),
+        .mshr_entries_dbg     (mshr_entries_dbg),
+        .mshr_next_head_dbg   (mshr_next_head_dbg),
+        .mshr_next_tail_dbg   (mshr_next_tail_dbg),
+        .mshr_pop_condition_dbg(mshr_pop_condition_dbg),
+        .mshr_push_condition_dbg(mshr_push_condition_dbg),
+        .mshr_pop_cond_has_data_dbg(mshr_pop_cond_has_data_dbg),
+        .mshr_pop_cond_head_valid_dbg(mshr_pop_cond_head_valid_dbg),
+        .mshr_pop_cond_tag_match_dbg(mshr_pop_cond_tag_match_dbg),
+        .mem_write_icache_dbg (mem_write_icache_dbg),
+        .mem_write_addr_dbg   (mem_write_addr_dbg),
+        .mem_data_dbg         (mem_data_dbg),
+        .mem_data_tag_dbg     (mem_data_tag_dbg),
+        .icache_write_addr_dbg(icache_write_addr_dbg),
+        .icache_write_data_dbg(icache_write_data_dbg),
+        .icache_line_write_dbg(icache_line_write_dbg),
+        .icache_write_enable_mask_dbg(icache_write_enable_mask_dbg),
+        // Prefetcher debug outputs
+        .prefetcher_last_icache_miss_mem_req_dbg(prefetcher_last_icache_miss_mem_req_dbg),
+        .prefetcher_next_last_icache_miss_mem_req_dbg(prefetcher_next_last_icache_miss_mem_req_dbg),
+        .prefetcher_addr_incrementor_dbg(prefetcher_addr_incrementor_dbg),
+        .prefetcher_next_addr_incrementor_dbg(prefetcher_next_addr_incrementor_dbg),
+        // Logic block debug outputs
+        .mem_req_addr_dbg(mem_req_addr_dbg),
+        .snooping_found_icache_dbg(snooping_found_icache_dbg),
+        .new_mshr_entry_dbg(new_mshr_entry_dbg)
+    );
 
+    // icache access memory only
+    // needs to be decided by arbitrator later when dcache is done
     always_comb begin
         // Using fake fetch - only handle data memory operations
-        proc2mem_command = Dmem_command_filtered;
-        proc2mem_size    = Dmem_size;
-        proc2mem_addr    = Dmem_addr;
-        proc2mem_data    = Dmem_store_data;
+        if (mem_req_addr.valid) begin
+            proc2mem_command = MEM_LOAD;
+            proc2mem_addr    = mem_req_addr.addr;
+        end else begin
+            proc2mem_command = MEM_NONE;
+            proc2mem_addr    = '0;
+        end
+`ifndef CACHE_MODE
+        proc2mem_size    = '0; // data size sent to memory
+`endif
+        proc2mem_data    = '0; // data sent to memory, no memory write for instruciotn
     end
 
-    //////////////////////////////////////////////////
-    //                                              //
-    //                  Valid Bit                   //
-    //                                              //
-    //////////////////////////////////////////////////
-
-    // This state controls fetch stalling for OOO processor
-    // Stall fetch when dispatch cannot accept more instructions
-
-    logic if_valid, start_valid_on_reset;
-
-    always_ff @(posedge clock) begin
-        // Start valid on reset
-        start_valid_on_reset <= reset;
-    end
-
-    // For OOO, stall fetch when dispatch count is zero (dispatch full)
-    assign if_valid = start_valid_on_reset || (dispatch_count != 0);
+    // In this simplified model, memory always accepts valid requests
+    assign mem_req_accepted = (proc2mem_command == MEM_LOAD) && (mem2proc_transaction_tag != 0);
 
     //////////////////////////////////////////////////
     //                                              //
@@ -305,15 +340,76 @@ module cpu (
     //                                              //
     //////////////////////////////////////////////////
 
-    // Fetch stage removed - using fake fetch directly
+    // fetch stage signals
+    // Note: I'm going to add all the single here and then move it to the pipeline wire stage
+    BP_PREDICT_REQUEST    bp_predict_request;
+    BP_PREDICT_RESPONSE   bp_predict_response;
+
+    FETCH_PACKET    [3:0]     fetch_packet;
+    ADDR correct_branch_target;
+    logic [`IB_IDX_BITS:0] ib_free_slots;
+    logic [$clog2(`IB_PUSH_WIDTH+1)-1:0] num_pushes; // Number of valid entries to push from fetch
+
+    stage_fetch stage_fetch_0 (
+        .clock        (clock),
+        .reset        (reset),
+
+        .read_addrs   (i_cache_read_addrs),
+        .cache_data   (icache_data),
+
+        .fetch_packet (fetch_packet),
+
+        .bp_request   (bp_predict_request),
+        .bp_response  (bp_predict_response),
+
+        .correct_branch_target ({mispredict, correct_branch_target}),
+        .ib_free_slots          (ib_free_slots),
+        .num_pushes             (num_pushes)
+    );
+
+    // Branch Predictor singals
+   BP_TRAIN_REQUEST train_req;
+   BP_RECOVER_REQUEST recover_req;
+
+    bp bp_0 (
+        .clock(clock),
+        .reset(reset),
+
+        // predict request IF -> BP
+        .predict_req_i(bp_predict_request),
+
+        // predict response BP -> IF
+        .predict_resp_o(bp_predict_response),
+
+        // training request (from ROB retire stage)
+        .train_req_i(train_req)
+    );
 
     //////////////////////////////////////////////////
     //                                              //
-    //       Fetch/Dispatch Pipeline Register       //
+    //           Instruction Buffer (IB)             //
     //                                              //
     //////////////////////////////////////////////////
 
-    // Pipeline register removed - using fake fetch directly
+    // Instruction Buffer signals
+    FETCH_PACKET [2:0] ib_dispatch_window;  // Window of instructions for decode/dispatch
+    logic [1:0]        ib_window_valid_count; // Number of valid instructions in window
+
+    instr_buffer instr_buffer_0 (
+        .clock(clock),
+        .reset(reset),
+        .flush(mispredict),  // Flush on branch mispredict
+
+        // Fetch interface (temporary fake fetch)
+        .new_ib_entries(fetch_packet),
+        .num_pushes(num_pushes),
+        .available_slots(ib_free_slots),
+
+        // Dispatch interface
+        .num_pops(dispatch_count),  // Dispatch count (0-3)
+        .dispatch_window(ib_dispatch_window),
+        .window_valid_count(ib_window_valid_count)
+    );
 
     //////////////////////////////////////////////////
     //                                              //
@@ -341,8 +437,8 @@ module cpu (
     generate
         for (genvar i = 0; i < `N; i++) begin
             decoder decoder_i (
-                .inst      (ff_instr[i]),
-                .valid     (i < ff_nvalid),
+                .inst      (ib_dispatch_window[i].inst),
+                .valid     (i < ib_window_valid_count),
                 .opa_select(decode_opa_select[i]),
                 .opb_select(decode_opb_select[i]),
                 .has_dest  (decode_has_dest[i]),
@@ -366,17 +462,6 @@ module cpu (
     //                                              //
     //////////////////////////////////////////////////
 
-
-    // Convert ff_nvalid count to bit mask for dispatch stage
-    always_comb begin
-        fetch_valid_mask = '0;
-        for (int i = 0; i < `N; i++) begin
-            if (unsigned'(i) < ff_nvalid) fetch_valid_mask[i] = 1'b1;
-        end
-    end
-
-    // Connect decoder outputs directly to dispatch stage (no packet builder needed)
-
     // Dispatch stage
     stage_dispatch stage_dispatch_0 (
         .clock(clock),
@@ -392,9 +477,8 @@ module cpu (
         .decode_opb_select(decode_opb_select),
         .decode_immediate (decode_immediate),
         .decode_halt      (decode_halt),
-        .ff_instr         (ff_instr),
-        .ff_pc            (ff_pc),
-        .fetch_valid      (fetch_valid_mask),   // Convert count to bit mask
+        .dispatch_window  (ib_dispatch_window),  // Full instruction packets from IB
+        .window_valid_count(ib_window_valid_count), // Number of valid instructions
 
         // From ROB/Freelist
         .free_slots_rob    (rob_free_slots),
@@ -434,7 +518,7 @@ module cpu (
 
     rob rob_0 (
         .clock(clock),
-        .reset(reset | rob_mispredict), // Reset on mispredict
+        .reset(reset | mispredict), // Reset on mispredict
 
         // Dispatch
         .rob_entry_packet(rob_entry_packet),
@@ -730,7 +814,7 @@ module cpu (
         // Mispredict recovery
         .table_snapshot(),
         .table_restore(arch_table_snapshot_dbg),
-        .table_restore_en(bp_recover_en)
+        .table_restore_en(mispredict)
     );
 
     //////////////////////////////////////////////////
@@ -813,7 +897,7 @@ module cpu (
 
     cdb cdb_0 (
         .clock(clock),
-        .reset(reset || rob_mispredict),
+        .reset(reset || mispredict),
 
         // Arbiter inputs (structured)
         .requests(cdb_requests),
@@ -865,6 +949,16 @@ module cpu (
     //                                              //
     //////////////////////////////////////////////////
 
+    logic v;
+
+    logic bp_enabled;
+    logic bp_enabled_dbg;
+    logic branch_retired_dbg;
+    logic branch_taken_dbg;
+    logic is_branch_target_unknown_dbg;
+    logic train_triggered_dbg;
+    logic retire_valid_dbg;
+
     stage_retire stage_retire_0 (
         .clock(clock),
         .reset(reset),
@@ -874,34 +968,35 @@ module cpu (
         .head_valids (rob_head_valids),
         .head_idxs   (rob_head_idxs),
 
-        // From arch map table for freelist restore
-        .arch_table_snapshot(arch_table_snapshot),
-
         // To ROB: flush younger if head is a mispredicted branch
-        .rob_mispredict (rob_mispredict),
+        .mispredict (mispredict),
         .rob_mispred_idx(rob_mispred_idx),
-
-        // Global recovery pulse (tables react internally)
-        .bp_recover_en(bp_recover_en),
 
         // To freelist: bitmap of PRs to free (all committed lanes' Told this cycle)
         .free_mask(freelist_free_mask),
-
-        // To freelist: restore mask on mispredict
-        .freelist_restore_mask(freelist_restore_mask),
 
         // To archMapTable: N write ports (commit multiple per cycle)
         .arch_write_enables  (arch_write_enables),
         .arch_write_addrs    (arch_write_addrs),
         .arch_write_phys_regs(arch_write_phys_regs),
+
         .retire_commits_dbg(retire_commits_dbg),
 
-        // To fake fetch
-        .branch_taken_out(branch_taken_out),
-        .branch_target_out(branch_target_out),
+
+        // To fetch
+        .branch_target_out(correct_branch_target),
+
+        // Branch predictor
+        .train_req_o            (train_req),
 
         // From PRF for committed data
-        .regfile_entries(regfile_entries_dbg)
+        .regfile_entries(regfile_entries_dbg),
+
+        // From arch map table for freelist restore on mispredict
+        .arch_table_snapshot(arch_table_snapshot),
+
+        // To freelist: restore mask on mispredict
+        .freelist_restore_mask(freelist_restore_mask)
     );
 
     //////////////////////////////////////////////////
@@ -916,7 +1011,7 @@ module cpu (
 
 
     // Fake-fetch outputs
-    assign ff_consumed            = dispatch_count;  // Number of instructions consumed by dispatch
+  //  assign ff_consumed            = dispatch_count;  // Number of instructions consumed by dispatch
 
 
     // Additional debug outputs
@@ -949,10 +1044,10 @@ module cpu (
     // CDB debug outputs
     assign cdb_output_dbg         = cdb_output;
 
-    // Dispatch packet debug output - removed (no packet structure)
-    // assign fetch_disp_packet_dbg  = fetch_disp_packet;
-
     // Issue clear signals debug output
     assign rs_clear_signals_dbg   = rs_clear_signals;
+
+    // Fetch stage debug outputs
+    assign fetch_packet_dbg      = fetch_packet;
 
 endmodule  // cpu

@@ -284,7 +284,14 @@ CPU_SOURCES = verilog/cpu.sv \
 			  verilog/allocator.sv \
 			  verilog/psel_gen.sv \
 			  verilog/alu.sv \
-			  verilog/branch.sv
+			  verilog/branch.sv \
+			  verilog/icache_subsystem.sv \
+			  verilog/stage_fetch.sv \
+			  verilog/instruction_buffer.sv \
+			  verilog/bp.sv \
+			  verilog/memDP.sv \
+			  verilog/LFSR.sv \
+
 
 build/cpu.simv: $(CPU_SOURCES) $(CPU_HEADERS) $(CPU_TESTBENCH)
 synth/cpu.vg: $(CPU_SOURCES) $(CPU_HEADERS)

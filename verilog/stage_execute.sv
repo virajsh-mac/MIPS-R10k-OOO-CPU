@@ -85,8 +85,10 @@ module stage_execute (
     // BRANCH signals
     DATA [`NUM_FU_BRANCH-1:0] branch_rs1, branch_rs2;
     BRANCH_FUNC [`NUM_FU_BRANCH-1:0] branch_funcs;  // Array of 3-bit func values
+    ADDR [`NUM_FU_BRANCH-1:0] branch_pcs;           // PC values for branch FUs
+    DATA [`NUM_FU_BRANCH-1:0] branch_offsets;       // Branch offsets for branch FUs
     logic [`NUM_FU_BRANCH-1:0] branch_take;
-    ADDR [`NUM_FU_BRANCH-1:0] branch_target;
+    ADDR [`NUM_FU_BRANCH-1:0] branch_targets;       // Target addresses from branch FUs
 
     // MEM signals (placeholder for future implementation)
     // DATA [`NUM_FU_MEM-1:0] mem_addr, mem_data;
@@ -347,9 +349,11 @@ module stage_execute (
 
     always_comb begin
         for (int i = 0; i < `NUM_FU_BRANCH; i++) begin
-            branch_rs1[i]   = resolved_src1.branch[i];
-            branch_rs2[i]   = resolved_src2.branch[i];
-            branch_funcs[i] = issue_entries.branch[i].op_type.func;
+            branch_rs1[i]     = resolved_src1.branch[i];
+            branch_rs2[i]     = resolved_src2.branch[i];
+            branch_funcs[i]   = issue_entries.branch[i].op_type.func;
+            branch_pcs[i]     = issue_entries.branch[i].PC;
+            branch_offsets[i] = issue_entries.branch[i].src2_immediate;
         end
     end
 
@@ -358,15 +362,13 @@ module stage_execute (
         .rs1 (branch_rs1),
         .rs2 (branch_rs2),
         .func(branch_funcs),  // Connect func array directly
-        .take(branch_take)
+        .pc  (branch_pcs),    // Current PC for each branch
+        .offset(branch_offsets), // Branch offset for each branch
+        .take(branch_take),
+        .target(branch_targets) // Target address computed by branch FU
     );
 
-    // Compute branch targets: PC + offset (offset is pre-stored in src2_immediate)
-    always_comb begin
-        for (int i = 0; i < `NUM_FU_BRANCH; i++) begin
-            branch_target[i] = issue_entries.branch[i].PC + issue_entries.branch[i].src2_immediate;
-        end
-    end
+    // Branch targets are now computed inside the branch functional units
 
     // BRANCH outputs to CDB
     // Only JAL and JALR produce data results; conditional branches don't
@@ -508,7 +510,7 @@ module stage_execute (
                     ex_comp.rob_idx[i] = issue_entries.branch[k].rob_idx;
                     ex_comp.branch_valid[i] = 1;
                     ex_comp.branch_taken[i] = branch_take[k];
-                    ex_comp.branch_target[i] = branch_target[k];
+                    ex_comp.branch_target[i] = branch_targets[k];
                     ex_comp.mispredict[i] = (branch_take[k] != issue_entries.branch[k].pred_taken);
                     ex_comp.dest_pr[i] = issue_entries.branch[k].dest_tag;
                     ex_comp.result[i] = issue_entries.branch[k].PC + 4;
@@ -531,7 +533,7 @@ module stage_execute (
     assign mult_start_dbg = mult_start;
     assign mult_done_dbg = mult_done;
     assign branch_take_dbg = branch_take;
-    assign branch_target_dbg = branch_target;
+    assign branch_target_dbg = branch_targets;
     assign alu_executing_dbg = {fu_outputs.alu[2].valid, fu_outputs.alu[1].valid, fu_outputs.alu[0].valid};
     assign mult_executing_dbg = {fu_outputs.mult[0].valid};
     assign branch_executing_dbg = {fu_outputs.branch[0].valid};

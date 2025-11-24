@@ -3,7 +3,7 @@
 // Dispatch Stage: Register renaming and resource allocation
 module stage_dispatch (
     input logic clock,
-    reset,
+    input logic reset,
 
     // From decode: individual signals
     input REG_IDX [`N-1:0]        decode_rs1_idx,
@@ -15,9 +15,8 @@ module stage_dispatch (
     input ALU_OPB_SELECT [`N-1:0] decode_opb_select,
     input DATA [`N-1:0]           decode_immediate,
     input logic [`N-1:0]          decode_halt,
-    input DATA                    ff_instr       [`N-1:0],
-    input ADDR                    ff_pc,
-    input logic [`N-1:0]          fetch_valid,
+    input FETCH_PACKET [`N-1:0]   dispatch_window,
+    input logic [$clog2(`N+1)-1:0] window_valid_count,
 
     // Structural hazard inputs
     input logic   [          $clog2(`ROB_SZ+1)-1:0] free_slots_rob,
@@ -29,8 +28,8 @@ module stage_dispatch (
     input logic   [      $clog2(`RS_MEM_SZ+1)-1:0] rs_mem_free_slots,
 
 
-    // To fetch: dispatch count (0 = stall)
-    output logic [$clog2(`N)-1:0] dispatch_count,
+    // To Instruction Buffer: dispatch count (0 = stall)
+    output logic [$clog2(`N+1)-1:0] dispatch_count,
 
     // To ROB: allocation entries
     output ROB_ENTRY [`N-1:0] rob_entry_packet,
@@ -86,21 +85,14 @@ module stage_dispatch (
         create_rs_entry.src2_immediate = decode_immediate[idx];
         create_rs_entry.dest_tag       = allocated_phys[idx];
         create_rs_entry.rob_idx        = rob_alloc_idxs[idx];
-        create_rs_entry.PC             = ff_pc + 32'(4 * idx);
+        create_rs_entry.PC             = dispatch_window[idx].pc;
         create_rs_entry.pred_taken     = 1'b0;  // No branch prediction
         create_rs_entry.pred_target    = '0;    // No prediction target
     endfunction
 
     always_comb begin
-        // Count valid instructions and check for contiguous validity (ordered dispatch)
-        num_valid_from_fetch = 0;
-        for (int i = 0; i < `N; i++) begin
-            if (fetch_valid[i]) begin
-                num_valid_from_fetch = i + 1;  // Must be contiguous from 0
-            end else if (num_valid_from_fetch > 0) begin
-                break;  // Gap found, stop counting
-            end
-        end
+        // Get number of valid instructions available for dispatch
+        num_valid_from_fetch = window_valid_count;
 
         // Calculate dispatch count by checking each instruction individually
         // Stop at the first instruction that hits a structural hazard
@@ -202,7 +194,7 @@ module stage_dispatch (
 
             // Build rename map incrementally as we process each instruction
             for (int i = 0; i < dispatch_count; i++) begin
-                if (fetch_valid[i]) begin
+                if (i < window_valid_count) begin
                     // First apply forwarding from previous renames to this instruction
                     if (has_rename[decode_rs1_idx[i]]) begin
                         local_reg1_tag[i] = dispatch_renames[decode_rs1_idx[i]];
@@ -224,7 +216,7 @@ module stage_dispatch (
 
         // Setup register remapping writes
         for (int i = 0; i < `N; i++) begin
-            if (i < dispatch_count && fetch_valid[i] && decode_uses_rd[i])  begin
+            if (i < dispatch_count && i < window_valid_count && decode_uses_rd[i]) begin
                 maptable_write_reqs[i].valid    = 1'b1;
                 maptable_write_reqs[i].addr     = decode_rd_idx[i];
                 maptable_write_reqs[i].phys_reg = allocated_phys[i];
@@ -240,20 +232,20 @@ module stage_dispatch (
         mem_count = 0;
 
         for (int i = 0; i < dispatch_count; i++) begin
-            if (fetch_valid[i]) begin
+            if (i < window_valid_count) begin
                 // ROB entry
                 rob_entry_packet[i] = '{
                     valid: 1'b1,
-                    PC: ff_pc + 32'(4 * i),
-                    inst: ff_instr[i],
+                    PC: dispatch_window[i].pc,
                     arch_rd: decode_rd_idx[i],
                     phys_rd: allocated_phys[i],
                     prev_phys_rd: local_Told[i],
                     complete: 1'b0,
                     exception: NO_ERROR,
                     branch: (decode_op_type[i].category == CAT_BRANCH),
-                    pred_target: '0,    // No prediction target
-                    pred_taken: 1'b0,   // No branch prediction
+                    pred_target: dispatch_window[i].bp_pred_target,  // No prediction target
+                    pred_taken: dispatch_window[i].bp_pred_taken,  // No branch prediction
+                    ghr_snapshot: dispatch_window[i].bp_ghr_snapshot,
                     halt: decode_halt[i],
                     default: '0
                 };

@@ -41,8 +41,17 @@
 `define RS_IDX_BITS $clog2(`RS_SZ)              // 4 bits for RS index
 `define NUM_CATS 4                              // Number of OP_CATEGORY values (0-4)
 
+// Instruction buffer
+`define IB_SZ  64  // Instruction buffer size
+`define IB_IDX_BITS  $clog2(`IB_SZ)
+`define IB_PUSH_WIDTH  4
+
 // branch prediction
-`define BRANCH_PRED_SZ 512  // Branch predictor size
+`define BP_GHR_WIDTH 7                              // ghr width
+`define BP_PHT_BITS `BP_GHR_WIDTH + 1               // PHT entries = GH + 1
+`define BP_BTB_BITS 7                        // BTB entries = 2^BTB_BITS
+`define BP_PC_WORD_ALIGN_BITS 2              // PC[1:0] are word-aligned (ignore)
+`define BP_BTB_TAG_BITS (32 - `BP_PC_WORD_ALIGN_BITS - `BP_BTB_BITS)  // Tag = upper PC bits above index + word-align
 
 // functional units
 `define NUM_FU_ALU 3      // Enough for superscalar width
@@ -156,7 +165,7 @@ typedef union packed {
     logic [63:0]      dbbl_level;
 } MEM_BLOCK;
 
-typedef logic [`ITAG_BITS-1:0]      I_TAG;  
+typedef logic [`ITAG_BITS-1:0]      I_TAG;
 
 typedef struct packed {
     logic valid;
@@ -631,10 +640,76 @@ typedef struct packed {
     logic          branch_taken;   // Resolved taken/not taken
     ADDR           pred_target;    // Predicted branch target
     logic          pred_taken;     // Predicted taken/not taken
+    logic [`BP_GHR_WIDTH-1:0] ghr_snapshot;   // new: GHR snapshot
     logic          mispredict;     // Branch misprediction flag
     logic          halt;           // Is this a halt?
     logic          illegal;        // Is this illegal?
 } ROB_ENTRY;
+
+// Branch predictor counter states (2-bit saturating counter)
+typedef enum logic [1:0] {
+    STRONGLY_NOT_TAKEN = 2'b00,
+    WEAKLY_NOT_TAKEN   = 2'b01,
+    WEAKLY_TAKEN       = 2'b10,
+    STRONGLY_TAKEN     = 2'b11
+} BP_COUNTER_STATE;
+
+// Branch predictor typedefs
+typedef BP_COUNTER_STATE saturating_counter2_t;
+
+// Branch predictor I/O structures
+typedef struct packed {
+    logic valid;  // Valid prediction request
+    ADDR  pc;     // PC to predict
+} BP_PREDICT_REQUEST;
+
+typedef struct packed {
+    logic              valid;
+    ADDR               target;        // Predicted target
+    logic [`BP_GHR_WIDTH-1:0] ghr_snapshot;  // GHR snapshot for mispredict recovery
+} BP_PREDICT_RESPONSE;
+
+typedef struct packed {
+    logic              valid;          // true when it was a branch
+    logic              mispredict; 
+    ADDR               pc;             // PC of branch
+    logic              actual_taken;   // Actual outcome
+    ADDR               actual_target;  // Actual target (if taken)
+    logic [`BP_GHR_WIDTH-1:0] ghr_snapshot;
+} BP_TRAIN_REQUEST;
+
+typedef struct packed {
+    logic              valid;         // Mispredict recovery pulse
+    logic [`BP_GHR_WIDTH-1:0] ghr_snapshot;  // GHR snapshot to restore
+} BP_RECOVER_REQUEST;
+
+// BTB entry structure
+typedef struct packed {
+    logic                        valid;
+    logic [`BP_BTB_TAG_BITS-1:0] tag;
+    logic [31:0]                 target;
+} BP_BTB_ENTRY;
+
+// Branch predictor index structure
+typedef struct packed {
+    logic [`BP_PHT_BITS-1:0]     pht_idx;
+    logic [`BP_BTB_BITS-1:0]     btb_idx;
+    logic [`BP_BTB_TAG_BITS-1:0] btb_tag;
+} BP_INDICES;
+
+// From fetch stage to instruction buffer
+typedef struct packed {
+    ADDR         pc;    // PC of this instruction
+    logic [31:0] inst;  // raw 32-bit instruction
+    logic        valid;
+
+    // Branch prediction metadata (for branch instructions)
+    logic              is_branch;        // 1 if this inst is a branch
+    logic              bp_pred_taken;    // predictor's taken/not-taken decision
+    ADDR               bp_pred_target;   // predicted target (if taken)
+    logic [`BP_GHR_WIDTH-1:0] bp_ghr_snapshot;  // GHR snapshot used for this prediction
+} FETCH_PACKET;
+
 
 // Individual entry for FU metadata (AoS - Array of Structs for internal use)
 typedef struct packed {
@@ -672,6 +747,7 @@ typedef struct packed {
     INST           inst;           // Full instruction
     logic          pred_taken;     // Branch prediction taken
     ADDR           pred_target;    // Branch prediction target
+    logic [`BP_GHR_WIDTH-1:0][`N-1:0] ghr_snapshot; // new: GHR snapshot
     logic          halt;           // Halt instruction flag
 } FETCH_DISP_ENTRY;
 
