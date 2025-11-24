@@ -336,8 +336,7 @@ module testbench;
         .new_mshr_entry_dbg(new_mshr_entry_dbg),
 
         // Fetch stage debug outputs
-        .fetch_packet_dbg(fetch_packet_out),
-        .ib_bundle_valid_dbg(ib_bundle_valid)
+        .fetch_packet_dbg(fetch_packet_out)
     );
 
     // Instruction Memory (for fake-fetch only - data operations disconnected)
@@ -376,8 +375,8 @@ module testbench;
     endfunction
 
     initial begin
-        $dumpfile("cpu_test.vcd");
-        $dumpvars(0, testbench);
+        // $dumpfile("cpu_test.vcd");
+        // $dumpvars(0, testbench);
 
         $display("\n---- Starting CPU Testbench (Fake-Fetch) ----\n");
 

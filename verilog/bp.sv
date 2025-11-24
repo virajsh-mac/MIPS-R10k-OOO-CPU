@@ -18,7 +18,7 @@ module bp (
     output BP_PREDICT_RESPONSE predict_resp_o,
 
     // Retire stage IOs
-    input BP_TRAIN_REQUEST train_req_i,
+    input BP_TRAIN_REQUEST train_req_i
 );
 
     // Local parameters derived from macros
@@ -64,7 +64,6 @@ module bp (
         predict_resp_o.valid = predict_req_i.valid;
         predict_resp_o.ghr_snapshot = ghr;
         predict_taken = pattern_history_table[prediction_indices.pht_idx][1];  // MSB of counter is the taken bit
-        ghr_next = ghr;
 
         btb_hit = btb_array[prediction_indices.btb_idx].valid && btb_array[prediction_indices.btb_idx].tag == prediction_indices.btb_tag;
 
@@ -73,9 +72,10 @@ module bp (
 
     // ghr_next logic
     always_comb begin
-        ghr_next = ghr;
-        if (train_req_i.valid && train_req_i.mispredict) begin // a retring branch instruction was mispredicted
-            ghr_next = {train_req_i.ghr_snapshot[`BP_GHR_WIDTH-2:0], actual_taken};
+        ghr_next = ghr;  // Default: hold current GHR
+        
+        if (train_req_i.valid && train_req_i.mispredict) begin // a retiring branch instruction was mispredicted
+            ghr_next = {train_req_i.ghr_snapshot[`BP_GHR_WIDTH-2:0], train_req_i.actual_taken};
         end else if (predict_req_i.valid) begin // from fetch
             ghr_next = {ghr[`BP_GHR_WIDTH-2:0], predict_taken};
         end 

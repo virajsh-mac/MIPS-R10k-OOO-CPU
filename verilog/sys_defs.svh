@@ -44,10 +44,10 @@
 // Instruction buffer
 `define IB_SZ  64  // Instruction buffer size
 `define IB_IDX_BITS  $clog2(`IB_SZ)
-`define IB_PUSH_WIDTH    
+`define IB_PUSH_WIDTH  4
 
 // branch prediction
-`define BP_GHR_WIDTH_WIDTH 7                              // ghr width
+`define BP_GHR_WIDTH 7                              // ghr width
 `define BP_PHT_BITS `BP_GHR_WIDTH + 1               // PHT entries = GH + 1
 `define BP_BTB_BITS 7                        // BTB entries = 2^BTB_BITS
 `define BP_PC_WORD_ALIGN_BITS 2              // PC[1:0] are word-aligned (ignore)
@@ -707,7 +707,7 @@ typedef struct packed {
     logic              is_branch;        // 1 if this inst is a branch
     logic              bp_pred_taken;    // predictor's taken/not-taken decision
     ADDR               bp_pred_target;   // predicted target (if taken)
-    logic [`BP_GHR_WIDTH-1:0] BP_GHR_WIDTHr_snapshot;  // GHR snapshot used for this prediction
+    logic [`BP_GHR_WIDTH-1:0] bp_ghr_snapshot;  // GHR snapshot used for this prediction
 } FETCH_PACKET;
 
 

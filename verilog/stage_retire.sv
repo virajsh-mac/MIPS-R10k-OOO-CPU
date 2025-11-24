@@ -127,7 +127,7 @@ module stage_retire #(
                     // Single consolidated mispredict signal
                     mispredict      = 1'b1;
                     rob_mispred_idx = head_idxs[w];  // ROB index of the mispredicted branch
-                    train_req_o.mispredict;
+                    train_req_o.mispredict = 1'b1;
 
                     // stop committing younger entries
                     break;

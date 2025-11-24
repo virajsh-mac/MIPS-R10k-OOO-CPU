@@ -145,9 +145,7 @@ module cpu (
     output MSHR_PACKET          new_mshr_entry_dbg,
 
     // Fetch stage debug outputs
-    output FETCH_PACKET [3:0]   fetch_packet_dbg,
-    output logic                ib_bundle_valid_dbg,
-
+    output FETCH_PACKET [3:0]   fetch_packet_dbg
 );
 
     //////////////////////////////////////////////////
@@ -349,7 +347,8 @@ module cpu (
 
     FETCH_PACKET    [3:0]     fetch_packet;
     ADDR correct_branch_target;
-    logic [`IB_IDX_BITs-1:0] ib_free_slots;
+    logic [`IB_IDX_BITS:0] ib_free_slots;
+    logic [$clog2(`IB_PUSH_WIDTH+1)-1:0] num_pushes; // Number of valid entries to push from fetch
 
     stage_fetch stage_fetch_0 (
         .clock        (clock),
@@ -364,7 +363,8 @@ module cpu (
         .bp_response  (bp_predict_response),
 
         .correct_branch_target ({mispredict, correct_branch_target}),
-        .ib_free_slots          (ib_free_slots)
+        .ib_free_slots          (ib_free_slots),
+        .num_pushes             (num_pushes)
     );
 
     // Branch Predictor singals
@@ -382,10 +382,7 @@ module cpu (
         .predict_resp_o(bp_predict_response),
 
         // training request (from ROB retire stage)
-        .train_req_i(train_req),
-
-        // Recover request (from ROB retire stage)
-        .recover_req_i(recover_req)
+        .train_req_i(train_req)
     );
 
     //////////////////////////////////////////////////
@@ -404,8 +401,8 @@ module cpu (
         .flush(mispredict),  // Flush on branch mispredict
 
         // Fetch interface (temporary fake fetch)
-        .new_ib_entry(fetch_packet),
-        .num_pushes(),
+        .new_ib_entries(fetch_packet),
+        .num_pushes(num_pushes),
         .available_slots(ib_free_slots),
 
         // Dispatch interface
@@ -991,7 +988,6 @@ module cpu (
 
         // Branch predictor
         .train_req_o            (train_req),
-        .recover_req_o          (recover_req),
 
         // From PRF for committed data
         .regfile_entries(regfile_entries_dbg),
@@ -1053,6 +1049,5 @@ module cpu (
 
     // Fetch stage debug outputs
     assign fetch_packet_dbg      = fetch_packet;
-    assign ib_bundle_valid_dbg   = ib_bundle_valid;
 
 endmodule  // cpu
