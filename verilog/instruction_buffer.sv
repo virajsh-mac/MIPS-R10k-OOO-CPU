@@ -1,4 +1,5 @@
 `include "sys_defs.svh"
+`include "ISA.svh"
 
 module instr_buffer (
     input  logic                 clock,
@@ -10,7 +11,6 @@ module instr_buffer (
     output logic [`IB_IDX_BITS:0]              available_slots, // total number of available slots
 
     // Fetch stage - supports up to `IB_PUSH_WIDTH pushes per cycle
-    input logic [$clog2(`IB_PUSH_WIDTH+1)-1:0]     num_pushes,      // number of valid entries to push
     input FETCH_PACKET [`IB_PUSH_WIDTH-1:0]        new_ib_entries,    // `IB_PUSH_WIDTH entries from fetch
 
     // Decode and Dispatch IO - supports up to `N pops per cycle
@@ -25,6 +25,25 @@ module instr_buffer (
         return (ptr + offset) % `IB_SZ;
     endfunction
 
+    // Helper: get instruction type name
+    function automatic string get_inst_type(INST instr);
+        case (instr.r.opcode)
+            `RV32_LOAD:     return "LOAD";
+            `RV32_STORE:    return "STORE";
+            `RV32_BRANCH:   return "BRANCH";
+            `RV32_JALR_OP:  return "JALR";
+            `RV32_JAL_OP:   return "JAL";
+            `RV32_OP_IMM:   return "OP_IMM";
+            `RV32_OP:       return "OP";
+            `RV32_SYSTEM:   return "SYSTEM";
+            `RV32_AUIPC_OP: return "AUIPC";
+            `RV32_LUI_OP:   return "LUI";
+            `RV32_FENCE:    return "FENCE";
+            `RV32_AMO:      return "AMO";
+            default:        return "UNKNOWN";
+        endcase
+    endfunction
+
     // FIFO storage
     FETCH_PACKET [`IB_SZ-1:0] ib_entries, ib_entries_next;
 
@@ -32,6 +51,9 @@ module instr_buffer (
     logic [`IB_IDX_BITS-1:0] head_ptr, head_ptr_next;
     logic [`IB_IDX_BITS-1:0] tail_ptr, tail_ptr_next;
     logic [`IB_IDX_BITS:0] count, count_next;
+    
+    // Helper variable for counting actual pushes
+    logic [$clog2(`IB_PUSH_WIDTH+1)-1:0] actual_pushes;
 
     // Available slots calculation
     assign available_slots = `IB_SZ - count;
@@ -55,16 +77,18 @@ module instr_buffer (
                 count_next = count - num_pops;
             end
 
-            // Handle pushes
-            if (num_pushes > 0 && (count_next + num_pushes) <= `IB_SZ) begin
-                // Push entries to FIFO
-                foreach (new_ib_entries[i]) begin
-                    if (i < num_pushes) begin
-                        ib_entries_next[wrap_ptr(tail_ptr, i)] = new_ib_entries[i];
-                    end
+            // Handle pushes - push all valid entries
+            // stage_fetch already checks ib_free_slots, so we can push all valid entries
+            actual_pushes = 0;
+            for (int i = 0; i < `IB_PUSH_WIDTH; i++) begin
+                if (new_ib_entries[i].valid) begin
+                    ib_entries_next[wrap_ptr(tail_ptr, actual_pushes)] = new_ib_entries[i];
+                    actual_pushes = actual_pushes + 1;
                 end
-                tail_ptr_next = wrap_ptr(tail_ptr, num_pushes);
-                count_next = count_next + num_pushes;
+            end
+            if (actual_pushes > 0) begin
+                tail_ptr_next = wrap_ptr(tail_ptr, actual_pushes);
+                count_next = count_next + actual_pushes;
             end
         end
     end
@@ -97,4 +121,58 @@ module instr_buffer (
         end
     end
 
+    // DEBUG: Track previous values to avoid duplicate prints
+    logic [`IB_IDX_BITS:0] prev_count;
+    logic [$clog2(`IB_PUSH_WIDTH+1)-1:0] prev_valid_count;
+    logic [$clog2(`N+1)-1:0] prev_num_pops;
+    FETCH_PACKET [`IB_SZ-1:0] prev_ib_entries;
+
+    // DEBUG: Print IB state (condensed format)
+    always_ff @(posedge clock) begin
+        if (!reset && !flush) begin
+            // Print when entries are pushed (condensed, single line)
+            // Count valid entries and check if any were pushed
+            integer valid_count;
+            integer i;
+            valid_count = 0;
+            for (i = 0; i < `IB_PUSH_WIDTH; i++) begin
+                if (new_ib_entries[i].valid) valid_count = valid_count + 1;
+            end
+            
+            if (valid_count > 0 && valid_count != prev_valid_count) begin
+                $write("[IB] PUSH %0d: ", valid_count);
+                for (i = 0; i < `IB_PUSH_WIDTH; i++) begin
+                    if (new_ib_entries[i].valid) begin
+                        $write("PC=%0d(%s) ", new_ib_entries[i].pc, get_inst_type(new_ib_entries[i].inst));
+                    end
+                end
+                $display("");
+            end
+            
+            prev_valid_count <= valid_count;
+
+            // Print when entries are popped (condensed, single line)
+            if (num_pops > 0 && num_pops != prev_num_pops) begin
+                $write("[IB] POP %0d: ", num_pops);
+                for (int i = 0; i < num_pops; i++) begin
+                    if (i < window_valid_count && dispatch_window[i].valid) begin
+                        $write("PC=%0d(%s) ", dispatch_window[i].pc, get_inst_type(dispatch_window[i].inst));
+                    end
+                end
+                $display("");
+            end
+
+            // Update previous values
+            prev_count <= count;
+            prev_num_pops <= num_pops;
+            prev_ib_entries <= ib_entries;
+        end else begin
+            prev_count <= '0;
+            prev_valid_count <= '0;
+            prev_num_pops <= '0;
+            prev_ib_entries <= '0;
+        end
+    end
+
 endmodule
+

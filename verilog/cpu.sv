@@ -348,7 +348,6 @@ module cpu (
     FETCH_PACKET    [3:0]     fetch_packet;
     ADDR correct_branch_target;
     logic [`IB_IDX_BITS:0] ib_free_slots;
-    logic [$clog2(`IB_PUSH_WIDTH+1)-1:0] num_pushes; // Number of valid entries to push from fetch
 
     stage_fetch stage_fetch_0 (
         .clock        (clock),
@@ -363,8 +362,7 @@ module cpu (
         .bp_response  (bp_predict_response),
 
         .correct_branch_target ({mispredict, correct_branch_target}),
-        .ib_free_slots          (ib_free_slots),
-        .num_pushes             (num_pushes)
+        .ib_free_slots          (ib_free_slots)
     );
 
     // Branch Predictor singals
@@ -402,7 +400,6 @@ module cpu (
 
         // Fetch interface (temporary fake fetch)
         .new_ib_entries(fetch_packet),
-        .num_pushes(num_pushes),
         .available_slots(ib_free_slots),
 
         // Dispatch interface
