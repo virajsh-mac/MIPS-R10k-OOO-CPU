@@ -252,9 +252,10 @@ module stage_fetch (
         read_addrs[1].addr  = I_ADDR'(PC_aligned + 8);
     end
     
+    // Fetch packet
     always_comb begin
-        logic pc_advancing;
-        pc_advancing = !correct_branch_target.valid && 
+        logic send_to_ib;
+        send_to_ib = !correct_branch_target.valid && 
                     cache_data[0].valid && 
                     cache_data[1].valid && 
                     num_valids <= ib_free_slots;
@@ -263,7 +264,7 @@ module stage_fetch (
         for (int i = 0; i < 4; i++) begin
             fetch_packet[i].pc    = PC_aligned + (ADDR'(i) << 2);
             fetch_packet[i].inst  = insts[i];
-            fetch_packet[i].valid = pc_advancing ? fetch_packet_valid_bits[i] : 1'b0;
+            fetch_packet[i].valid = send_to_ib ? fetch_packet_valid_bits[i] : 1'b0;
             
             // Default branch metadata
             fetch_packet[i].is_branch       = 1'b0;
@@ -272,8 +273,8 @@ module stage_fetch (
             fetch_packet[i].bp_ghr_snapshot = '0;
         end
         
-        // Set branch metadata for first branch if it's valid and we're pc_advancing
-        if (pc_advancing && first_branch_idx != 3'd4 && fetch_packet_valid_bits[first_branch_idx]) begin
+        // Set branch metadata for first branch if it's valid and we're send_to_ib
+        if (send_to_ib && first_branch_idx != 3'd4 && fetch_packet_valid_bits[first_branch_idx]) begin
             fetch_packet[first_branch_idx].is_branch       = 1'b1;
             fetch_packet[first_branch_idx].bp_pred_taken   = first_branch_taken;
             
