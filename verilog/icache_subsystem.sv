@@ -257,25 +257,6 @@ module icache (
     logic [MEM_DEPTH-1:0]                 snooping_one_hot;
     logic [MEM_DEPTH-1:0]                 valid_bits;
 
-    // Helper: get instruction type name
-    function automatic string get_inst_type(INST instr);
-        case (instr.r.opcode)
-            `RV32_LOAD:     return "LOAD";
-            `RV32_STORE:    return "STORE";
-            `RV32_BRANCH:   return "BRANCH";
-            `RV32_JALR_OP:  return "JALR";
-            `RV32_JAL_OP:   return "JAL";
-            `RV32_OP_IMM:   return "OP_IMM";
-            `RV32_OP:       return "OP";
-            `RV32_SYSTEM:   return "SYSTEM";
-            `RV32_AUIPC_OP: return "AUIPC";
-            `RV32_LUI_OP:   return "LUI";
-            `RV32_FENCE:    return "FENCE";
-            `RV32_AMO:      return "AMO";
-            default:        return "UNKNOWN";
-        endcase
-    endfunction
-
     memDP #(
         .WIDTH(MEM_WIDTH),
         .DEPTH(1'b1),
@@ -348,59 +329,5 @@ module icache (
         assign cache_outs_temp[j].valid = |cache_reads_one_hot[j];
     end
     assign cache_outs = cache_outs_temp;
-
-    // Track evictions and print evicted instructions
-    logic eviction_occurring;
-    integer cycle_count;
-    
-    // Detect eviction: write is valid AND no empty slots available (eviction path taken)
-    // AND the line being evicted is actually valid (not just writing to empty slot)
-    assign eviction_occurring = write_addr.valid && !(|cache_write_no_evict_one_hot) && 
-                                cache_lines[cache_write_evict_index].valid;
-    
-    always_ff @(posedge clock) begin
-        if (reset) begin
-            cycle_count <= 0;
-        end else begin
-            cycle_count <= cycle_count + 1;
-            
-            // Print cache write signals every cycle
-            $display("[ICACHE_WRITE] C%0d | write_addr.valid = %b", cycle_count, write_addr.valid);
-            if (write_addr.valid) begin
-                $display("[ICACHE_WRITE] C%0d | write_addr.addr.tag = 0x%02h", cycle_count, write_addr.addr.tag);
-            end
-            $display("[ICACHE_WRITE] C%0d | cache_write_evict_index = %0d", cycle_count, cache_write_evict_index);
-            $display("[ICACHE_WRITE] C%0d | cache_write_no_evict_one_hot = 0b%b", cycle_count, cache_write_no_evict_one_hot);
-            $display("[ICACHE_WRITE] C%0d | cache_write_evict_one_hot = 0b%b", cycle_count, cache_write_evict_one_hot);
-            $display("[ICACHE_WRITE] C%0d | cache_write_enable_mask = 0b%b", cycle_count, cache_write_enable_mask);
-            $display("[ICACHE_WRITE] C%0d | cache_line_write.valid = %b", cycle_count, cache_line_write.valid);
-            if (cache_line_write.valid) begin
-                $display("[ICACHE_WRITE] C%0d | cache_line_write.tag = 0x%02h", cycle_count, cache_line_write.tag);
-                $display("[ICACHE_WRITE] C%0d | cache_line_write.data.word_level[0] = 0x%08h", cycle_count, cache_line_write.data.word_level[0]);
-                $display("[ICACHE_WRITE] C%0d | cache_line_write.data.word_level[1] = 0x%08h", cycle_count, cache_line_write.data.word_level[1]);
-            end
-            $display("[ICACHE_WRITE] C%0d | write_data.word_level[0] = 0x%08h", cycle_count, write_data.word_level[0]);
-            $display("[ICACHE_WRITE] C%0d | write_data.word_level[1] = 0x%08h", cycle_count, write_data.word_level[1]);
-            
-            // Print eviction when it occurs (valid line being replaced)
-            if (eviction_occurring) begin
-                $display("[ICACHE_EVICT] C%0d | Evicting cache line at index %0d | Tag: 0x%02h", 
-                         cycle_count, cache_write_evict_index, cache_lines[cache_write_evict_index].tag);
-                $display("[ICACHE_EVICT] C%0d | Evicted instructions: [0]=%s(0x%08h) [1]=%s(0x%08h)",
-                         cycle_count,
-                         get_inst_type(cache_lines[cache_write_evict_index].data.word_level[0]),
-                         cache_lines[cache_write_evict_index].data.word_level[0],
-                         get_inst_type(cache_lines[cache_write_evict_index].data.word_level[1]),
-                         cache_lines[cache_write_evict_index].data.word_level[1]);
-                $display("[ICACHE_EVICT] C%0d | Replacing with new line: Tag: 0x%02h | [0]=%s(0x%08h) [1]=%s(0x%08h)",
-                         cycle_count,
-                         write_addr.addr.tag,
-                         get_inst_type(write_data.word_level[0]),
-                         write_data.word_level[0],
-                         get_inst_type(write_data.word_level[1]),
-                         write_data.word_level[1]);
-            end
-        end
-    end
 
 endmodule

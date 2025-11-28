@@ -71,8 +71,11 @@ module instr_buffer (
             tail_ptr_next = '0;
             count_next = '0;
         end else begin
-            // Handle pops first
+            // Handle pops first - invalidate entries being popped
             if (num_pops > 0 && count >= num_pops) begin
+                for (int i = 0; i < num_pops; i++) begin
+                    ib_entries_next[wrap_ptr(head_ptr, i)].valid = 1'b0;
+                end
                 head_ptr_next = wrap_ptr(head_ptr, num_pops);
                 count_next = count - num_pops;
             end
@@ -114,7 +117,7 @@ module instr_buffer (
         window_valid_count = 0;
 
         foreach (dispatch_window[i]) begin
-            if (count > i) begin
+            if (count > i && ib_entries[wrap_ptr(head_ptr, i)].valid) begin
                 dispatch_window[i] = ib_entries[wrap_ptr(head_ptr, i)];
                 window_valid_count = window_valid_count + 1;
             end
@@ -126,51 +129,80 @@ module instr_buffer (
     logic [$clog2(`IB_PUSH_WIDTH+1)-1:0] prev_valid_count;
     logic [$clog2(`N+1)-1:0] prev_num_pops;
     FETCH_PACKET [`IB_SZ-1:0] prev_ib_entries;
+    logic prev_has_changes;
+    
+    // DEBUG: Combinational signals for counting
+    logic [$clog2(`IB_PUSH_WIDTH+1)-1:0] valid_count;
+    logic has_changes;
+    
+    always_comb begin
+        valid_count = 0;
+        for (int i = 0; i < `IB_PUSH_WIDTH; i++) begin
+            if (new_ib_entries[i].valid) valid_count = valid_count + 1;
+        end
+        has_changes = (valid_count != prev_valid_count) || (num_pops != prev_num_pops) || (count != prev_count);
+    end
 
-    // DEBUG: Print IB state (condensed format)
+    // DEBUG: Print IB state (all entries, pushes, pops)
     always_ff @(posedge clock) begin
         if (!reset && !flush) begin
-            // Print when entries are pushed (condensed, single line)
-            // Count valid entries and check if any were pushed
-            integer valid_count;
-            integer i;
-            valid_count = 0;
-            for (i = 0; i < `IB_PUSH_WIDTH; i++) begin
-                if (new_ib_entries[i].valid) valid_count = valid_count + 1;
-            end
             
-            if (valid_count > 0 && valid_count != prev_valid_count) begin
-                $write("[IB] PUSH %0d: ", valid_count);
-                for (i = 0; i < `IB_PUSH_WIDTH; i++) begin
-                    if (new_ib_entries[i].valid) begin
-                        $write("PC=%0d(%s) ", new_ib_entries[i].pc, get_inst_type(new_ib_entries[i].inst));
-                    end
-                end
-                $display("");
-            end
+            // Print num_pops every cycle
+            $display("[IB] num_pops=%0d", num_pops);
             
-            prev_valid_count <= valid_count;
-
-            // Print when entries are popped (condensed, single line)
-            if (num_pops > 0 && num_pops != prev_num_pops) begin
-                $write("[IB] POP %0d: ", num_pops);
-                for (int i = 0; i < num_pops; i++) begin
-                    if (i < window_valid_count && dispatch_window[i].valid) begin
-                        $write("PC=%0d(%s) ", dispatch_window[i].pc, get_inst_type(dispatch_window[i].inst));
+            // Print IB state when there are changes
+            if (has_changes || !prev_has_changes) begin
+                $display("");  // Newline to separate from other prints
+                $display("[IB] count=%0d/%0d | head=%0d tail=%0d", count, `IB_SZ, head_ptr, tail_ptr);
+                
+                // Print all entries in buffer (in order from head)
+                if (count > 0) begin
+                    $write("[IB] BUFFER: ");
+                    for (int i = 0; i < count; i++) begin
+                        if (ib_entries[wrap_ptr(head_ptr, i)].valid) begin
+                            $write("PC %04x:%s ", ib_entries[wrap_ptr(head_ptr, i)].pc, get_inst_type(ib_entries[wrap_ptr(head_ptr, i)].inst));
+                        end
                     end
+                    $display("");
+                end else begin
+                    $display("[IB] BUFFER: (empty)");
                 end
-                $display("");
+                
+                // Print push operations
+                if (valid_count > 0) begin
+                    $write("[IB] PUSH %0d: ", valid_count);
+                    for (int i = 0; i < `IB_PUSH_WIDTH; i++) begin
+                        if (new_ib_entries[i].valid) begin
+                            $write("PC %04x:%s ", new_ib_entries[i].pc, get_inst_type(new_ib_entries[i].inst));
+                        end
+                    end
+                    $display("");
+                end
+                
+                // Print pop operations - show actual buffer entries being popped
+                if (num_pops > 0) begin
+                    $write("[IB] POP %0d: ", num_pops);
+                    for (int i = 0; i < num_pops; i++) begin
+                        if (i < count && ib_entries[wrap_ptr(head_ptr, i)].valid) begin
+                            $write("PC %04x:%s ", ib_entries[wrap_ptr(head_ptr, i)].pc, get_inst_type(ib_entries[wrap_ptr(head_ptr, i)].inst));
+                        end
+                    end
+                    $display("");
+                end
             end
 
             // Update previous values
             prev_count <= count;
+            prev_valid_count <= valid_count;
             prev_num_pops <= num_pops;
             prev_ib_entries <= ib_entries;
+            prev_has_changes <= has_changes;
         end else begin
             prev_count <= '0;
             prev_valid_count <= '0;
             prev_num_pops <= '0;
             prev_ib_entries <= '0;
+            prev_has_changes <= 1'b0;
         end
     end
 

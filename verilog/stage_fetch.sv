@@ -77,6 +77,7 @@ module stage_fetch (
     ADDR branch_target;  // Computed BRANCH target
     logic first_branch_taken;
     logic [2:0] num_valids;  // Count of valid instructions in fetch_packet (0-4)
+    logic send_to_ib;
 
     assign insts[0] = cache_data[0].data.word_level[0];
     assign insts[1] = cache_data[0].data.word_level[1];
@@ -252,13 +253,14 @@ module stage_fetch (
         read_addrs[1].addr  = I_ADDR'(PC_aligned + 8);
     end
     
+    // Compute send_to_ib signal
+    assign send_to_ib = !correct_branch_target.valid && 
+                       cache_data[0].valid && 
+                       cache_data[1].valid && 
+                       num_valids <= ib_free_slots;
+
     // Fetch packet
     always_comb begin
-        logic send_to_ib;
-        send_to_ib = !correct_branch_target.valid && 
-                    cache_data[0].valid && 
-                    cache_data[1].valid && 
-                    num_valids <= ib_free_slots;
         
         // Initialize all fetch packets
         for (int i = 0; i < 4; i++) begin
@@ -304,6 +306,74 @@ module stage_fetch (
             PC <= '0;
         end else begin
             PC <= PC_next;
+        end
+    end
+    
+    // ============================================================================
+    // DEBUG CODE BELOW - Remove when done debugging
+    // ============================================================================
+    
+    // Helper: get instruction type name
+    function automatic string get_inst_type(INST instr);
+        case (instr.r.opcode)
+            `RV32_LOAD:     return "LOAD";
+            `RV32_STORE:    return "STORE";
+            `RV32_BRANCH:   return "BRANCH";
+            `RV32_JALR_OP:  return "JALR";
+            `RV32_JAL_OP:   return "JAL";
+            `RV32_OP_IMM:   return "OP_IMM";
+            `RV32_OP:       return "OP";
+            `RV32_SYSTEM:   return "SYSTEM";
+            `RV32_AUIPC_OP: return "AUIPC";
+            `RV32_LUI_OP:   return "LUI";
+            `RV32_FENCE:    return "FENCE";
+            `RV32_AMO:      return "AMO";
+            default:        return "UNKNOWN";
+        endcase
+    endfunction
+    
+    // DEBUG: Track previous values to avoid duplicate prints
+    logic prev_send_to_ib;
+    ADDR prev_PC;
+    
+    // DEBUG: Print instruction types, valid bits, send_to_ib, and correct_branch_target.valid
+    always_ff @(posedge clock) begin
+        if (reset) begin
+            prev_send_to_ib <= 1'b0;
+            prev_PC <= '0;
+        end else begin
+            
+            // Print fetched instructions when cache becomes ready (only once per PC)
+            if (cache_data[0].valid && cache_data[1].valid && (PC != prev_PC)) begin
+                $display("[FETCH] PC %04x: (aligned=%04x, PC[2]=%b) | correct_branch_target.valid=%b",
+                         PC, PC_aligned, PC[2], correct_branch_target.valid);
+                $display("[FETCH] cache_data[0].valid=%b cache_data[1].valid=%b",
+                         cache_data[0].valid, cache_data[1].valid);
+                for (int i = 0; i < 4; i++) begin
+                    $display("[FETCH] Inst[%0d] PC %04x: %s(0x%08x)[%b]",
+                             i, PC_aligned + (ADDR'(i) << 2),
+                             get_inst_type(insts[i]), insts[i], fetch_packet_valid_bits[i]);
+                end
+                $display("[FETCH] send_to_ib=%b", send_to_ib);
+            end
+            
+            // Print send_to_ib transitions
+            if (send_to_ib != prev_send_to_ib) begin
+                $display("[FETCH] send_to_ib=%b (was %b) | cache_data[0].valid=%b cache_data[1].valid=%b num_valids=%0d ib_free_slots=%0d correct_branch_target.valid=%b",
+                         send_to_ib, prev_send_to_ib,
+                         cache_data[0].valid, cache_data[1].valid,
+                         num_valids, ib_free_slots, correct_branch_target.valid);
+            end
+            
+            // Print correct_branch_target.valid transitions
+            if (correct_branch_target.valid) begin
+                $display("[FETCH] MISPREDICT: correct_branch_target.valid=1 | target PC %04x:",
+                         correct_branch_target.addr);
+            end
+            
+            // Update previous values
+            prev_send_to_ib <= send_to_ib;
+            prev_PC <= PC;
         end
     end
     
