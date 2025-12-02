@@ -163,7 +163,11 @@ module d_mshr #(
 
 endmodule
 
-module dcache (
+module dcache #(
+    parameter MEM_DEPTH = `DCACHE_LINES,
+    parameter D_CACHE_INDEX_BITS = $clog2(MEM_DEPTH),
+    parameter MEM_WIDTH = 1 + 1 + `DTAG_BITS + `MEM_BLOCK_BITS  // valid + dirty + tag + data
+) (
     input clock,
     input reset,
 
@@ -180,10 +184,6 @@ module dcache (
     input I_ADDR_PACKET write_addr,
     input MEM_BLOCK     write_data
 );
-
-    localparam MEM_DEPTH = `DCACHE_LINES;
-    localparam D_CACHE_INDEX_BITS = $clog2(MEM_DEPTH);
-    localparam MEM_WIDTH = 1 + `DTAG_BITS + `MEM_BLOCK_BITS;
 
     wor CACHE_DATA [1:0]                  cache_outs_temp;
     D_CACHE_LINE [MEM_DEPTH-1:0]          cache_lines;
