@@ -265,39 +265,43 @@ module cpu (
         end
     end
 
-        // Simple arbiter: data memory (stores) get priority over icache fetches
+    //////////////////////////////////////////////////
+    //                                              //
+    //          Memory Arbiter Logic                //
+    //                                              //
+    //////////////////////////////////////////////////
+
+    logic icache_mem_req_accepted;
+
+    // Arbitration: Data stores (from store queue) prioritized over instruction requests (icache)
     always_comb begin
-        // Default: no request
+        // Default values
         proc2mem_command = MEM_NONE;
         proc2mem_addr    = '0;
-    `ifndef CACHE_MODE
-        proc2mem_size    = DOUBLE;  // doesn’t really matter when idle
-    `endif
         proc2mem_data    = '0;
+        icache_mem_req_accepted = 1'b0;
 
+        // Priority 1: Store queue writes (stores from execute stage)
         if (dmem_req_valid) begin
-            // Data-side store wins
-            proc2mem_command = dmem_req_command;  // MEM_STORE
+            proc2mem_command = MEM_STORE;
             proc2mem_addr    = dmem_req_addr;
-        `ifndef CACHE_MODE
-            proc2mem_size    = dmem_req_size;     // WORD for sw
-        `endif
             proc2mem_data    = dmem_req_data;
-
-        end else if (mem_req_addr.valid) begin
-            // Otherwise, instruction fetch can use the bus
+            // Stores are always accepted (no need to check tag)
+        end
+        // Priority 2: Icache reads (instruction fetch)
+        else if (mem_req_addr.valid) begin
             proc2mem_command = MEM_LOAD;
             proc2mem_addr    = mem_req_addr.addr;
-        `ifndef CACHE_MODE
-            proc2mem_size    = DOUBLE;            // icache line fill
-        `endif
-            proc2mem_data    = '0;                // no write data for loads
+            icache_mem_req_accepted = (mem2proc_transaction_tag != 0);
         end
+
+`ifndef CACHE_MODE
+        proc2mem_size = DOUBLE; // Always 64-bit blocks in cache mode
+`endif
     end
 
-
-    // In this simplified model, memory always accepts valid requests
-    assign mem_req_accepted = (proc2mem_command == MEM_LOAD) && (mem2proc_transaction_tag != 0);
+    // Keep old interface for compatibility
+    assign mem_req_accepted = icache_mem_req_accepted;
 
     //////////////////////////////////////////////////
     //                                              //
