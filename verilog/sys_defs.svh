@@ -170,12 +170,20 @@ typedef union packed {
 } MEM_BLOCK;
 
 typedef logic [`ITAG_BITS-1:0]      I_TAG;
+typedef logic [`DTAG_BITS-1:0]      D_TAG;
 
 typedef struct packed {
     logic valid;
     I_TAG tag;
     MEM_BLOCK data;
 } I_CACHE_LINE;
+
+typedef struct packed {
+    logic valid;
+    logic dirty;
+    logic [`DTAG_BITS-1:0] tag;
+    MEM_BLOCK data;
+} D_CACHE_LINE;
 
 typedef struct packed {
     logic valid;
