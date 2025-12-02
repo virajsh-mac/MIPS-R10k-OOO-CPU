@@ -213,6 +213,12 @@ typedef struct packed {
 } MSHR_PACKET;
 
 typedef struct packed {
+    logic   valid;
+    MEM_TAG mem_tag;
+    D_TAG   d_tag;
+} D_MSHR_PACKET;
+
+typedef struct packed {
     logic [15:0]                    zeros;
     logic [`DTAG_BITS-1:0]          tag;
     logic [`DSET_INDEX_BITS-1:0]    index;

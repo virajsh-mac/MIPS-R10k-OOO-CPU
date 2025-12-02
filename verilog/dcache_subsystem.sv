@@ -27,7 +27,7 @@ module dcache_subsystem (
     // Internal wires
     I_ADDR_PACKET dcache_write_addr, oldest_miss_addr;
     logic dcache_full;
-    MSHR_PACKET new_mshr_entry;
+    D_MSHR_PACKET new_mshr_entry;
     D_CACHE_LINE evicted_line, writeback_line;
     logic evicted_valid, writeback_valid;
     CACHE_DATA [1:0] dcache_outs, victim_outs, combined_outs;
@@ -152,7 +152,7 @@ module d_mshr #(
     output logic  addr_found,
 
     // When mem_req_accepted
-    input MSHR_PACKET new_entry,
+    input D_MSHR_PACKET new_entry,
 
     // Mem data back
     input  MEM_TAG       mem_data_tag,
@@ -161,7 +161,7 @@ module d_mshr #(
 
     // MSHR Internals
     localparam D_CACHE_INDEX_BITS = $clog2(MSHR_WIDTH);
-    MSHR_PACKET [MSHR_WIDTH-1:0] mshr_entries, next_mshr_entries;
+    D_MSHR_PACKET [MSHR_WIDTH-1:0] mshr_entries, next_mshr_entries;
     logic [D_CACHE_INDEX_BITS-1:0] head, next_head, tail, next_tail;
 
     // Snooping logic - check if address is already in MSHR
