@@ -190,7 +190,7 @@ GREP = grep -E --color=auto
 # ---- Modules to Test ---- #
 
 # TODO: add more modules here
-MODULES = cpu mult rob rs regfile map_table stage_issue stage_dispatch stage_execute stage_complete stage_retire cdb
+MODULES = cpu mult rob rs regfile map_table stage_issue stage_dispatch stage_execute stage_complete stage_retire cdb store_queue
 
 # TODO: update this if you add more header files
 ALL_HEADERS = $(CPU_HEADERS)
@@ -245,7 +245,7 @@ build/stage_retire.simv: $(STAGE_RETIRE_FILES)
 build/stage_retire.cov:  $(STAGE_RETIRE_FILES)
 synth/stage_retire.vg:   $(STAGE_RETIRE_FILES)
 # TODO: add any files required for stage_execute here (besides test/stage_execute_test.sv and verilog/stage_execute.sv)
-STAGE_EXECUTE_FILES = verilog/sys_defs.svh verilog/alu.sv verilog/mult.sv verilog/branch.sv
+STAGE_EXECUTE_FILES = verilog/sys_defs.svh verilog/alu.sv verilog/mult.sv verilog/branch.sv verilog/mem_fu.sv
 build/stage_execute.simv: $(STAGE_EXECUTE_FILES)
 build/stage_execute.cov: $(STAGE_EXECUTE_FILES)
 synth/stage_execute.vg: $(STAGE_EXECUTE_FILES)
@@ -288,9 +288,11 @@ CPU_SOURCES = verilog/cpu.sv \
 			  verilog/icache_subsystem.sv \
 			  verilog/stage_fetch.sv \
 			  verilog/instruction_buffer.sv \
+			  verilog/mem_fu.sv \
 			  verilog/bp.sv \
 			  verilog/memDP.sv \
 			  verilog/LFSR.sv \
+			  verilog/store_queue.sv
 
 
 build/cpu.simv: $(CPU_SOURCES) $(CPU_HEADERS) $(CPU_TESTBENCH)

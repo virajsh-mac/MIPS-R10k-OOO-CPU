@@ -21,12 +21,12 @@ module stage_execute (
     input  PRF_READ_DATA prf_read_data_src2,
 
     // // Interface to D-cache for memory operations (IGNORE FOR NOW)
-    // output MEM_COMMAND proc2dcache_command [`NUM_FU_MEM-1:0],
-    // output ADDR proc2dcache_addr [`NUM_FU_MEM-1:0],
-    // output DATA proc2dcache_data [`NUM_FU_MEM-1:0],  // For stores
-    // output MEM_SIZE proc2dcache_size [`NUM_FU_MEM-1:0],
-    // input logic [`NUM_FU_MEM-1:0] dcache_valid,
-    // input DATA [`NUM_FU_MEM-1:0] dcache_data,  // For loads
+    // output MEM_COMMAND proc2Dcache_command [`NUM_FU_MEM-1:0],
+    // output ADDR proc2Dcache_addr [`NUM_FU_MEM-1:0],
+    // output DATA proc2Dcache_data [`NUM_FU_MEM-1:0],  // For stores
+    // output MEM_SIZE proc2Dcache_size [`NUM_FU_MEM-1:0],
+    // input logic [`NUM_FU_MEM-1:0] Dcache_valid,
+    // input DATA [`NUM_FU_MEM-1:0] Dcache_data,  // For loads
 
     output logic [`NUM_FU_MULT-1:0] mult_request,
     output CDB_FU_OUTPUTS fu_outputs,
@@ -34,9 +34,6 @@ module stage_execute (
     // To complete stage
     output logic [`N-1:0] ex_valid,
     output EX_COMPLETE_PACKET ex_comp,
-
-    // to store queue
-    output EXECUTE_STOREQ_PACKET execute_storeq_packet,
 
     // From CDB for grant selection
     input logic [`N-1:0][`NUM_FU_TOTAL-1:0] gnt_bus
@@ -73,14 +70,10 @@ module stage_execute (
     ADDR [`NUM_FU_BRANCH-1:0] branch_pcs;           // PC values for branch FUs
     DATA [`NUM_FU_BRANCH-1:0] branch_offsets;       // Branch offsets for branch FUs
     logic [`NUM_FU_BRANCH-1:0] branch_take;
-    ADDR [`NUM_FU_BRANCH-1:0] branch_targets;
+    ADDR [`NUM_FU_BRANCH-1:0] branch_targets;       // Target addresses from branch FUs
 
     // MEM signals (placeholder for future implementation)
-    DATA [`NUM_FU_MEM-1:0] mem_rs1, mem_rs2, mem_src2_imm;
-    MEM_FUNC [`NUM_FU_MEM-1:0] mem_funcs;
-    DATA [`NUM_FU_MEM-1:0] mem_data;
-    ADDR [`NUM_FU_MEM-1:0] mem_addr;
-
+    // DATA [`NUM_FU_MEM-1:0] mem_addr, mem_data;
 
     // Operand resolution: choose between PRF data, CDB forwarding, or RS stored value
     PRF_READ_DATA resolved_src1, resolved_src2;
@@ -379,45 +372,8 @@ module stage_execute (
     // =========================================================================
     // MEM Functional Units (Placeholder)
     // =========================================================================
-    // TODO stores implemented, load instructions need to be implemented (WIP)
 
-    always_comb begin
-        for (int i = 0; i < `NUM_FU_MEM; i++) begin
-            mem_rs1[i] = resolved_src1.mem[i];
-            mem_rs2[i] = resolved_src2.mem[i];
-            mem_src2_imm[i] = issue_entries.mem[i].src2_immediate;
-            mem_funcs[i] = issue_entries.mem[i].op_type.func;
-        end
-    end
-
-    mem_fu mem_inst[`NUM_FU_MEM-1:0] (
-        .rs1(mem_rs1),
-        .rs2(mem_rs2),
-        .imm(mem_src2_imm),
-        .addr(mem_addr),
-        .data(mem_data)
-    );
-
-    // send store instruction address and data to store queue
-    always_comb begin
-        execute_storeq_packet = '0;
-
-        for (int i = 0; i < `NUM_FU_MEM; i++) begin
-            // This lane is active AND this MEM op is a store (SB/SH/SW/SD)
-            if ( issue_entries.mem[i].valid &&
-                (issue_entries.mem[i].op_type.func == STORE_BYTE   ||
-                 issue_entries.mem[i].op_type.func == STORE_HALF   ||
-                 issue_entries.mem[i].op_type.func == STORE_WORD   ||
-                 issue_entries.mem[i].op_type.func == STORE_DOUBLE) ) begin
-
-                execute_storeq_packet.valid[i]          = 1'b1;
-                execute_storeq_packet.addr[i]           = mem_addr[i];                // effective address from mem_fu
-                execute_storeq_packet.data[i]           = mem_data[i];                // store data from mem_fu
-                execute_storeq_packet.store_queue_idx[i] = issue_entries.mem[i].store_queue_idx; // index from dispatch/RS
-            end
-        end
-    end
-
+    // TODO: Implement memory functional units when mem.sv is completed
     always_comb begin
         for (int i = 0; i < `NUM_FU_MEM; i++) begin
             fu_results.mem[i] = '0;  // Initialize MEM results to 0

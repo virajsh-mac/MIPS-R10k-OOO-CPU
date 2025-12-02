@@ -116,6 +116,17 @@ module cpu (
     logic                   [          $clog2(`ROB_SZ+1)-1:0]                        rob_free_slots;
     ROB_IDX                 [                         `N-1:0]                        rob_alloc_idxs;
 
+    // Store Queue wires
+    STOREQ_ENTRY [`N-1:0] sq_dispatch_packet;  // from dispatch
+    STOREQ_IDX   [`N-1:0] sq_alloc_idxs;       // indices assigned by SQ
+    logic [$clog2(`LSQ_SZ+1)-1:0] sq_free_slots;
+
+    // From execute: address/data updates for stores
+    EXECUTE_STOREQ_PACKET execute_storeq_packet;
+
+    // From ROB: how many SQ entries to free this cycle
+    logic [$clog2(`N+1)-1:0] sq_free_count;
+
     // Free list allocation signals
     logic                   [                         `N-1:0]                        free_alloc_valid;
     PHYS_TAG                [                         `N-1:0]                        allocated_phys;
@@ -174,6 +185,20 @@ module cpu (
     // Global mispredict signal
     logic              mispredict;
 
+        // Memory interface placeholders (TODO: implement proper data memory stages)
+    logic                        Dmem_command_filtered = MEM_NONE;
+    MEM_SIZE                     Dmem_size = DOUBLE;
+    ADDR                         Dmem_addr = '0;
+    MEM_BLOCK                    Dmem_store_data = '0;
+    // Data memory request (from execute/store queue)
+    logic        dmem_req_valid;
+    MEM_COMMAND  dmem_req_command;
+    ADDR         dmem_req_addr;
+    MEM_BLOCK    dmem_req_data;
+`ifndef CACHE_MODE
+    MEM_SIZE     dmem_req_size;
+`endif
+
     // CDB requests: single-cycle FUs request during issue, multi-cycle during execute
     assign cdb_requests.alu    = issue_cdb_requests.alu;  // From issue stage
     assign cdb_requests.mult   = mult_request;  // From execute stage (when completing)
@@ -220,19 +245,56 @@ module cpu (
     // icache access memory only
     // needs to be decided by arbitrator later when dcache is done
     always_comb begin
-        // Using fake fetch - only handle data memory operations
-        if (mem_req_addr.valid) begin
+        dmem_req_valid   = 1'b0;
+        dmem_req_command = MEM_NONE;
+        dmem_req_addr    = '0;
+        dmem_req_data    = '0;
+    `ifndef CACHE_MODE
+        dmem_req_size    = WORD;  // sw = store word
+    `endif
+
+        // For now, if any MEM FU lane has a valid store, use that
+        for (int i = 0; i < `NUM_FU_MEM; i++) begin
+            if (execute_storeq_packet.valid[i]) begin
+                dmem_req_valid   = 1'b1;
+                dmem_req_command = MEM_STORE;
+                dmem_req_addr    = execute_storeq_packet.addr[i];
+                // MEM_BLOCK is 64 bits; store word goes in low bits
+                dmem_req_data[31:0] = execute_storeq_packet.data[i];
+            end
+        end
+    end
+
+        // Simple arbiter: data memory (stores) get priority over icache fetches
+    always_comb begin
+        // Default: no request
+        proc2mem_command = MEM_NONE;
+        proc2mem_addr    = '0;
+    `ifndef CACHE_MODE
+        proc2mem_size    = DOUBLE;  // doesn’t really matter when idle
+    `endif
+        proc2mem_data    = '0;
+
+        if (dmem_req_valid) begin
+            // Data-side store wins
+            proc2mem_command = dmem_req_command;  // MEM_STORE
+            proc2mem_addr    = dmem_req_addr;
+        `ifndef CACHE_MODE
+            proc2mem_size    = dmem_req_size;     // WORD for sw
+        `endif
+            proc2mem_data    = dmem_req_data;
+
+        end else if (mem_req_addr.valid) begin
+            // Otherwise, instruction fetch can use the bus
             proc2mem_command = MEM_LOAD;
             proc2mem_addr    = mem_req_addr.addr;
-        end else begin
-            proc2mem_command = MEM_NONE;
-            proc2mem_addr    = '0;
+        `ifndef CACHE_MODE
+            proc2mem_size    = DOUBLE;            // icache line fill
+        `endif
+            proc2mem_data    = '0;                // no write data for loads
         end
-`ifndef CACHE_MODE
-        proc2mem_size    = '0; // data size sent to memory
-`endif
-        proc2mem_data    = '0; // data sent to memory, no memory write for instruciotn
     end
+
 
     // In this simplified model, memory always accepts valid requests
     assign mem_req_accepted = (proc2mem_command == MEM_LOAD) && (mem2proc_transaction_tag != 0);
@@ -394,6 +456,13 @@ module cpu (
         // TO ROB
         .rob_entry_packet(rob_entry_packet),
 
+        // TO Store queue free slots
+       .store_queue_free_slots(sq_free_slots),
+
+        // To Store Queue
+        .store_queue_alloc_idxs   (sq_alloc_idxs),      // indices from SQ
+        .store_queue_entry_packet (sq_dispatch_packet), // entries to SQ
+
         // TO RS (structured allocation requests)
         .rs_alloc(rs_alloc_from_dispatch),
 
@@ -429,6 +498,29 @@ module cpu (
         .head_entries(rob_head_entries),
         .head_idxs(rob_head_idxs),
         .head_valids(rob_head_valids)
+    );
+
+    //////////////////////////////////////////////////
+    //                                              //
+    //                 Store Queue                  //
+    //                                              //
+    //////////////////////////////////////////////////
+
+    store_queue store_queue_0 (
+        .clock(clock),
+        .reset(reset),
+
+        // Dispatch side
+        .sq_dispatch_packet(sq_dispatch_packet),
+        .free_slots        (sq_free_slots),
+        .sq_alloc_idxs     (sq_alloc_idxs),
+
+        // Execute side
+        .execute_storeq_packet(execute_storeq_packet),
+
+        // Retire / flush side
+        .mispredict(mispredict),
+        .free_count(sq_free_count)
     );
 
     //////////////////////////////////////////////////
@@ -646,7 +738,11 @@ module cpu (
         .ex_comp (ex_comp),
 
         // From CDB for grant selection
-        .gnt_bus(cdb_0.grant_bus_out)
+        .gnt_bus(cdb_0.grant_bus_out),
+
+        // To Store Queue
+        .execute_storeq_packet(execute_storeq_packet)
+
     );
 
     //////////////////////////////////////////////////

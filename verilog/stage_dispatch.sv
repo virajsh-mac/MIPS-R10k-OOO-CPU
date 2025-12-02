@@ -21,6 +21,7 @@ module stage_dispatch (
     // Structural hazard inputs
     input logic   [          $clog2(`ROB_SZ+1)-1:0] free_slots_rob,
     input ROB_IDX [                         `N-1:0] rob_alloc_idxs,
+    input logic   [          $clog2(`LSQ_SZ+1)-1:0] store_queue_free_slots,
     input logic   [$clog2(`PHYS_REG_SZ_R10K+1)-1:0] freelist_free_slots,
     input logic   [       $clog2(`RS_ALU_SZ+1)-1:0] rs_alu_free_slots,
     input logic   [     $clog2(`RS_MULT_SZ+1)-1:0] rs_mult_free_slots,
@@ -33,6 +34,11 @@ module stage_dispatch (
 
     // To ROB: allocation entries
     output ROB_ENTRY [`N-1:0] rob_entry_packet,
+
+    // From Store Queue: alloc idxs
+    input STOREQ_IDX [`N-1:0] store_queue_alloc_idxs,
+    // To Store Queue: allocation entries
+    output STOREQ_ENTRY [`N-1:0] store_queue_entry_packet,
 
     // To RS: allocation requests
     output RS_ALLOC_BANKS rs_alloc,
@@ -61,6 +67,7 @@ module stage_dispatch (
     int mult_used;
     int branch_used;
     int mem_used;
+    int storeq_used;
 
     // Map table read results
     logic [`PHYS_TAG_BITS-1:0] local_reg1_tag[`N-1:0];
@@ -83,6 +90,7 @@ module stage_dispatch (
         create_rs_entry.src2_tag       = local_reg2_tag[idx];
         create_rs_entry.src2_ready     = local_reg2_ready[idx];
         create_rs_entry.src2_immediate = decode_immediate[idx];
+        create_rs_entry.store_queue_idx = '0;
         create_rs_entry.dest_tag       = allocated_phys[idx];
         create_rs_entry.rob_idx        = rob_alloc_idxs[idx];
         create_rs_entry.PC             = dispatch_window[idx].pc;
@@ -104,6 +112,7 @@ module stage_dispatch (
         mult_used = 0;
         branch_used = 0;
         mem_used = 0;
+        storeq_used = 0;
 
         for (int i = 0; i < `N; i++) begin
             if (i >= num_valid_from_fetch) break;  // No more valid instructions
@@ -113,6 +122,11 @@ module stage_dispatch (
 
             // Check freelist space (only if instruction uses a destination register)
             if (decode_uses_rd[i] && freelist_slots_used >= freelist_free_slots) break;
+
+            // checks if there is space in store queue if instruction is a store
+            if (decode_op_type[i].category == CAT_MEM && !decode_uses_rd[i]) begin
+                if (storeq_used >= store_queue_free_slots) break;
+            end
 
             // Check RS bank space for this instruction's functional unit
             case (decode_op_type[i].category)
@@ -127,6 +141,11 @@ module stage_dispatch (
             num_to_dispatch++;
             rob_slots_used++;
             if (decode_uses_rd[i]) freelist_slots_used++;
+
+            // Count how many stores we’re dispatching (for LSQ capacity check)
+            if (decode_op_type[i].category == CAT_MEM && !decode_uses_rd[i]) begin
+                storeq_used++;
+            end
 
             // Reserve RS slot for this instruction type
             case (decode_op_type[i].category)
@@ -144,6 +163,8 @@ module stage_dispatch (
         rs_alloc = '0;
         free_alloc_valid = '0;
         rob_entry_packet = '0;
+        store_queue_entry_packet = '0;
+        storeq_used = 0;
 
         // Read register mappings from map table
         for (int i = 0; i < `N; i++) begin
@@ -270,8 +291,36 @@ module stage_dispatch (
                     CAT_MEM: begin
                         rs_alloc.mem.valid[mem_count]   = 1'b1;
                         rs_alloc.mem.entries[mem_count] = create_rs_entry(i);
+
+                        // Store instructions: MEM category and no dest register
+                        if (!decode_uses_rd[i]) begin
+                            // Create store queue entry at position storeq_used
+                            store_queue_entry_packet[storeq_used] = '{
+                                valid:   1'b1,
+                                rob_idx: rob_alloc_idxs[i],
+                                address: '0,   // filled in later by execute
+                                data:    '0,   // filled in later by execute
+                                default: '0
+                            };
+
+                            // Tell the RS entry which SQ index this store owns
+                            rs_alloc.mem.entries[mem_count].store_queue_idx = store_queue_alloc_idxs[storeq_used];
+
+                            // Move to next free SQ allocation lane
+                            storeq_used++;
+                        end
+                        // else: load instruction
+                        //      - it still uses RS_MEM
+                        //      - but it does NOT allocate a store queue entry
+                        //      - create_rs_entry already set store_queue_idx = '0
+
                         mem_count++;
                     end
+                    // CAT_MEM: begin
+                    //     rs_alloc.mem.valid[mem_count]   = 1'b1;
+                    //     rs_alloc.mem.entries[mem_count] = create_rs_entry(i);
+                    //     mem_count++;
+                    // end
                 endcase
 
                 // Request physical register allocation
