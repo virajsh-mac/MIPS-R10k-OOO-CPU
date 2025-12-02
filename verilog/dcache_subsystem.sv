@@ -5,8 +5,8 @@ module dcache_subsystem (
     input clock,
     input reset,
 
-    // Fetch
-    input  I_ADDR_PACKET [1:0]  read_addrs,  // read_addr[0] is older instructions
+    // Memory operations read
+    input  D_ADDR_PACKET [1:0]  read_addrs,  // read_addr[0] is older operations
     output CACHE_DATA [1:0]     cache_outs,
 
     // Mem.sv IOs - Read requests
@@ -25,7 +25,7 @@ module dcache_subsystem (
 );
 
     // Internal wires
-    I_ADDR_PACKET dcache_write_addr, oldest_miss_addr;
+    D_ADDR_PACKET dcache_write_addr, oldest_miss_addr;
     logic dcache_full;
     D_MSHR_PACKET new_mshr_entry;
     D_CACHE_LINE evicted_line, writeback_line;
@@ -113,6 +113,8 @@ module dcache_subsystem (
             mem_write_addr.valid = 1'b1;
             mem_write_addr.addr = '{zeros: 16'b0,
                                    tag: writeback_line.tag,
+                                   index: writeback_line.index,
+                                   bank: writeback_line.bank,
                                    block_offset: 3'b0};
             mem_write_data = writeback_line.data;
         end
@@ -134,7 +136,7 @@ module dcache_subsystem (
         if (mem_req_accepted && current_req_tag != 0) begin
             new_mshr_entry = '{valid: 1'b1,
                               mem_tag: current_req_tag,
-                              d_tag: mem_req_addr.addr.tag};
+                              d_addr: mem_req_addr.addr};
         end
     end
 
@@ -156,7 +158,7 @@ module d_mshr #(
 
     // Mem data back
     input  MEM_TAG       mem_data_tag,
-    output I_ADDR_PACKET mem_data_d_addr  // to write to dcache
+    output D_ADDR_PACKET mem_data_d_addr  // to write to dcache
 );
 
     // MSHR Internals
@@ -168,7 +170,7 @@ module d_mshr #(
     always_comb begin
         addr_found = 1'b0;
         for (int i = 0; i < MSHR_WIDTH; i++) begin
-            if (mshr_entries[i].valid && (mshr_entries[i].d_tag == snooping_addr.tag)) begin
+            if (mshr_entries[i].valid && (mshr_entries[i].d_addr.tag == snooping_addr.tag)) begin
                 addr_found = 1'b1;
             end
         end
@@ -194,9 +196,7 @@ module d_mshr #(
             next_head = D_CACHE_INDEX_BITS'((head + 1'b1) % MSHR_WIDTH);
             next_mshr_entries[head].valid = '0;
             mem_data_d_addr.valid = 1'b1;
-            mem_data_d_addr.addr = '{zeros: 16'b0,
-                                     tag: mshr_entries[head].d_tag,
-                                     block_offset: 3'b0};
+            mem_data_d_addr.addr = mshr_entries[head].d_addr;
         end
 
         // New memory request, push new MSHR Entry
@@ -223,22 +223,22 @@ endmodule
 module dcache #(
     parameter MEM_DEPTH = `DCACHE_LINES,
     parameter D_CACHE_INDEX_BITS = $clog2(MEM_DEPTH),
-    parameter MEM_WIDTH = 1 + 1 + `DTAG_BITS + `MEM_BLOCK_BITS  // valid + dirty + tag + data
+    parameter MEM_WIDTH = 1 + 1 + `DTAG_BITS + `DSET_INDEX_BITS + 1 + `MEM_BLOCK_BITS  // valid + dirty + tag + index + bank + data
 ) (
     input clock,
     input reset,
 
-    // Fetch Stage read
-    input I_ADDR_PACKET [1:0] read_addrs,
+    // Memory operations read
+    input D_ADDR_PACKET [1:0] read_addrs,
     output CACHE_DATA [1:0] cache_outs,
 
     // Prefetch snooping
-    input  I_ADDR_PACKET snooping_addr,  // to decide whether to send mem request
+    input  D_ADDR_PACKET snooping_addr,  // to decide whether to send mem request
     output logic         addr_found,
     output logic         full,
 
     // Dcache write mem_data, when mem_data_tag matches head of MSHR
-    input I_ADDR_PACKET write_addr,
+    input D_ADDR_PACKET write_addr,
     input MEM_BLOCK     write_data,
     
     // Victim cache interface - output evicted lines
@@ -297,6 +297,8 @@ module dcache #(
         cache_line_write = '{valid: write_addr.valid,
                             dirty: 1'b0,  // Data from memory is clean
                             tag: write_addr.addr.tag,
+                            index: write_addr.addr.index,
+                            bank: write_addr.addr.bank,
                             data: write_data};
         evicted_line = '0;
         evicted_valid = 1'b0;
@@ -357,7 +359,7 @@ endmodule
 module victim_cache #(
     parameter VICTIM_DEPTH = `DCACHE_VICTIM_SZ,
     parameter VICTIM_INDEX_BITS = $clog2(VICTIM_DEPTH),
-    parameter MEM_WIDTH = 1 + 1 + `DTAG_BITS + `MEM_BLOCK_BITS  // valid + dirty + tag + data
+    parameter MEM_WIDTH = 1 + 1 + `DTAG_BITS + `DSET_INDEX_BITS + 1 + `MEM_BLOCK_BITS  // valid + dirty + tag + index + bank + data
 ) (
     input clock,
     input reset,
@@ -367,7 +369,7 @@ module victim_cache #(
     input logic        evicted_valid,
 
     // Read interface for checking hits
-    input  I_ADDR_PACKET [1:0] read_addrs,
+    input  D_ADDR_PACKET [1:0] read_addrs,
     output CACHE_DATA [1:0]    victim_outs,
 
     // Writeback interface - evicted dirty line from victim cache

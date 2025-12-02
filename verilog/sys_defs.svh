@@ -182,6 +182,8 @@ typedef struct packed {
     logic valid;
     logic dirty;
     logic [`DTAG_BITS-1:0] tag;
+    logic [`DSET_INDEX_BITS-1:0] index;
+    logic bank;
     MEM_BLOCK data;
 } D_CACHE_LINE;
 
@@ -203,6 +205,11 @@ typedef struct packed {
 
 typedef struct packed {
     logic valid;
+    D_ADDR  addr;
+} D_ADDR_PACKET;
+
+typedef struct packed {
+    logic valid;
     I_TAG  addr;
 } I_TAG_PACKET;
 
@@ -215,7 +222,7 @@ typedef struct packed {
 typedef struct packed {
     logic   valid;
     MEM_TAG mem_tag;
-    D_TAG   d_tag;
+    D_ADDR  d_addr;
 } D_MSHR_PACKET;
 
 typedef struct packed {
@@ -673,6 +680,13 @@ typedef struct packed {
     ROB_IDX                rob_idx;   // associated rob idx (may not be needed but kept for squashing)
     logic                  valid;     // Entry occupancy bit
 } STOREQ_ENTRY;
+
+typedef struct packed {
+    logic valid;
+    ADDR  addr;
+    DATA  data;
+    STOREQ_IDX store_queue_idx;
+} EXECUTE_STOREQ_ENTRY;
 
 typedef struct packed {
     logic [`NUM_FU_MEM-1:0] valid;
