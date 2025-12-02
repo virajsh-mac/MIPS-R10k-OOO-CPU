@@ -185,18 +185,13 @@ module dcache #(
     input MEM_BLOCK     write_data
 );
 
-    wor CACHE_DATA [1:0]                  cache_outs_temp;
+    CACHE_DATA [1:0]                  cache_outs_temp;
     D_CACHE_LINE [MEM_DEPTH-1:0]          cache_lines;
     D_CACHE_LINE                          cache_line_write;
     logic [MEM_DEPTH-1:0]                 cache_write_enable_mask;
     logic [MEM_DEPTH-1:0]                 cache_write_no_evict_one_hot;
     logic [D_CACHE_INDEX_BITS-1:0]        cache_write_evict_index;
-    logic [MEM_DEPTH-1:0]                 cache_write_evict_one_hot;
-
-    logic [1:0][MEM_DEPTH-1:0]            cache_reads_one_hot;
-    logic [1:0][D_CACHE_INDEX_BITS-1:0]   cache_reads_index;
-
-    logic [MEM_DEPTH-1:0]                 snooping_one_hot;
+    logic [D_CACHE_INDEX_BITS-1:0]        lfsr_out;
     logic [MEM_DEPTH-1:0]                 valid_bits;
 
     memDP #(
@@ -223,11 +218,16 @@ module dcache #(
     );
 
     // Write selection random eviction
-    LFSR LFSR_inst (
+    LFSR #(
+        .WIDTH(D_CACHE_INDEX_BITS)
+    ) LFSR_inst (
         .clk(clock),
         .rst(reset),
-        .op(cache_write_evict_index)
+        .op(lfsr_out)
     );
+    
+    // Modulo to ensure index is within bounds
+    assign cache_write_evict_index = D_CACHE_INDEX_BITS'(lfsr_out % MEM_DEPTH);
 
 
     // Cache write logic
@@ -262,10 +262,11 @@ module dcache #(
 
     // Full detection
     always_comb begin
-        full = 1'b1;
+        // Extract valid bits
         for (int i = 0; i < MEM_DEPTH; i++) begin
-            if (!cache_lines[i].valid) full = 1'b0;
+            valid_bits[i] = cache_lines[i].valid;
         end
+        full = &valid_bits;
     end
 
     // Cache read logic
