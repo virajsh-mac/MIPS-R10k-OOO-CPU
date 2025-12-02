@@ -65,9 +65,7 @@ module mem_fu (
                     func == STORE_WORD || func == STORE_DOUBLE);
 
         // Check if pending load now hits cache
-        pending_load_hit = pending_load.valid && cache_hit_data.valid &&
-                          (pending_load.addr.tag == current_dcache_addr.tag) &&
-                          (pending_load.addr.block_offset == current_dcache_addr.block_offset);
+        pending_load_hit = pending_load.valid && cache_hit_data.valid;
     end
 
     // Store queue entry generation

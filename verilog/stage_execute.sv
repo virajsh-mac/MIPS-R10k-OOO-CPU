@@ -415,6 +415,8 @@ module stage_execute (
     generate
         for (genvar i = 0; i < `NUM_FU_MEM; i++) begin : mem_fu_gen
             mem_fu mem_inst (
+                .clock(clock),
+                .reset(reset | mispredict),
                 .valid(issue_entries.mem[i].valid),
                 .func(mem_funcs[i]),
                 .rs1(mem_rs1[i]),
