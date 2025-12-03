@@ -32,9 +32,14 @@ module store_queue (
     input logic                     mispredict,
     input logic [$clog2(`N+1)-1:0]  free_count,  // number of entries to free (from rob)
 
-   // output logic [$clog2(`LSQ_SZ)-1:0] complete_ptr, //not being used rn might use later
-
-    output logic                       unexecuted_store
+    // Outputs
+    output logic [$clog2(`LSQ_SZ)-1:0] complete_ptr,  // First index that is NOT (valid && executed)
+    output logic                       unexecuted_store,  // Has any store that is valid but not yet executed
+    
+    // To D-Cache
+    output logic                    dcache_store_valid,
+    output ADDR                     dcache_store_addr,
+    output DATA                     dcache_store_data
 );
 
     // ============================================================
@@ -55,10 +60,23 @@ module store_queue (
         tail_idx_next        = tail_idx;
         executed_next       = executed;
 
+        // D-Cache Outputs (Default)
+        dcache_store_valid = 1'b0;
+        dcache_store_addr  = '0;
+        dcache_store_data  = '0;
+
         // ============================
         // 1. Retire logic
         // ============================
-        // Clear up to free_count entries starting at head
+        // Output the head store to the dcache (only if executed)
+        // Retire should only commit stores that have been marked complete in the ROB,
+        // which requires the store to have executed and computed its address/data
+        if (sq_entries[head_idx].valid && executed[head_idx]) begin
+            dcache_store_valid = 1'b1;
+            dcache_store_addr  = sq_entries[head_idx].address;
+            dcache_store_data  = sq_entries[head_idx].data;
+        end
+
         for (int i = 0; i < free_count; i++) begin
             sq_entries_next[(head_idx + i) % `LSQ_SZ].valid = 1'b0;
             executed_next[(head_idx + i) % `LSQ_SZ]        = 1'b0; 
@@ -128,7 +146,7 @@ module store_queue (
             end
         end
 
-        // complete_ptr = ptr;
+        complete_ptr = ptr;
     end
 
     // ------------------------------------------------------------

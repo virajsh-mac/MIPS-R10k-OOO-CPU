@@ -130,6 +130,19 @@ module cpu (
     // From ROB: how many SQ entries to free this cycle
     logic [$clog2(`N+1)-1:0] sq_free_count;
 
+    // From Store Queue
+    logic [$clog2(`LSQ_SZ)-1:0] sq_complete_ptr;
+    logic sq_unexecuted_store;
+
+    // From Store Queue to D-Cache (Processor Store)
+    logic sq_to_dcache_valid;
+    ADDR  sq_to_dcache_addr;
+    DATA  sq_to_dcache_data;
+
+    // Retire <-> D-Cache Handshake
+    logic retire_store_request;
+    logic dcache_store_response;
+
     // Free list allocation signals
     logic                   [                         `N-1:0]                        free_alloc_valid;
     PHYS_TAG                [                         `N-1:0]                        allocated_phys;
@@ -257,8 +270,8 @@ module cpu (
     // TODO: Connect these to actual memory operation addresses from execute stage
     D_ADDR_PACKET          [1:0] d_cache_read_addrs;
     CACHE_DATA             [1:0] dcache_data;
-    I_ADDR_PACKET                dcache_mem_req_addr;
-    I_ADDR_PACKET                dcache_mem_write_addr;
+    D_ADDR_PACKET                dcache_mem_req_addr;
+    D_ADDR_PACKET                dcache_mem_write_addr;
     MEM_BLOCK                    dcache_mem_write_data;
     logic                        dcache_mem_write_valid;
     logic                        dcache_mem_req_accepted;
@@ -282,7 +295,12 @@ module cpu (
         // Arbitor IOs - Write requests (dirty writebacks)
         .mem_write_addr   (dcache_mem_write_addr),
         .mem_write_data   (dcache_mem_write_data),
-        .mem_write_valid  (dcache_mem_write_valid)
+        .mem_write_valid  (dcache_mem_write_valid),
+        // Processor Stores
+        .proc_store_valid (retire_store_request), // Driven by Retire, using data from SQ
+        .proc_store_addr  (sq_to_dcache_addr),
+        .proc_store_data  (sq_to_dcache_data),
+        .proc_store_response (dcache_store_response)
     );
     //////////////////////////////////////////////////
     //                                              //
@@ -292,6 +310,10 @@ module cpu (
 
     // Arbitration: Data requests (dcache) prioritized over instruction requests (icache)
     // Writes: Only dcache writes, no conflicts
+    // 
+    // D_ADDR to 32-bit address conversion:
+    // D_ADDR stores: tag = addr[31:12] (20 bits), block_offset = addr[4:3] (2 bits)
+    // To reconstruct line-aligned address: {tag[19:0], 12'b0}
     always_comb begin
         // Default values
         proc2mem_command = MEM_NONE;
@@ -303,7 +325,8 @@ module cpu (
         // Priority 1: Dcache writes (dirty writebacks)
         if (dcache_mem_write_valid) begin
             proc2mem_command = MEM_STORE;
-            proc2mem_addr    = dcache_mem_write_addr.addr;
+            // Convert D_ADDR to 32-bit line-aligned address
+            proc2mem_addr    = {dcache_mem_write_addr.addr.tag[19:0], 12'b0};
             proc2mem_data    = dcache_mem_write_data;
             // Writes are always accepted if transaction tag is available
             // Note: mem_req_accepted logic is for reads only
@@ -311,7 +334,8 @@ module cpu (
         // Priority 2: Dcache reads (data memory operations)
         else if (dcache_mem_req_addr.valid) begin
             proc2mem_command = MEM_LOAD;
-            proc2mem_addr    = dcache_mem_req_addr.addr;
+            // Convert D_ADDR to 32-bit line-aligned address
+            proc2mem_addr    = {dcache_mem_req_addr.addr.tag[19:0], 12'b0};
             dcache_mem_req_accepted = (mem2proc_transaction_tag != 0);
         end
         // Priority 3: Icache reads (instruction fetch)
@@ -551,8 +575,14 @@ module cpu (
         .mispredict(mispredict),
         .free_count(sq_free_count),
 
-        // .complete_ptr(sq_complete_ptr),
-        .unexecuted_store(sq_unexecuted_store)
+        // Outputs
+        .complete_ptr(sq_complete_ptr),
+        .unexecuted_store(sq_unexecuted_store),
+        
+        // To D-Cache
+        .dcache_store_valid(sq_to_dcache_valid),
+        .dcache_store_addr (sq_to_dcache_addr),
+        .dcache_store_data (sq_to_dcache_data)
     );
 
     //////////////////////////////////////////////////
@@ -1013,7 +1043,14 @@ module cpu (
         .freelist_restore_mask(freelist_restore_mask),
 
         // to store queue: free entries and writes to DCache
-        .sq_free_count(sq_free_count)
+        .sq_free_count(sq_free_count),
+
+        // From store queue
+        .sq_head_valid(sq_to_dcache_valid),
+
+        // To D-Cache
+        .dcache_store_request(retire_store_request),
+        .dcache_store_response(dcache_store_response)
     );
 
     //////////////////////////////////////////////////

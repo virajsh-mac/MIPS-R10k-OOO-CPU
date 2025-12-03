@@ -32,6 +32,7 @@ module mem_fu (
         logic valid;
         PHYS_TAG dest_tag;
         D_ADDR addr;
+        logic word_offset;  // bit [2] of full address for word selection
     } PENDING_LOAD;
 
     PENDING_LOAD pending_load, pending_load_next;
@@ -84,6 +85,29 @@ module mem_fu (
         end
     end
 
+    // Extract correct word from cache line based on address
+    DATA loaded_data;
+    logic word_select;
+    always_comb begin
+        // Determine which word to extract: use pending load offset if that's what hit
+        // otherwise use current instruction's address
+        if (pending_load_hit) begin
+            word_select = pending_load.word_offset;
+        end else begin
+            word_select = addr[2];
+        end
+        
+        // Extract word from 64-bit cache line based on word offset
+        if (word_select) begin
+            loaded_data = cache_hit_data.data.word_level[1];  // Upper word
+        end else begin
+            loaded_data = cache_hit_data.data.word_level[0];  // Lower word
+        end
+        
+        // TODO: Handle byte/halfword loads with proper sign extension
+        // For now, assumes all loads are word-sized
+    end
+
     // CDB result and request generation
     always_comb begin
         if (pending_load_hit) begin
@@ -91,19 +115,19 @@ module mem_fu (
             cdb_result = '{
                 valid: 1'b1,
                 tag: pending_load.dest_tag,
-                data: cache_hit_data.data
+                data: loaded_data
             };
             cdb_request = 1'b1;
         end else if (valid && is_load && cache_hit_data.valid) begin
-            // New load hits cache immediately
+            // New load hits cache immediately (no store queue forwarding yet)
             cdb_result = '{
                 valid: 1'b1,
                 tag: dest_tag,
-                data: cache_hit_data.data
+                data: loaded_data
             };
             cdb_request = 1'b1;
         end else if (valid && is_store) begin
-            // Store completes immediately (no data result)
+            // Store completes immediately (address/data sent to store queue)
             cdb_result = '0;
             cdb_request = 1'b1;
         end else begin
@@ -114,13 +138,15 @@ module mem_fu (
     end
 
     // Dcache request generation
+    // NOTE: Load-Store Forwarding is NOT yet implemented
+    // Loads always go to D-cache; they do not check store queue for newer values
     always_comb begin
         if (valid && is_load) begin
-            // New load request
+            // New load request - goes directly to dcache
             is_load_request = 1'b1;
             dcache_addr = current_dcache_addr;
         end else if (pending_load.valid) begin
-            // Continue requesting for pending load
+            // Continue requesting for pending load (cache miss case)
             is_load_request = 1'b1;
             dcache_addr = pending_load.addr;
         end else begin
@@ -145,7 +171,8 @@ module mem_fu (
                     zeros: 16'b0,
                     tag: addr[31:12],
                     block_offset: addr[4:3]
-                }
+                },
+                word_offset: addr[2]
             };
         end
     end

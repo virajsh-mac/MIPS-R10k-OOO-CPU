@@ -282,7 +282,6 @@ module stage_dispatch (
                     pred_taken: dispatch_window[i].bp_pred_taken,  // No branch prediction
                     ghr_snapshot: dispatch_window[i].bp_ghr_snapshot,
                     halt: decode_halt[i],
-                    is_store: is_store,
                     default: '0
                 };
 

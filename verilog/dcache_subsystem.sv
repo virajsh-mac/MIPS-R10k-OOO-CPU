@@ -15,22 +15,39 @@ module dcache_subsystem (
     input MEM_TAG               mem_data_tag,
 
     // Arbitor IOs - Read requests
-    output I_ADDR_PACKET        mem_req_addr,
+    output D_ADDR_PACKET        mem_req_addr,
     input  logic                mem_req_accepted,
     
     // Arbitor IOs - Write requests (dirty writebacks)
-    output I_ADDR_PACKET        mem_write_addr,
+    output D_ADDR_PACKET        mem_write_addr,
     output MEM_BLOCK            mem_write_data,
-    output logic                mem_write_valid
+    output logic                mem_write_valid,
+
+    // Processor Store Interface (from Store Queue)
+    input logic                 proc_store_valid,
+    input ADDR                  proc_store_addr,
+    input DATA                  proc_store_data,
+    output logic                proc_store_response  // 1 = Store Complete, 0 = Stall/Retry
 );
 
     // Internal wires
-    D_ADDR_PACKET dcache_write_addr, oldest_miss_addr;
+    D_ADDR_PACKET dcache_write_addr, oldest_miss_addr, dcache_write_addr_refill;
     logic dcache_full;
     D_MSHR_PACKET new_mshr_entry;
-    D_CACHE_LINE evicted_line, writeback_line;
-    logic evicted_valid, writeback_valid;
-    CACHE_DATA [1:0] dcache_outs, victim_outs, combined_outs;
+    D_CACHE_LINE evicted_line;
+    logic evicted_valid;
+    CACHE_DATA [1:0] dcache_outs;
+    logic mshr_addr_found;  // MSHR already has this address
+
+    // Store logic signals
+    D_ADDR_PACKET store_req_addr;
+    logic     store_hit_dcache;
+
+    // D-cache write control signals
+    D_ADDR_PACKET dcache_write_addr_refill_local;
+    logic         dcache_store_en_local;
+    MEM_BLOCK     dcache_store_data_local;
+    logic [7:0]   dcache_store_byte_en;  // Byte enable mask for sub-word stores
 
     dcache dcache_inst (
         .clock        (clock),
@@ -38,97 +55,150 @@ module dcache_subsystem (
         // Fetch Stage read
         .read_addrs   (read_addrs),
         .cache_outs   (dcache_outs),
-        // Prefetch snooping - removed for dcache
-        .snooping_addr('0),
-        .addr_found   (),
+        // Snoop for store hits
+        .snooping_addr(store_req_addr),
+        .addr_found   (store_hit_dcache),
         .full         (dcache_full),
-        // Dcache write mem_data, when mem_data_tag matches head of MSHR
+        // Dcache write mem_data (refill)
         .write_addr   (dcache_write_addr),
         .write_data   (mem_data),
-        // Victim cache interface
+        // Dcache Store Update
+        .store_en     (dcache_store_en_local),
+        .store_addr   (store_req_addr),
+        .store_data   (dcache_store_data_local),
+        .store_byte_en(dcache_store_byte_en),
+        // Eviction interface (for dirty writeback to memory)
         .evicted_line (evicted_line),
         .evicted_valid(evicted_valid)
     );
 
-    victim_cache victim_cache_inst (
-        .clock          (clock),
-        .reset          (reset),
-        // Evicted line from dcache
-        .evicted_line   (evicted_line),
-        .evicted_valid  (evicted_valid),
-        // Read interface
-        .read_addrs     (read_addrs),
-        .victim_outs    (victim_outs),
-        // Writeback interface
-        .writeback_line (writeback_line),
-        .writeback_valid(writeback_valid)
-    );
-
-    // Combine dcache and victim cache outputs
-    // Priority: dcache hits take precedence over victim cache hits
-    always_comb begin
-        for (int i = 0; i < 2; i++) begin
-            if (dcache_outs[i].valid) begin
-                combined_outs[i] = dcache_outs[i];
-            end else begin
-                combined_outs[i] = victim_outs[i];
-            end
-        end
-    end
-    assign cache_outs = combined_outs;
-
+    // Direct output from dcache (no victim cache)
+    assign cache_outs = dcache_outs;
 
     d_mshr d_mshr_inst (
         .clock          (clock),
         .reset          (reset),
-        // Prefetch snooping - removed for dcache
-        .snooping_addr  ('0),
-        .addr_found     (),
+        // Snoop for duplicate requests (loads & stores)
+        .snooping_addr  (oldest_miss_addr.addr),
+        .addr_found     (mshr_addr_found),
         // When mem_req_accepted
         .new_entry      (new_mshr_entry),
         // Mem data back
         .mem_data_tag   (mem_data_tag),
-        .mem_data_d_addr(dcache_write_addr)
+        .mem_data_d_addr(dcache_write_addr_refill)
     );
 
-    // Oldest miss address logic - check combined outputs (dcache + victim cache)
+    assign dcache_write_addr_refill_local = dcache_write_addr_refill;
+
+    // D-cache write mux: Refill takes priority
+    always_comb begin
+        dcache_write_addr = '0;
+        if (dcache_write_addr_refill_local.valid) begin
+            dcache_write_addr = dcache_write_addr_refill_local;
+        end 
+    end
+
+    // Store Request Processing
+    // Convert processor store address to cache address format and generate byte enables
+    // NOTE: Address breakdown matches mem_fu.sv:
+    //   tag = addr[31:12] (20 bits)
+    //   block_offset = addr[4:3] (2 bits - word index within 8-byte line)
+    //   word_offset = addr[2] (1 bit - which word: 0=lower, 1=upper)
+    always_comb begin
+        store_req_addr = '0;
+        dcache_store_data_local = '0;
+        dcache_store_byte_en = '0;
+        
+        if (proc_store_valid) begin
+            store_req_addr.valid = 1'b1;
+            store_req_addr.addr.tag = proc_store_addr[31:12];  // Match mem_fu.sv tag extraction
+            store_req_addr.addr.block_offset = proc_store_addr[4:3];  // Word index within line
+            store_req_addr.addr.zeros = '0;
+            
+            // For now, assume WORD stores (4 bytes)
+            // Place data in correct position within 64-bit line based on word offset (bit 2)
+            // TODO: Support BYTE and HALF stores with appropriate byte enables
+            if (proc_store_addr[2]) begin
+                // Upper word (bytes 4-7)
+                dcache_store_data_local.word_level[1] = proc_store_data;
+                dcache_store_byte_en = 8'b1111_0000;  // Enable upper 4 bytes
+            end else begin
+                // Lower word (bytes 0-3)
+                dcache_store_data_local.word_level[0] = proc_store_data;
+                dcache_store_byte_en = 8'b0000_1111;  // Enable lower 4 bytes
+            end
+        end
+    end
+
+    // Store completion logic
+    // A store can only complete if the line is already in the cache (hit)
+    // If it misses, we request the line and the store will retry next cycle
+    always_comb begin
+        dcache_store_en_local = 1'b0;
+        proc_store_response = 1'b0;
+
+        // Only process stores if NO refill is active (Refill has priority)
+        if (proc_store_valid && !dcache_write_addr_refill_local.valid) begin
+            if (store_hit_dcache) begin
+                // Hit: write to cache and signal completion
+                dcache_store_en_local = 1'b1;
+                proc_store_response = 1'b1;
+            end
+            // Miss: response stays 0 (stall), line will be fetched via MSHR
+        end
+    end
+
+    // Oldest miss address logic - prioritize store misses over load misses
     always_comb begin
         oldest_miss_addr = '0;
-        if (read_addrs[0].valid && !combined_outs[0].valid) begin
+        
+        // If store misses the cache, request the line
+        if (proc_store_valid && !store_hit_dcache) begin
+            oldest_miss_addr.valid = 1'b1;
+            oldest_miss_addr.addr.tag = proc_store_addr[31:12];  // Match mem_fu.sv
+            oldest_miss_addr.addr.block_offset = '0;  // Request full line
+            oldest_miss_addr.addr.zeros = '0;
+        end
+        // Otherwise check for load misses
+        else if (read_addrs[0].valid && !dcache_outs[0].valid) begin
             oldest_miss_addr.valid = 1'b1;
             oldest_miss_addr.addr  = read_addrs[0].addr;
-        end else if (read_addrs[1].valid && !combined_outs[1].valid) begin
+        end else if (read_addrs[1].valid && !dcache_outs[1].valid) begin
             oldest_miss_addr.valid = 1'b1;
             oldest_miss_addr.addr  = read_addrs[1].addr;
         end
     end
 
-    // Mem write logic - send dirty writebacks from victim cache
+    // Memory write logic - send dirty evictions to memory
+    // Since we removed victim cache, evictions go directly to memory
     always_comb begin
-        mem_write_valid = writeback_valid && writeback_line.dirty;
+        mem_write_valid = evicted_valid && evicted_line.dirty;
         mem_write_addr = '0;
         mem_write_data = '0;
         
         if (mem_write_valid) begin
             mem_write_addr.valid = 1'b1;
+            // Reconstruct D_ADDR from stored tag (matches mem_fu.sv format)
             mem_write_addr.addr = '{zeros: 16'b0,
-                                   tag: writeback_line.tag,
-                                   block_offset: 3'b0};
-            mem_write_data = writeback_line.data;
+                                   tag: evicted_line.tag,
+                                   block_offset: '0};
+            mem_write_data = evicted_line.data;
         end
     end
 
-    // Mem read request address logic - handle cache misses
+    // Memory read request logic - handle cache misses
     always_comb begin
         mem_req_addr = '0;
         
-        // Send read requests for cache misses (load/store)
-        if (oldest_miss_addr.valid) begin
+        // Send read requests for cache misses
+        // ARBITRATION: Prioritize dirty writeback over read request
+        // DUPLICATE CHECK: Only send if not already in MSHR
+        if (oldest_miss_addr.valid && !mem_write_valid && !mshr_addr_found) begin
             mem_req_addr = oldest_miss_addr;
         end
     end
 
-    // MSHR entry logic - add immediately when request is accepted and tag is valid
+    // MSHR entry logic - add when request is accepted
     always_comb begin
         new_mshr_entry = '0;
         if (mem_req_accepted && current_req_tag != 0) begin
@@ -140,15 +210,16 @@ module dcache_subsystem (
 
 endmodule
 
-// this should never be full, so no logic for handling full FIFO head tail edge case
+// D-Cache MSHR (Miss Status Handling Register)
+// Tracks outstanding memory requests
 module d_mshr #(
     parameter MSHR_WIDTH = `NUM_MEM_TAGS + `N
 ) (
     input clock,
     input reset,
 
-    // Prefetch snooping
-    input  I_ADDR snooping_addr,  // to decide whether to send mem request
+    // Duplicate request detection
+    input  D_ADDR snooping_addr,
     output logic  addr_found,
 
     // When mem_req_accepted
@@ -156,10 +227,9 @@ module d_mshr #(
 
     // Mem data back
     input  MEM_TAG       mem_data_tag,
-    output D_ADDR_PACKET mem_data_d_addr  // to write to dcache
+    output D_ADDR_PACKET mem_data_d_addr
 );
 
-    // MSHR Internals
     localparam D_CACHE_INDEX_BITS = $clog2(MSHR_WIDTH);
     D_MSHR_PACKET [MSHR_WIDTH-1:0] mshr_entries, next_mshr_entries;
     logic [D_CACHE_INDEX_BITS-1:0] head, next_head, tail, next_tail;
@@ -218,6 +288,7 @@ module d_mshr #(
 
 endmodule
 
+// D-Cache module - fully associative cache with byte-enable store support
 module dcache #(
     parameter MEM_DEPTH = `DCACHE_LINES,
     parameter D_CACHE_INDEX_BITS = $clog2(MEM_DEPTH),
@@ -230,28 +301,38 @@ module dcache #(
     input D_ADDR_PACKET [1:0] read_addrs,
     output CACHE_DATA [1:0] cache_outs,
 
-    // Prefetch snooping
-    input  D_ADDR_PACKET snooping_addr,  // to decide whether to send mem request
+    // Store hit snooping
+    input  D_ADDR_PACKET snooping_addr,
     output logic         addr_found,
     output logic         full,
 
-    // Dcache write mem_data, when mem_data_tag matches head of MSHR
+    // Dcache write (refill from memory)
     input D_ADDR_PACKET write_addr,
     input MEM_BLOCK     write_data,
     
-    // Victim cache interface - output evicted lines
+    // Store update interface (byte-granular)
+    input logic         store_en,
+    input D_ADDR_PACKET store_addr,
+    input MEM_BLOCK     store_data,
+    input logic [7:0]   store_byte_en,  // Byte enable mask
+    
+    // Eviction interface
     output D_CACHE_LINE evicted_line,
     output logic        evicted_valid
 );
 
     CACHE_DATA [1:0]                  cache_outs_temp;
-    D_CACHE_LINE [MEM_DEPTH-1:0]          cache_lines;
-    D_CACHE_LINE                          cache_line_write;
-    logic [MEM_DEPTH-1:0]                 cache_write_enable_mask;
-    logic [MEM_DEPTH-1:0]                 cache_write_no_evict_one_hot;
-    logic [D_CACHE_INDEX_BITS-1:0]        cache_write_evict_index;
-    logic [D_CACHE_INDEX_BITS-1:0]        lfsr_out;
-    logic [MEM_DEPTH-1:0]                 valid_bits;
+    D_CACHE_LINE [MEM_DEPTH-1:0]      cache_lines;
+    D_CACHE_LINE                      cache_line_write;
+    logic [MEM_DEPTH-1:0]             cache_write_enable_mask;
+    logic [MEM_DEPTH-1:0]             cache_write_no_evict_one_hot;
+    logic [D_CACHE_INDEX_BITS-1:0]    cache_write_evict_index;
+    logic [D_CACHE_INDEX_BITS-1:0]    lfsr_out;
+    logic [MEM_DEPTH-1:0]             valid_bits;
+
+    // Hit logic for stores
+    logic [D_CACHE_INDEX_BITS-1:0]    hit_index;
+    logic                             hit_valid;
 
     memDP #(
         .WIDTH(MEM_WIDTH),
@@ -267,7 +348,7 @@ module dcache #(
         .wdata(cache_line_write)
     );
 
-    // Write selection no eviction
+    // Write selection - find free slot
     psel_gen #(
         .WIDTH(MEM_DEPTH),
         .REQS(1'b1)
@@ -276,7 +357,7 @@ module dcache #(
         .gnt(cache_write_no_evict_one_hot)
     );
 
-    // Write selection random eviction
+    // LFSR for random eviction
     LFSR #(
         .WIDTH(D_CACHE_INDEX_BITS)
     ) LFSR_inst (
@@ -285,53 +366,75 @@ module dcache #(
         .op(lfsr_out)
     );
     
-    // Modulo to ensure index is within bounds
     assign cache_write_evict_index = D_CACHE_INDEX_BITS'(lfsr_out % MEM_DEPTH);
 
-
-    // Cache write logic
-    always_comb begin
-        cache_write_enable_mask = '0;
-        cache_line_write = '{valid: write_addr.valid,
-                            dirty: 1'b0,  // Data from memory is clean
-                            tag: write_addr.addr.tag,
-                            data: write_data};
-        evicted_line = '0;
-        evicted_valid = 1'b0;
-        
-        if (write_addr.valid) begin
-            // Try to find an invalid (free) slot first
-            if (|cache_write_no_evict_one_hot) begin
-                cache_write_enable_mask = cache_write_no_evict_one_hot;
-                // No eviction when writing to a free slot
-            end else begin
-                // No free slot, evict using LFSR-selected index
-                cache_write_enable_mask[cache_write_evict_index] = 1'b1;
-                // Output the evicted line to victim cache
-                evicted_line = cache_lines[cache_write_evict_index];
-                evicted_valid = cache_lines[cache_write_evict_index].valid;
-            end
-        end
-    end
-
-    // Prefetch snooping logic
+    // Hit detection for store snooping
     always_comb begin
         addr_found = 1'b0;
+        hit_index = '0;
+        hit_valid = 1'b0;
         for (int i = 0; i < MEM_DEPTH; i++) begin
             if (snooping_addr.valid && cache_lines[i].valid && 
                 (snooping_addr.addr.tag == cache_lines[i].tag)) begin
                 addr_found = 1'b1;
+                hit_index = D_CACHE_INDEX_BITS'(i);
+                hit_valid = 1'b1;
             end
         end
     end
 
     // Full detection
     always_comb begin
-        // Extract valid bits
         for (int i = 0; i < MEM_DEPTH; i++) begin
             valid_bits[i] = cache_lines[i].valid;
         end
         full = &valid_bits;
+    end
+
+    // Cache write logic with byte-enable support for stores
+    MEM_BLOCK merged_data;
+    
+    always_comb begin
+        cache_write_enable_mask = '0;
+        cache_line_write = '0;
+        evicted_line = '0;
+        evicted_valid = 1'b0;
+        merged_data = '0;
+
+        // Priority 1: Refill (allocating new line from memory)
+        if (write_addr.valid) begin
+            cache_line_write = '{valid: 1'b1,
+                                dirty: 1'b0,  // Data from memory is clean
+                                tag: write_addr.addr.tag,
+                                data: write_data};
+            
+            // Try to find a free slot first
+            if (|cache_write_no_evict_one_hot) begin
+                cache_write_enable_mask = cache_write_no_evict_one_hot;
+            end else begin
+                // No free slot, evict using LFSR-selected index
+                cache_write_enable_mask[cache_write_evict_index] = 1'b1;
+                evicted_line = cache_lines[cache_write_evict_index];
+                evicted_valid = cache_lines[cache_write_evict_index].valid;
+            end
+        end
+        // Priority 2: Store update (hit only - merge with existing data)
+        else if (store_en && hit_valid) begin
+            cache_write_enable_mask[hit_index] = 1'b1;
+            
+            // Byte-granular merge: only update bytes enabled by store_byte_en
+            merged_data = cache_lines[hit_index].data;
+            for (int b = 0; b < 8; b++) begin
+                if (store_byte_en[b]) begin
+                    merged_data.byte_level[b] = store_data.byte_level[b];
+                end
+            end
+
+            cache_line_write = '{valid: 1'b1,
+                                dirty: 1'b1,  // Store makes it dirty
+                                tag: cache_lines[hit_index].tag,
+                                data: merged_data};
+        end
     end
 
     // Cache read logic
@@ -348,107 +451,5 @@ module dcache #(
         end
     end
     assign cache_outs = cache_outs_temp;
-
-endmodule
-
-// Victim cache module - FIFO for evicted dcache lines
-module victim_cache #(
-    parameter VICTIM_DEPTH = `DCACHE_VICTIM_SZ,
-    parameter VICTIM_INDEX_BITS = $clog2(VICTIM_DEPTH),
-    parameter MEM_WIDTH = 1 + 1 + `DTAG_BITS + `MEM_BLOCK_BITS  // valid + dirty + tag + data
-) (
-    input clock,
-    input reset,
-
-    // Evicted line from dcache
-    input D_CACHE_LINE evicted_line,
-    input logic        evicted_valid,
-
-    // Read interface for checking hits
-    input  D_ADDR_PACKET [1:0] read_addrs,
-    output CACHE_DATA [1:0]    victim_outs,
-
-    // Writeback interface - evicted dirty line from victim cache
-    output D_CACHE_LINE writeback_line,
-    output logic        writeback_valid
-);
-
-    D_CACHE_LINE [VICTIM_DEPTH-1:0] victim_lines;
-    D_CACHE_LINE                    victim_line_write;
-    logic [VICTIM_DEPTH-1:0]        victim_write_enable_mask;
-    logic [VICTIM_INDEX_BITS-1:0]   head, next_head, tail, next_tail;
-    logic                           full, empty;
-
-    // memDP instances for each victim cache entry
-    memDP #(
-        .WIDTH(MEM_WIDTH),
-        .DEPTH(1'b1)
-    ) victim_line[VICTIM_DEPTH-1:0] (
-        .clock(clock),
-        .reset(reset),
-        .re(1'b1),
-        .raddr(1'b0),
-        .rdata(victim_lines),
-        .we(victim_write_enable_mask),
-        .waddr(1'b0),
-        .wdata(victim_line_write)
-    );
-
-    // FIFO status
-    always_comb begin
-        full = (tail + 1'b1) % VICTIM_DEPTH == head && victim_lines[head].valid;
-        empty = (head == tail) && !victim_lines[head].valid;
-    end
-
-    // FIFO write logic
-    always_comb begin
-        next_head = head;
-        next_tail = tail;
-        victim_write_enable_mask = '0;
-        victim_line_write = '0;
-        writeback_line = '0;
-        writeback_valid = 1'b0;
-
-        if (evicted_valid) begin
-            // Write evicted line to tail
-            victim_write_enable_mask[tail] = 1'b1;
-            victim_line_write = evicted_line;
-            next_tail = VICTIM_INDEX_BITS'((tail + 1'b1) % VICTIM_DEPTH);
-
-            // If full, evict from head
-            if (full) begin
-                writeback_line = victim_lines[head];
-                writeback_valid = victim_lines[head].valid && victim_lines[head].dirty;
-                next_head = VICTIM_INDEX_BITS'((head + 1'b1) % VICTIM_DEPTH);
-            end
-        end
-    end
-
-    // Sequential logic
-    always_ff @(posedge clock) begin
-        if (reset) begin
-            head <= '0;
-            tail <= '0;
-        end else begin
-            head <= next_head;
-            tail <= next_tail;
-        end
-    end
-
-    // Read logic - check for hits
-    CACHE_DATA [1:0] victim_outs_temp;
-    always_comb begin
-        victim_outs_temp = '0;
-        for (int j = 0; j < 2; j++) begin
-            for (int i = 0; i < VICTIM_DEPTH; i++) begin
-                if (read_addrs[j].valid && victim_lines[i].valid &&
-                    (read_addrs[j].addr.tag == victim_lines[i].tag)) begin
-                    victim_outs_temp[j].data = victim_lines[i].data;
-                    victim_outs_temp[j].valid = 1'b1;
-                end
-            end
-        end
-    end
-    assign victim_outs = victim_outs_temp;
 
 endmodule

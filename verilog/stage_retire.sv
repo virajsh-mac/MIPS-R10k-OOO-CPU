@@ -38,7 +38,14 @@ module stage_retire (
     output logic [`PHYS_REG_SZ_R10K-1:0] freelist_restore_mask,
 
     // To store queue: free count
-    output logic [$clog2(`N+1)-1:0]  sq_free_count
+    output logic [$clog2(`N+1)-1:0]  sq_free_count,
+
+    // From store queue: head store is ready
+    input logic sq_head_valid,
+
+    // D-Cache Interface
+    output logic dcache_store_request,
+    input logic  dcache_store_response
 
 );
 
@@ -52,6 +59,8 @@ module stage_retire (
     // Freelist checkpoint for mispredict restore
     logic [`PHYS_REG_SZ_R10K-1:0] freelist_checkpoint_mask, freelist_checkpoint_mask_next;
 
+
+    logic retired_store_this_cycle;
 
     always_comb begin
         freelist_checkpoint_mask_next = freelist_checkpoint_mask;
@@ -67,6 +76,8 @@ module stage_retire (
         entry = '0;
         committed_insts = '0;
         sq_free_count = '0;
+        dcache_store_request = '0;
+        retired_store_this_cycle = 1'b0;
 
         // branch info for fetch
         branch_target_out = '0;
@@ -83,6 +94,33 @@ module stage_retire (
             // Stop at first incomplete instruction (in-order boundary)
             if (!entry.complete) begin
                 break;
+            end
+
+            // Check if this is a store and handle D-Cache interaction
+            // If it's a store, we MUST wait for D-Cache to accept it before committing
+            if (entry.store) begin
+                // We can only retire ONE store per cycle because the D-cache interface
+                // and Store Queue head pointer can only handle one transaction at a time.
+                if (retired_store_this_cycle) begin
+                    break; 
+                end
+
+                // Only request if store queue has the data ready (executed)
+                if (sq_head_valid) begin
+                    dcache_store_request = 1'b1;
+                    
+                    // If D-Cache says "not done yet" (miss or busy), we STALL retirement
+                    if (!dcache_store_response) begin
+                        break; // Stall: do not commit this instruction or any younger ones
+                    end
+                    
+                    // If we are here, the store completed successfully in the cache
+                    sq_free_count++;
+                    retired_store_this_cycle = 1'b1;
+                end else begin
+                    // Store hasn't executed yet (no address/data), stall
+                    break;
+                end
             end
 
             // Record debug info
@@ -105,11 +143,6 @@ module stage_retire (
                     free_mask[entry.prev_phys_rd] = 1'b1;
                     freelist_checkpoint_mask_next[entry.prev_phys_rd] = 1'b1;
                 end
-            end
-
-            // handles store instructions
-            if (entry.store) begin
-                sq_free_count = sq_free_count + 1;
             end
 
             // If this entry is a branch, check for mispredict (compare prediction vs actual)

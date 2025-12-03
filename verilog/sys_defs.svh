@@ -679,7 +679,6 @@ typedef struct packed {
     ADDR           pred_target;    // Predicted branch target
     logic [`BP_GHR_WIDTH-1:0] ghr_snapshot;   // new: GHR snapshot
     logic          mispredict;     // Branch misprediction flag
-    logic          is_store;       // Is this a store?
     logic          halt;           // Is this a halt?
     logic          illegal;        // Is this illegal?
 } ROB_ENTRY;
