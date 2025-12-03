@@ -127,8 +127,11 @@ module testbench;
     logic [`NUM_FU_TOTAL-1:0] cdb_grants_flat;
     CDB_EARLY_TAG_ENTRY [`N-1:0] cdb_early_tags;
 
-    // Dispatch packet debug output
-    FETCH_DISP_PACKET fetch_disp_packet;
+    // Instruction Buffer debug output
+    FETCH_PACKET [`N-1:0] ib_output_disp_wdn;
+
+    // Store Queue entry packet output
+    STOREQ_ENTRY [`N-1:0] sq_entry_packet;
 
     // Issue clear signals debug output
     RS_CLEAR_SIGNALS rs_clear_signals;
@@ -217,8 +220,11 @@ module testbench;
         .cdb_grants_flat_dbg(cdb_grants_flat),
         .cdb_early_tags_dbg(cdb_early_tags),
 
-        // Dispatch packet debug output
-        .fetch_disp_packet_dbg(fetch_disp_packet),
+        // Instruction Buffer outputs
+        .ib_output_disp_wdn_dbg(ib_output_disp_wdn),
+
+        // store queue outputs
+        .sq_entry_packet_dbg(sq_entry_packet),
 
         // Issue clear signals debug output
         .rs_clear_signals_dbg(rs_clear_signals),
@@ -485,165 +491,157 @@ module testbench;
         $display("CPU STATE SNAPSHOT - Cycle %0d", clock_count - 1);
         $display("=================================================================================");
 
-        // $display("\nFetch Packet Output (4-wide bundle):");
+        // ========================================
+        // Fetch Packet
+        // ========================================
+
+        $display("\nFetch Packet Output (4-wide bundle):");
+        // INV SIG
         // $display("  IB Bundle Valid: %b", ib_bundle_valid);
-        // for (integer fp_idx = 0; fp_idx < 4; fp_idx++) begin
-        //     $display("  Packet[%0d]:", fp_idx);
-        //     $display("    Valid:          %b", fetch_packet_out[fp_idx].valid);
-        //     if (fetch_packet_out[fp_idx].valid) begin
-        //         $display("    PC:             0x%08h", fetch_packet_out[fp_idx].pc);
-        //         $display("    Instruction:    0x%08h", fetch_packet_out[fp_idx].inst);
-        //         $display("    Is Branch:      %b", fetch_packet_out[fp_idx].is_branch);
-        //         if (fetch_packet_out[fp_idx].is_branch) begin
-        //             $display("    BP Pred Taken:  %b", fetch_packet_out[fp_idx].bp_pred_taken);
-        //             $display("    BP Pred Target: 0x%08h", fetch_packet_out[fp_idx].bp_pred_target);
-        //             $display("    BP GHR Snapshot: 0b%07b", fetch_packet_out[fp_idx].bp_ghr_snapshot);
-        //         end
-        //     end
-        // end
+        for (integer fp_idx = 0; fp_idx < 4; fp_idx++) begin
+            $display("  Packet[%0d]:", fp_idx);
+            $display("    Valid:          %b", fetch_packet_out[fp_idx].valid);
+            if (fetch_packet_out[fp_idx].valid) begin
+                $display("    PC:             0x%08h", fetch_packet_out[fp_idx].pc);
+                $display("    Instruction:    0x%08h", fetch_packet_out[fp_idx].inst);
+                $display("    Is Branch:      %b", fetch_packet_out[fp_idx].is_branch);
+                if (fetch_packet_out[fp_idx].is_branch) begin
+                    $display("    BP Pred Taken:  %b", fetch_packet_out[fp_idx].bp_pred_taken);
+                    $display("    BP Pred Target: 0x%08h", fetch_packet_out[fp_idx].bp_pred_target);
+                    $display("    BP GHR Snapshot: 0b%07b", fetch_packet_out[fp_idx].bp_ghr_snapshot);
+                end
+            end
+        end
 
-        // // INSTRUCTION BUFFER DEBUG
-        // $display("\n--- INSTRUCTION BUFFER ---");
-        // $display("Buffer State:");
-        // $display("  Head Pointer: %0d | Tail Pointer: %0d | Count: %0d | Free Slots: %0d", ib_head_ptr, ib_tail_ptr, ib_count,
-        //          ib_free_slots);
-        // $display("  Full: %b | Empty: %b", (ib_free_slots == 0), (ib_count == 0));
 
-        // $display("\nPush Operations (this cycle):");
-        // $display("  Num Pushes: %0d", ib_num_pushes);
-        // for (integer push_idx = 0; push_idx < 4; push_idx++) begin
-        //     if (push_idx < ib_num_pushes && ib_new_entries[push_idx].valid) begin
-        //         $display("  Push[%0d]: PC=0x%08h | Inst=0x%08h | Branch=%b", push_idx, ib_new_entries[push_idx].pc,
-        //                  ib_new_entries[push_idx].inst, ib_new_entries[push_idx].is_branch);
-        //     end
-        // end
+        // ========================================
+        // Instruction Buffer Debug (output to Dispatch)
+        // ========================================
+        $display("\n--- INSTRUCTION BUFFER OUTPUT TO DISPATCH ---");
+        for (i = 0; i < `N; i++) begin
+            if (ib_output_disp_wdn[i].valid) begin
+                $display(
+                    "  IB_OUT[%0d]: PC=0x%08h | Inst=0x%08h | Branch=%b | PredTaken=%b | PredTarget=0x%08h | GHR=%0b",
+                    i,
+                    ib_output_disp_wdn[i].pc,
+                    ib_output_disp_wdn[i].inst,
+                    ib_output_disp_wdn[i].is_branch,
+                    ib_output_disp_wdn[i].bp_pred_taken,
+                    ib_output_disp_wdn[i].bp_pred_target,
+                    ib_output_disp_wdn[i].bp_ghr_snapshot
+                );
+            end else begin
+                $display("  IB_OUT[%0d]: INVALID", i);
+            end
+        end
 
-        // $display("\nPop Operations (this cycle):");
-        // $display("  Num Pops: %0d", ib_num_pops);
-        // for (integer pop_idx = 0; pop_idx < 3; pop_idx++) begin
-        //     if (pop_idx < ib_num_pops && ib_popped_entries[pop_idx].valid) begin
-        //         $display("  Pop[%0d]: PC=0x%08h | Inst=0x%08h | Branch=%b", pop_idx, ib_popped_entries[pop_idx].pc,
-        //                  ib_popped_entries[pop_idx].inst, ib_popped_entries[pop_idx].is_branch);
-        //     end
-        // end
 
-        // $display("\nBuffer Contents (valid entries only):");
-        // begin
-        //     integer valid_count = 0;
-        //     for (integer buf_idx = 0; buf_idx < 32 && valid_count < 8; buf_idx++) begin  // Limit output to first 8 entries
-        //         if (ib_buffer_entries[buf_idx].valid) begin
-        //             $display("  Slot[%0d]: PC=0x%08h | Inst=0x%08h | Branch=%b", buf_idx, ib_buffer_entries[buf_idx].pc,
-        //                      ib_buffer_entries[buf_idx].inst, ib_buffer_entries[buf_idx].is_branch);
-        //             valid_count++;
-        //         end
-        //     end
-        //     if (valid_count == 0) begin
-        //         $display("  (Buffer is empty)");
-        //     end else if (valid_count >= 8) begin
-        //         $display("  ... (showing first 8 of %0d total entries)", ib_count);
-        //     end
-        // end
+        // ========================================
+        // Store Queue Debug (entries coming from Dispatch)
+        // ========================================
+        $display("\n--- STORE QUEUE DISPATCH PACKET ---");
+        for (i = 0; i < `N; i++) begin
+            if (sq_entry_packet[i].valid) begin
+                $display(
+                    "  SQ_IN[%0d]: addr=0x%08h | data=0x%08h | rob_idx=%0d",
+                    i,
+                    sq_entry_packet[i].address,
+                    sq_entry_packet[i].data,
+                    sq_entry_packet[i].rob_idx
+                );
+            end else begin
+                $display("  SQ_IN[%0d]: INVALID", i);
+            end
+        end
 
-        // // FETCH/DISPATCH STAGE
-        // $display("\n--- FETCH/DISPATCH STAGE ---");
-        // $display("Dispatch count: %0d", dispatch_count);
-        // // $display("Fake PC: 0x%08h | Consumed: %0d", fake_pc, fake_consumed);
+        // RESERVATION STATIONS
+        $display("\n--- RESERVATION STATIONS ---");
 
-        // for (integer i = 0; i < `N; i++) begin
-        //     // if (i < dispatch_count) begin
-        //     $display("DISP[%0d]: PC=0x%08h | Inst=0x%08h | Uses_RD=%b | RD=%0d", i, fetch_disp_packet.entries[i].PC,
-        //              fetch_disp_packet.entries[i].inst, fetch_disp_packet.entries[i].uses_rd,
-        //              fetch_disp_packet.entries[i].rd_idx);
-        //     // end
-        // end
+        // Show RS requests (ready entries)
+        $display("RS Requests (ready entries):");
+        $display("  ALU requests: %b", rs_alu_requests);
+        $display("  MULT requests: %b", rs_mult_requests);
+        $display("  BRANCH requests: %b", rs_branch_requests);
+        $display("  MEM requests: %b", rs_mem_requests);
 
-        // // RESERVATION STATIONS
-        // $display("\n--- RESERVATION STATIONS ---");
+        // ALU RS
+        $display("\nALU RS (%0d entries):", `RS_ALU_SZ);
+        for (integer i = 0; i < `RS_ALU_SZ; i++) begin
+            if (rs_alu_entries[i].valid) begin
+                $display("  ALU_RS[%0d]: PC=0x%08h | OP=%0d | Dest=P%0d | Src1=P%0d(%b) | Src2=P%0d(%b) | ROB=%0d", i,
+                         rs_alu_entries[i].PC, rs_alu_entries[i].op_type.category, rs_alu_entries[i].dest_tag,
+                         rs_alu_entries[i].src1_tag, rs_alu_entries[i].src1_ready, rs_alu_entries[i].src2_tag,
+                         rs_alu_entries[i].src2_ready, rs_alu_entries[i].rob_idx);
+            end else begin
+                $display("  ALU_RS[%0d]: EMPTY", i);
+            end
+        end
 
-        // // Show RS requests (ready entries)
-        // $display("RS Requests (ready entries):");
-        // $display("  ALU requests: %b", rs_alu_requests);
-        // $display("  MULT requests: %b", rs_mult_requests);
-        // $display("  BRANCH requests: %b", rs_branch_requests);
-        // $display("  MEM requests: %b", rs_mem_requests);
+        // MULT RS
+        $display("\nMULT RS (%0d entries):", `RS_MULT_SZ);
+        for (integer i = 0; i < `RS_MULT_SZ; i++) begin
+            if (rs_mult_entries[i].valid) begin
+                $display("  MULT_RS[%0d]: PC=0x%08h | OP=%0d | Dest=P%0d | Src1=P%0d(%b) | Src2=P%0d(%b) | ROB=%0d", i,
+                         rs_mult_entries[i].PC, rs_mult_entries[i].op_type.category, rs_mult_entries[i].dest_tag,
+                         rs_mult_entries[i].src1_tag, rs_mult_entries[i].src1_ready, rs_mult_entries[i].src2_tag,
+                         rs_mult_entries[i].src2_ready, rs_mult_entries[i].rob_idx);
+            end else begin
+                $display("  MULT_RS[%0d]: EMPTY", i);
+            end
+        end
 
-        // // ALU RS
-        // $display("\nALU RS (%0d entries):", `RS_ALU_SZ);
-        // for (integer i = 0; i < `RS_ALU_SZ; i++) begin
-        //     if (rs_alu_entries[i].valid) begin
-        //         $display("  ALU_RS[%0d]: PC=0x%08h | OP=%0d | Dest=P%0d | Src1=P%0d(%b) | Src2=P%0d(%b) | ROB=%0d", i,
-        //                  rs_alu_entries[i].PC, rs_alu_entries[i].op_type.category, rs_alu_entries[i].dest_tag,
-        //                  rs_alu_entries[i].src1_tag, rs_alu_entries[i].src1_ready, rs_alu_entries[i].src2_tag,
-        //                  rs_alu_entries[i].src2_ready, rs_alu_entries[i].rob_idx);
-        //     end else begin
-        //         $display("  ALU_RS[%0d]: EMPTY", i);
-        //     end
-        // end
+        // BRANCH RS
+        $display("\nBRANCH RS (%0d entries):", `RS_BRANCH_SZ);
+        for (integer i = 0; i < `RS_BRANCH_SZ; i++) begin
+            if (rs_branch_entries[i].valid) begin
+                $display("  BR_RS[%0d]: PC=0x%08h | OP=%0d | Dest=P%0d | Src1=P%0d(%b) | Src2=P%0d(%b) | ROB=%0d", i,
+                         rs_branch_entries[i].PC, rs_branch_entries[i].op_type.category, rs_branch_entries[i].dest_tag,
+                         rs_branch_entries[i].src1_tag, rs_branch_entries[i].src1_ready, rs_branch_entries[i].src2_tag,
+                         rs_branch_entries[i].src2_ready, rs_branch_entries[i].rob_idx);
+            end else begin
+                $display("  BR_RS[%0d]: EMPTY", i);
+            end
+        end
 
-        // // MULT RS
-        // $display("\nMULT RS (%0d entries):", `RS_MULT_SZ);
-        // for (integer i = 0; i < `RS_MULT_SZ; i++) begin
-        //     if (rs_mult_entries[i].valid) begin
-        //         $display("  MULT_RS[%0d]: PC=0x%08h | OP=%0d | Dest=P%0d | Src1=P%0d(%b) | Src2=P%0d(%b) | ROB=%0d", i,
-        //                  rs_mult_entries[i].PC, rs_mult_entries[i].op_type.category, rs_mult_entries[i].dest_tag,
-        //                  rs_mult_entries[i].src1_tag, rs_mult_entries[i].src1_ready, rs_mult_entries[i].src2_tag,
-        //                  rs_mult_entries[i].src2_ready, rs_mult_entries[i].rob_idx);
-        //     end else begin
-        //         $display("  MULT_RS[%0d]: EMPTY", i);
-        //     end
-        // end
+        // MEM RS
+        $display("\nMEM RS (%0d entries):", `RS_MEM_SZ);
+        for (integer i = 0; i < `RS_MEM_SZ; i++) begin
+            if (rs_mem_entries[i].valid) begin
+                $display("  MEM_RS[%0d]: PC=0x%08h | OP=%0d | Dest=P%0d | Src1=P%0d(%b) | Src2=P%0d(%b) | ROB=%0d", i,
+                         rs_mem_entries[i].PC, rs_mem_entries[i].op_type.category, rs_mem_entries[i].dest_tag,
+                         rs_mem_entries[i].src1_tag, rs_mem_entries[i].src1_ready, rs_mem_entries[i].src2_tag,
+                         rs_mem_entries[i].src2_ready, rs_mem_entries[i].rob_idx);
+            end else begin
+                $display("  MEM_RS[%0d]: EMPTY", i);
+            end
+        end
 
-        // // BRANCH RS
-        // $display("\nBRANCH RS (%0d entries):", `RS_BRANCH_SZ);
-        // for (integer i = 0; i < `RS_BRANCH_SZ; i++) begin
-        //     if (rs_branch_entries[i].valid) begin
-        //         $display("  BR_RS[%0d]: PC=0x%08h | OP=%0d | Dest=P%0d | Src1=P%0d(%b) | Src2=P%0d(%b) | ROB=%0d", i,
-        //                  rs_branch_entries[i].PC, rs_branch_entries[i].op_type.category, rs_branch_entries[i].dest_tag,
-        //                  rs_branch_entries[i].src1_tag, rs_branch_entries[i].src1_ready, rs_branch_entries[i].src2_tag,
-        //                  rs_branch_entries[i].src2_ready, rs_branch_entries[i].rob_idx);
-        //     end else begin
-        //         $display("  BR_RS[%0d]: EMPTY", i);
-        //     end
-        // end
+        // ISSUE STAGE
+        $display("\n--- ISSUE STAGE ---");
+        $display("RS Grants - ALU: %b | MULT: %b | BRANCH: %b | MEM: %b", rs_granted.alu, rs_granted.mult, rs_granted.branch,
+                 rs_granted.mem);
 
-        // // MEM RS
-        // $display("\nMEM RS (%0d entries):", `RS_MEM_SZ);
-        // for (integer i = 0; i < `RS_MEM_SZ; i++) begin
-        //     if (rs_mem_entries[i].valid) begin
-        //         $display("  MEM_RS[%0d]: PC=0x%08h | OP=%0d | Dest=P%0d | Src1=P%0d(%b) | Src2=P%0d(%b) | ROB=%0d", i,
-        //                  rs_mem_entries[i].PC, rs_mem_entries[i].op_type.category, rs_mem_entries[i].dest_tag,
-        //                  rs_mem_entries[i].src1_tag, rs_mem_entries[i].src1_ready, rs_mem_entries[i].src2_tag,
-        //                  rs_mem_entries[i].src2_ready, rs_mem_entries[i].rob_idx);
-        //     end else begin
-        //         $display("  MEM_RS[%0d]: EMPTY", i);
-        //     end
-        // end
+        $display("ISSUE REGISTER (currently issued to execute):");
+        $display("  ALU: valid[0]=%b valid[1]=%b valid[2]=%b", issue_entries.alu[0].valid, issue_entries.alu[1].valid,
+                 issue_entries.alu[2].valid);
+        $display("  MULT: valid[0]=%b", issue_entries.mult[0].valid);
+        $display("  BRANCH: valid[0]=%b", issue_entries.branch[0].valid);
+        $display("  MEM: valid[0]=%b", issue_entries.mem[0].valid);
 
-        // // ISSUE STAGE
-        // $display("\n--- ISSUE STAGE ---");
-        // $display("RS Grants - ALU: %b | MULT: %b | BRANCH: %b | MEM: %b", rs_granted.alu, rs_granted.mult, rs_granted.branch,
-        //          rs_granted.mem);
+        $display("RS CLEARS (immediate, follow grants):");
+        $display("  ALU: %b | MULT: %b | BRANCH: %b | MEM: %b", rs_clear_signals.valid_alu, rs_clear_signals.valid_mult,
+                 rs_clear_signals.valid_branch, rs_clear_signals.valid_mem);
 
-        // $display("ISSUE REGISTER (currently issued to execute):");
-        // $display("  ALU: valid[0]=%b valid[1]=%b valid[2]=%b", issue_entries.alu[0].valid, issue_entries.alu[1].valid,
-        //          issue_entries.alu[2].valid);
-        // $display("  MULT: valid[0]=%b", issue_entries.mult[0].valid);
-        // $display("  BRANCH: valid[0]=%b", issue_entries.branch[0].valid);
-        // $display("  MEM: valid[0]=%b", issue_entries.mem[0].valid);
+        $display("TEMP DEBUG - ALU Clear Signals from CDB: %b", alu_clear_signals);
+        $display("TEMP DEBUG - Grants ALU[0]: %b", grants_alu[0]);
+        $display("TEMP DEBUG - Grants ALU[1]: %b", grants_alu[1]);
+        $display("TEMP DEBUG - Grants ALU[2]: %b", grants_alu[2]);
+        $display("TEMP DEBUG - Grants ALU[3]: %b", grants_alu[3]);
+        $display("TEMP DEBUG - Grants ALU[4]: %b", grants_alu[4]);
+        $display("TEMP DEBUG - Grants ALU[5]: %b", grants_alu[5]);
 
-        // $display("RS CLEARS (immediate, follow grants):");
-        // $display("  ALU: %b | MULT: %b | BRANCH: %b | MEM: %b", rs_clear_signals.valid_alu, rs_clear_signals.valid_mult,
-        //          rs_clear_signals.valid_branch, rs_clear_signals.valid_mem);
-
-        // $display("TEMP DEBUG - ALU Clear Signals from CDB: %b", alu_clear_signals);
-        // $display("TEMP DEBUG - Grants ALU[0]: %b", grants_alu[0]);
-        // $display("TEMP DEBUG - Grants ALU[1]: %b", grants_alu[1]);
-        // $display("TEMP DEBUG - Grants ALU[2]: %b", grants_alu[2]);
-        // $display("TEMP DEBUG - Grants ALU[3]: %b", grants_alu[3]);
-        // $display("TEMP DEBUG - Grants ALU[4]: %b", grants_alu[4]);
-        // $display("TEMP DEBUG - Grants ALU[5]: %b", grants_alu[5]);
-
-        // // EXECUTE STAGE
+        // EXECUTE STAGE
+        // INV SIG
         // $display("\n--- EXECUTE STAGE ---");
         // $display("FUNCTIONAL UNITS EXECUTING:");
         // $display("  ALU: valid[0]=%b valid[1]=%b valid[2]=%b", alu_executing[0], alu_executing[1], alu_executing[2]);
@@ -651,7 +649,8 @@ module testbench;
         // $display("  BRANCH: valid[0]=%b", branch_executing[0]);
         // $display("  MEM: valid[0]=%b", mem_executing[0]);
 
-        // // FU Results
+        // FU Results
+        // INV SIG
         // $display("\nFunctional Unit Results:");
         // for (integer i = 0; i < `NUM_FU_ALU; i++) begin
         //     $display("  ALU[%0d]: func=%0d | result=0x%08h", i, alu_func[i], fu_results.alu[i]);
@@ -664,13 +663,15 @@ module testbench;
         //     $display("  BRANCH[%0d]: take=%b target=0x%08h", i, branch_take[i], branch_target[i]);
         // end
 
-        // // PRF Reads
+        // PRF Reads
+        // INV SIG
         // $display("\nPRF Read Operations:");
         // $display("  ALU reads - src1_en=%b src2_en=%b", prf_read_en_src1.alu, prf_read_en_src2.alu);
         // $display("  MULT reads - src1_en=%b src2_en=%b", prf_read_en_src1.mult, prf_read_en_src2.mult);
         // $display("  BRANCH reads - src1_en=%b src2_en=%b", prf_read_en_src1.branch, prf_read_en_src2.branch);
 
-        // // Resolved Operands (after forwarding)
+        // Resolved Operands (after forwarding)
+        // INV SIG
         // $display("\nResolved Operands (after CDB forwarding):");
         // for (integer i = 0; i < `NUM_FU_ALU; i++) begin
         //     if (prf_read_en_src1.alu[i] || prf_read_en_src2.alu[i]) begin
@@ -691,50 +692,50 @@ module testbench;
         //     end
         // end
 
-        // // COMPLETE STAGE
-        // $display("\n--- COMPLETE STAGE ---");
-        // $display("ROB Update: valid=%b", rob_update_packet.valid);
-        // if (rob_update_packet.valid) begin
-        //     for (integer i = 0; i < `N; i++) begin
-        //         if (rob_update_packet.valid[i]) begin
-        //             $display("  ROB[%0d]: idx=%0d | value=%h | taken=%b | target=%h", i, rob_update_packet.idx[i],
-        //                      rob_update_packet.values[i], rob_update_packet.branch_taken[i], rob_update_packet.branch_targets[i]);
-        //         end
-        //     end
-        // end
+        // COMPLETE STAGE
+        $display("\n--- COMPLETE STAGE ---");
+        $display("ROB Update: valid=%b", rob_update_packet.valid);
+        if (rob_update_packet.valid) begin
+            for (integer i = 0; i < `N; i++) begin
+                if (rob_update_packet.valid[i]) begin
+                    $display("  ROB[%0d]: idx=%0d | value=%h | taken=%b | target=%h", i, rob_update_packet.idx[i],
+                             rob_update_packet.values[i], rob_update_packet.branch_taken[i], rob_update_packet.branch_targets[i]);
+                end
+            end
+        end
 
-        // // CDB
-        // $display("\n--- COMMON DATA BUS (CDB) ---");
+        // CDB
+        $display("\n--- COMMON DATA BUS (CDB) ---");
 
-        // // FU Requests to CDB
-        // $display("FU REQUESTS to CDB Arbiter:");
-        // $display("  ALU requests: %b", cdb_requests.alu);
-        // $display("  MULT requests: %b", cdb_requests.mult);
-        // $display("  BRANCH requests: %b", cdb_requests.branch);
-        // $display("  MEM requests: %b", cdb_requests.mem);
+        // FU Requests to CDB
+        $display("FU REQUESTS to CDB Arbiter:");
+        $display("  ALU requests: %b", cdb_requests.alu);
+        $display("  MULT requests: %b", cdb_requests.mult);
+        $display("  BRANCH requests: %b", cdb_requests.branch);
+        $display("  MEM requests: %b", cdb_requests.mem);
 
-        // // FU Outputs (data ready to broadcast)
-        // $display("\nFU OUTPUTS (data ready for CDB):");
-        // for (integer i = 0; i < `NUM_FU_ALU; i++) begin
-        //     if (cdb_fu_outputs.alu[i].valid) begin
-        //         $display("  ALU[%0d]: tag=P%0d | data=0x%08h", i, cdb_fu_outputs.alu[i].tag, cdb_fu_outputs.alu[i].data);
-        //     end
-        // end
-        // for (integer i = 0; i < `NUM_FU_MULT; i++) begin
-        //     if (cdb_fu_outputs.mult[i].valid) begin
-        //         $display("  MULT[%0d]: tag=P%0d | data=0x%08h", i, cdb_fu_outputs.mult[i].tag, cdb_fu_outputs.mult[i].data);
-        //     end
-        // end
-        // for (integer i = 0; i < `NUM_FU_BRANCH; i++) begin
-        //     if (cdb_fu_outputs.branch[i].valid) begin
-        //         $display("  BRANCH[%0d]: tag=P%0d | data=0x%08h", i, cdb_fu_outputs.branch[i].tag, cdb_fu_outputs.branch[i].data);
-        //     end
-        // end
-        // for (integer i = 0; i < `NUM_FU_MEM; i++) begin
-        //     if (cdb_fu_outputs.mem[i].valid) begin
-        //         $display("  MEM[%0d]: tag=P%0d | data=0x%08h", i, cdb_fu_outputs.mem[i].tag, cdb_fu_outputs.mem[i].data);
-        //     end
-        // end
+        // FU Outputs (data ready to broadcast)
+        $display("\nFU OUTPUTS (data ready for CDB):");
+        for (integer i = 0; i < `NUM_FU_ALU; i++) begin
+            if (cdb_fu_outputs.alu[i].valid) begin
+                $display("  ALU[%0d]: tag=P%0d | data=0x%08h", i, cdb_fu_outputs.alu[i].tag, cdb_fu_outputs.alu[i].data);
+            end
+        end
+        for (integer i = 0; i < `NUM_FU_MULT; i++) begin
+            if (cdb_fu_outputs.mult[i].valid) begin
+                $display("  MULT[%0d]: tag=P%0d | data=0x%08h", i, cdb_fu_outputs.mult[i].tag, cdb_fu_outputs.mult[i].data);
+            end
+        end
+        for (integer i = 0; i < `NUM_FU_BRANCH; i++) begin
+            if (cdb_fu_outputs.branch[i].valid) begin
+                $display("  BRANCH[%0d]: tag=P%0d | data=0x%08h", i, cdb_fu_outputs.branch[i].tag, cdb_fu_outputs.branch[i].data);
+            end
+        end
+        for (integer i = 0; i < `NUM_FU_MEM; i++) begin
+            if (cdb_fu_outputs.mem[i].valid) begin
+                $display("  MEM[%0d]: tag=P%0d | data=0x%08h", i, cdb_fu_outputs.mem[i].tag, cdb_fu_outputs.mem[i].data);
+            end
+        end
 
         // // CDB Arbitration Results
         // $display("\nCDB ARBITRATION RESULTS:");
@@ -772,22 +773,22 @@ module testbench;
         //     end
         // end
 
-        // // RETIRE/COMMIT
-        // $display("\n--- RETIRE/COMMIT ---");
-        // for (integer i = 0; i < `N; i++) begin
-        //     if (committed_insts[i].valid) begin
-        //         if (committed_insts[i].reg_idx == `ZERO_REG)
-        //             $display("COMMIT[%0d]: PC=0x%08h | ---", i, committed_insts[i].NPC - 4);
-        //         else
-        //             $display(
-        //                 "COMMIT[%0d]: PC=0x%08h | r%0d = 0x%08h",
-        //                 i,
-        //                 committed_insts[i].NPC - 4,
-        //                 committed_insts[i].reg_idx,
-        //                 committed_insts[i].data
-        //             );
-        //     end
-        // end
+        // RETIRE/COMMIT
+        $display("\n--- RETIRE/COMMIT ---");
+        for (integer i = 0; i < `N; i++) begin
+            if (committed_insts[i].valid) begin
+                if (committed_insts[i].reg_idx == `ZERO_REG)
+                    $display("COMMIT[%0d]: PC=0x%08h | ---", i, committed_insts[i].NPC - 4);
+                else
+                    $display(
+                        "COMMIT[%0d]: PC=0x%08h | r%0d = 0x%08h",
+                        i,
+                        committed_insts[i].NPC - 4,
+                        committed_insts[i].reg_idx,
+                        committed_insts[i].data
+                    );
+            end
+        end
 
         // // MAP TABLES
         // $display("\n--- MAP TABLES ---");

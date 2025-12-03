@@ -81,8 +81,11 @@ module cpu (
     output logic [`NUM_FU_TOTAL-1:0] cdb_grants_flat_dbg,
     output CDB_EARLY_TAG_ENTRY [`N-1:0] cdb_early_tags_dbg,
 
-    // Dispatch packet debug output
-    output FETCH_DISP_PACKET fetch_disp_packet_dbg,
+    // Instruction Buffer debug output
+    output FETCH_PACKET [`N-1:0] ib_output_disp_wdn_dbg,
+
+    // Store Queue entry packet output
+    output STOREQ_ENTRY [`N-1:0] sq_entry_packet_dbg,
 
     // Issue clear signals debug output
     output RS_CLEAR_SIGNALS rs_clear_signals_dbg,
@@ -1054,5 +1057,11 @@ module cpu (
 
     // Fetch stage debug outputs
     assign fetch_packet_dbg      = fetch_packet;
+
+    // Instruction Buffer debug outputs
+    assign ib_output_disp_wdn_dbg = ib_dispatch_window;
+
+    // Store Queue entry packet output
+    assign sq_entry_packet_dbg = sq_dispatch_packet;
 
 endmodule  // cpu
