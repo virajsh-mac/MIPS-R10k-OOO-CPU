@@ -263,6 +263,7 @@ module stage_dispatch (
                     phys_rd: allocated_phys[i],
                     prev_phys_rd: local_Told[i],
                     complete: 1'b0,
+                    store:        (decode_op_type[i].category == CAT_MEM && !decode_uses_rd[i]),
                     exception: NO_ERROR,
                     branch: (decode_op_type[i].category == CAT_BRANCH),
                     pred_target: dispatch_window[i].bp_pred_target,  // No prediction target
@@ -292,26 +293,48 @@ module stage_dispatch (
                     CAT_MEM: begin
                         rs_alloc.mem.valid[mem_count]   = 1'b1;
                         rs_alloc.mem.entries[mem_count] = create_rs_entry(i);
+
+                        // Store instructions: MEM category and no dest register
+                        if (!decode_uses_rd[i]) begin
+                            // Create store queue entry at position storeq_used
+                            store_queue_entry_packet[storeq_used] = '{
+                                valid:   1'b1,
+                                rob_idx: rob_alloc_idxs[i],
+                                address: '0,   // filled in later by execute
+                                data:    '0,   // filled in later by execute
+                                default: '0
+                            };
+
+                            // Tell the RS entry which SQ index this store owns
+                            rs_alloc.mem.entries[mem_count].store_queue_idx = store_queue_alloc_idxs[storeq_used];
+
+                            // Move to next free SQ allocation lane
+                            storeq_used++;
+                        end
+                        else begin // load instruction
+                            rs_alloc.mem.entries[mem_count].store_queue_idx = store_queue_alloc_idxs[storeq_used];
+                        end
+
                         mem_count++;
                     end
                 endcase
 
-                // Store queue allocation for store instructions
-                if (decode_op_type[i].category == CAT_MEM && !decode_uses_rd[i]) begin
-                    // Create store queue entry
-                    store_queue_entry_packet[storeq_count] = '{
-                        valid:   1'b1,
-                        rob_idx: rob_alloc_idxs[i],
-                        address: '0,   // filled in later by execute
-                        data:    '0,   // filled in later by execute
-                        default: '0
-                    };
+                // // Store queue allocation for store instructions
+                // if (decode_op_type[i].category == CAT_MEM && !decode_uses_rd[i]) begin
+                //     // Create store queue entry
+                //     store_queue_entry_packet[storeq_count] = '{
+                //         valid:   1'b1,
+                //         rob_idx: rob_alloc_idxs[i],
+                //         address: '0,   // filled in later by execute
+                //         data:    '0,   // filled in later by execute
+                //         default: '0
+                //     };
 
-                    // Tell the RS entry which SQ index this store owns
-                    rs_alloc.mem.entries[mem_count-1].store_queue_idx = store_queue_alloc_idxs[storeq_count];
+                //     // Tell the RS entry which SQ index this store owns
+                //     rs_alloc.mem.entries[mem_count-1].store_queue_idx = store_queue_alloc_idxs[storeq_count];
 
-                    storeq_count++;
-                end
+                //     storeq_count++;
+                // end
 
                 // Request physical register allocation
                 free_alloc_valid[i] = decode_uses_rd[i];

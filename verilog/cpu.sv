@@ -1001,7 +1001,10 @@ module cpu (
         .arch_table_snapshot(arch_table_snapshot),
 
         // To freelist: restore mask on mispredict
-        .freelist_restore_mask(freelist_restore_mask)
+        .freelist_restore_mask(freelist_restore_mask),
+
+        // to store queue: free entries and writes to DCache
+        .sq_free_count(sq_free_count)
     );
 
     //////////////////////////////////////////////////

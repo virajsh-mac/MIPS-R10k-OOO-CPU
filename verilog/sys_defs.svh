@@ -670,6 +670,7 @@ typedef struct packed {
     PHYS_TAG       prev_phys_rd;   // Previous physical mapping (for free on commit)
     DATA           value;          // Computed value (from Complete, if needed)
     logic          complete;       // Instruction has completed
+    logic          store;          // is this a store instruction
     EXCEPTION_CODE exception;      // Any exception code
     logic          branch;         // Is this a branch?
     ADDR           branch_target;  // Resolved branch target

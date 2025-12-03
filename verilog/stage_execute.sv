@@ -20,14 +20,6 @@ module stage_execute (
     input  PRF_READ_DATA prf_read_data_src1,
     input  PRF_READ_DATA prf_read_data_src2,
 
-    // // Interface to D-cache for memory operations (IGNORE FOR NOW)
-    // output MEM_COMMAND proc2dcache_command [`NUM_FU_MEM-1:0],
-    // output ADDR proc2dcache_addr [`NUM_FU_MEM-1:0],
-    // output DATA proc2dcache_data [`NUM_FU_MEM-1:0],  // For stores
-    // output MEM_SIZE proc2dcache_size [`NUM_FU_MEM-1:0],
-    // input logic [`NUM_FU_MEM-1:0] dcache_valid,
-    // input DATA [`NUM_FU_MEM-1:0] dcache_data,  // For loads
-
     output logic [`NUM_FU_MULT-1:0] mult_request,
     output CDB_FU_OUTPUTS fu_outputs,
 

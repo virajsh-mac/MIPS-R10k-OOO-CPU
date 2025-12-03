@@ -35,7 +35,10 @@ module stage_retire (
     input MAP_ENTRY [`ARCH_REG_SZ-1:0] arch_table_snapshot,
 
     // To freelist: restore mask on mispredict
-    output logic [`PHYS_REG_SZ_R10K-1:0] freelist_restore_mask
+    output logic [`PHYS_REG_SZ_R10K-1:0] freelist_restore_mask,
+
+    // To store queue: free count
+    output logic [$clog2(`N+1)-1:0]  sq_free_count
 
 );
 
@@ -48,6 +51,7 @@ module stage_retire (
 
     // Freelist checkpoint for mispredict restore
     logic [`PHYS_REG_SZ_R10K-1:0] freelist_checkpoint_mask, freelist_checkpoint_mask_next;
+
 
     always_comb begin
         freelist_checkpoint_mask_next = freelist_checkpoint_mask;
@@ -62,6 +66,7 @@ module stage_retire (
         mispred = 1'b0;
         entry = '0;
         committed_insts = '0;
+        sq_free_count = '0;
 
         // branch info for fetch
         branch_target_out = '0;
@@ -100,6 +105,11 @@ module stage_retire (
                     free_mask[entry.prev_phys_rd] = 1'b1;
                     freelist_checkpoint_mask_next[entry.prev_phys_rd] = 1'b1;
                 end
+            end
+
+            // handles store instructions
+            if (entry.store) begin
+                sq_free_count = sq_free_count + 1;
             end
 
             // If this entry is a branch, check for mispredict (compare prediction vs actual)
