@@ -83,10 +83,10 @@ module store_queue (
         // ============================
 
         for (int i = 0; i < `NUM_FU_MEM; i++) begin
-            if (mem_storeq_entries.valid[i]) begin
-                sq_entries_next[mem_storeq_entries.store_queue_idx[i]].address = mem_storeq_entries.addr[i];
-                sq_entries_next[mem_storeq_entries.store_queue_idx[i]].data    = mem_storeq_entries.data[i];
-                completed_next[mem_storeq_entries.store_queue_idx[i]]          = 1'b1; 
+            if (mem_storeq_entries[i].valid) begin
+                sq_entries_next[mem_storeq_entries[i].store_queue_idx].address = mem_storeq_entries[i].addr;
+                sq_entries_next[mem_storeq_entries[i].store_queue_idx].data    = mem_storeq_entries[i].data;
+                completed_next[mem_storeq_entries[i].store_queue_idx]          = 1'b1; 
             end
         end
 
