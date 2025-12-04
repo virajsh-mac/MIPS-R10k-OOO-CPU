@@ -73,6 +73,7 @@ module stage_dispatch (
     int storeq_used;
     logic is_store;
     logic is_load;
+    logic is_jal;  // JAL bypasses RS entirely
     logic saw_store_in_bundle;
 
     // Map table read results
@@ -144,6 +145,9 @@ module stage_dispatch (
                         decode_op_type[i].func == LOAD_BYTE_U || 
                         decode_op_type[i].func == LOAD_HALF_U);
 
+            // JAL bypasses RS - target is computed in fetch, no execution needed
+            is_jal = decode_op_type[i].category == CAT_BRANCH && decode_op_type[i].func == JAL;
+
             // CRITICAL: Do NOT dispatch loads until ALL stores in the store queue have executed.
             // This prevents deadlock where:
             //   1. Loads issue to MEM FU and stall waiting for older stores
@@ -164,13 +168,16 @@ module stage_dispatch (
             if (is_store && storeq_used >= store_queue_free_slots) break;
 
             // Check RS bank space for this instruction's functional unit
-            case (decode_op_type[i].category)
-                CAT_ALU:    if (alu_used   >= rs_alu_free_slots)    break;
-                CAT_MULT:   if (mult_used  >= rs_mult_free_slots)   break;
-                CAT_BRANCH: if (branch_used>= rs_branch_free_slots) break;
-                CAT_MEM:    if (mem_used   >= rs_mem_free_slots)    break;
-                default:    break;
-            endcase
+            // JAL bypasses RS entirely, so skip the check
+            if (!is_jal) begin
+                case (decode_op_type[i].category)
+                    CAT_ALU:    if (alu_used   >= rs_alu_free_slots)    break;
+                    CAT_MULT:   if (mult_used  >= rs_mult_free_slots)   break;
+                    CAT_BRANCH: if (branch_used>= rs_branch_free_slots) break;
+                    CAT_MEM:    if (mem_used   >= rs_mem_free_slots)    break;
+                    default:    break;
+                endcase
+            end
 
             // This instruction can be dispatched
             num_to_dispatch++;
@@ -181,13 +188,15 @@ module stage_dispatch (
                 saw_store_in_bundle = 1'b1;  // mark that there is an older store in this group
             end
 
-            // Reserve RS slot for this instruction type
-            case (decode_op_type[i].category)
-                CAT_ALU:    alu_used++;
-                CAT_MULT:   mult_used++;
-                CAT_BRANCH: branch_used++;
-                CAT_MEM:    mem_used++;
-            endcase
+            // Reserve RS slot for this instruction type (JAL bypasses RS)
+            if (!is_jal) begin
+                case (decode_op_type[i].category)
+                    CAT_ALU:    alu_used++;
+                    CAT_MULT:   mult_used++;
+                    CAT_BRANCH: branch_used++;
+                    CAT_MEM:    mem_used++;
+                endcase
+            end
         end
 
         // Set dispatch count (0 = stall)
@@ -301,14 +310,18 @@ module stage_dispatch (
 
         for (int i = 0; i < dispatch_count; i++) begin
             if (i < window_valid_count) begin
+                // Detect JAL for special handling
+                is_jal = decode_op_type[i].category == CAT_BRANCH && decode_op_type[i].func == JAL;
+
                 // ROB entry
+                // JAL is marked complete at dispatch - no execution needed, target computed in fetch
                 rob_entry_packet[i] = '{
                     valid: 1'b1,
                     PC: dispatch_window[i].pc,
                     arch_rd: decode_rd_idx[i],
                     phys_rd: allocated_phys[i],
                     prev_phys_rd: local_Told[i],
-                    complete: 1'b0,
+                    complete: is_jal,  // JAL is complete at dispatch
                     store:        (decode_op_type[i].category == CAT_MEM && 
                                    (decode_op_type[i].func == STORE_BYTE || 
                                     decode_op_type[i].func == STORE_HALF || 
@@ -316,14 +329,17 @@ module stage_dispatch (
                                     decode_op_type[i].func == STORE_DOUBLE)),
                     exception: NO_ERROR,
                     branch: (decode_op_type[i].category == CAT_BRANCH),
-                    pred_target: dispatch_window[i].bp_pred_target,  // No prediction target
-                    pred_taken: dispatch_window[i].bp_pred_taken,  // No branch prediction
+                    // JAL: target/taken are known at fetch, store them for retire
+                    branch_target: is_jal ? dispatch_window[i].bp_pred_target : '0,
+                    branch_taken: is_jal ? 1'b1 : 1'b0,  // JAL is always taken
+                    pred_target: dispatch_window[i].bp_pred_target,
+                    pred_taken: dispatch_window[i].bp_pred_taken,
                     ghr_snapshot: dispatch_window[i].bp_ghr_snapshot,
                     halt: decode_halt[i],
                     default: '0
                 };
 
-                // Route to appropriate RS bank
+                // Route to appropriate RS bank (JAL bypasses RS entirely)
                 case (decode_op_type[i].category)
                     CAT_ALU: begin
                         rs_alloc.alu.valid[alu_count]   = 1'b1;
@@ -336,9 +352,12 @@ module stage_dispatch (
                         mult_count++;
                     end
                     CAT_BRANCH: begin
-                        rs_alloc.branch.valid[branch_count]   = 1'b1;
-                        rs_alloc.branch.entries[branch_count] = create_rs_entry(i);
-                        branch_count++;
+                        // JAL bypasses RS - already complete at dispatch
+                        if (!is_jal) begin
+                            rs_alloc.branch.valid[branch_count]   = 1'b1;
+                            rs_alloc.branch.entries[branch_count] = create_rs_entry(i);
+                            branch_count++;
+                        end
                     end
                     CAT_MEM: begin
                         rs_alloc.mem.valid[mem_count]   = 1'b1;
@@ -376,22 +395,6 @@ module stage_dispatch (
                     end
                 endcase
 
-                // // Store queue allocation for store instructions
-                // if (decode_op_type[i].category == CAT_MEM && !decode_uses_rd[i]) begin
-                //     // Create store queue entry
-                //     store_queue_entry_packet[storeq_count] = '{
-                //         valid:   1'b1,
-                //         rob_idx: rob_alloc_idxs[i],
-                //         address: '0,   // filled in later by execute
-                //         data:    '0,   // filled in later by execute
-                //         default: '0
-                //     };
-
-                //     // Tell the RS entry which SQ index this store owns
-                //     rs_alloc.mem.entries[mem_count-1].store_queue_idx = store_queue_alloc_idxs[storeq_count];
-
-                //     storeq_count++;
-                // end
 
                 // Request physical register allocation
                 free_alloc_valid[i] = decode_uses_rd[i];

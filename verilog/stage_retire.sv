@@ -129,9 +129,11 @@ module stage_retire (
             end
 
             // Record debug info
+            // Use phys_rd != 0 to determine if instruction writes to a register
+            // This correctly handles JAL/JALR (which write PC+4 to rd) vs conditional branches
             committed_insts[w].NPC    = entry.PC + 4;
             committed_insts[w].data   = regfile_entries[entry.phys_rd];
-            committed_insts[w].reg_idx = entry.branch ? `ZERO_REG : entry.arch_rd;
+            committed_insts[w].reg_idx = (entry.phys_rd == '0) ? `ZERO_REG : entry.arch_rd;
             committed_insts[w].halt   = entry.halt;
             committed_insts[w].illegal = (entry.exception == ILLEGAL_INST);
             committed_insts[w].valid  = 1'b1;
@@ -139,8 +141,9 @@ module stage_retire (
             // Count this instruction as retired
             retire_count++;
 
-            // Commit this entry (it's complete)
-            if (entry.arch_rd != '0 && !entry.branch) begin
+            // Commit this entry (it's complete) - update arch map and free old physical register
+            // Check phys_rd != 0 to include JAL/JALR which have branch=true but still write to rd
+            if (entry.phys_rd != '0) begin
                 arch_write_enables[w]  = 1'b1;
                 arch_write_addrs[w]    = entry.arch_rd;
                 arch_write_phys_regs[w] = entry.phys_rd;

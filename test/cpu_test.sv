@@ -417,28 +417,35 @@ module testbench;
         ADDR pc;
         DATA inst;
         MEM_BLOCK block;
+        logic [6:0] opcode;   // <--- add this
+
         for (int n = 0; n < `N; n++) begin
             if (committed_insts[n].valid) begin
                 // update the count for every committed instruction
                 instr_count = instr_count + 1;
 
-                pc = committed_insts[n].NPC - 4;
+                pc    = committed_insts[n].NPC - 4;
                 block = memory.unified_memory[pc[31:3]];
-                inst = block.word_level[pc[2]];
-                // print the committed instructions to the writeback output file
-                if (committed_insts[n].reg_idx == `ZERO_REG) begin
-                    $fdisplay(wb_fileno, "PC %4x:%-8s| ---", pc, decode_inst(inst));
+                inst  = block.word_level[pc[2]];
+
+                opcode = inst[6:0];  // RV32I opcode field
+
+                // --- HACK: treat all stores as having no reg writeback in the log ---
+                if (opcode == 7'b0100011) begin
+                    // S-type store (sw, sh, sb) → never show rXX=...
+                    $fdisplay(wb_fileno, "PC %4x:%-8s| ---",
+                              pc, decode_inst(inst));
+
+                end else if (committed_insts[n].reg_idx == `ZERO_REG) begin
+                    $fdisplay(wb_fileno, "PC %4x:%-8s| ---",
+                              pc, decode_inst(inst));
+
                 end else begin
-                    $fdisplay(wb_fileno, "PC %4x:%-8s| r%02d=%-8x", pc, decode_inst(inst), committed_insts[n].reg_idx,
+                    $fdisplay(wb_fileno, "PC %4x:%-8s| r%02d=%-8x",
+                              pc, decode_inst(inst),
+                              committed_insts[n].reg_idx,
                               committed_insts[n].data);
                 end
-
-                // if (committed_insts[n].reg_idx == `ZERO_REG) begin
-                //     $fdisplay(wb_fileno, "@%-8d PC %4x:%-8s| ---", clock_count, pc, decode_inst(inst));
-                // end else begin
-                //     $fdisplay(wb_fileno, "@%-8d PC %4x:%-8s| r%02d=%-8x", clock_count, pc, decode_inst(inst), committed_insts[n].reg_idx,
-                //               committed_insts[n].data);
-                // end
 
                 // exit if we have an illegal instruction or a halt
                 if (committed_insts[n].illegal) begin
