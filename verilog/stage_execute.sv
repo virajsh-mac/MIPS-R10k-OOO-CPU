@@ -64,6 +64,7 @@ module stage_execute (
     DATA [`NUM_FU_MULT-1:0] mult_rs1, mult_rs2;
     MULT_FUNC [`NUM_FU_MULT-1:0] mult_func;
     logic [`NUM_FU_MULT-1:0] mult_start, mult_done;
+    logic [`NUM_FU_MULT-1:0] mult_grant;  // Grant signal to clear mult completion
 
     // FU metadata computed on-the-fly in EX/COMP register fill (SoA approach)
 
@@ -75,7 +76,10 @@ module stage_execute (
     EX_COMPLETE_ENTRY mult_meta_out[`NUM_FU_MULT-1:0];
 
     // Pulse generation for mult start (mult expects start pulse, not held high)
+    // We track both valid AND rob_idx to detect new instructions even when
+    // back-to-back (valid stays 1 but rob_idx changes)
     logic [`NUM_FU_MULT-1:0] prev_mult_valid;
+    ROB_IDX [`NUM_FU_MULT-1:0] prev_mult_rob_idx;
 
     // BRANCH signals
     DATA [`NUM_FU_BRANCH-1:0] branch_rs1, branch_rs2;
@@ -223,16 +227,23 @@ module stage_execute (
     always_ff @(posedge clock) begin
         if (reset | mispredict) begin
             prev_mult_valid <= '0;
+            prev_mult_rob_idx <= '0;
         end else begin
             for (int i = 0; i < `NUM_FU_MULT; i++) begin
                 prev_mult_valid[i] <= issue_entries.mult[i].valid;
+                prev_mult_rob_idx[i] <= issue_entries.mult[i].rob_idx;
             end
         end
     end
 
     always_comb begin
         for (int i = 0; i < `NUM_FU_MULT; i++) begin
-            mult_start[i] = issue_entries.mult[i].valid & ~prev_mult_valid[i];
+            // Start when:
+            // 1. Valid and wasn't valid before (new instruction), OR
+            // 2. Valid and ROB index changed (different instruction back-to-back)
+            mult_start[i] = issue_entries.mult[i].valid && 
+                            (!prev_mult_valid[i] || 
+                             (issue_entries.mult[i].rob_idx != prev_mult_rob_idx[i]));
         end
     end
 
@@ -317,11 +328,13 @@ module stage_execute (
     end
 
     // Instantiate MULT modules
+    // The mult module now holds its result until grant is received
 
     mult mult_inst[`NUM_FU_MULT-1:0] (
         .clock(clock),
         .reset(reset | mispredict),
         .start(mult_start),
+        .grant(mult_grant),
         .rs1(mult_rs1),
         .rs2(mult_rs2),
         .func(mult_func),
@@ -332,13 +345,13 @@ module stage_execute (
         .meta_out(mult_meta_out)
     );
 
-    // MULT outputs to CDB (only when done)
+    // MULT outputs to CDB (when done/pending)
+    // Use mult_meta_out for tag since it contains the correct dest from when the mult started
     always_comb begin
         for (int i = 0; i < `NUM_FU_MULT; i++) begin
-            fu_outputs.mult[i].valid = mult_done[i] && (issue_entries.mult[i].dest_tag != '0);
-            fu_outputs.mult[i].tag   = issue_entries.mult[i].dest_tag;
+            fu_outputs.mult[i].valid = mult_done[i] && (mult_meta_out[i].dest_pr != '0);
+            fu_outputs.mult[i].tag   = mult_meta_out[i].dest_pr;
             fu_outputs.mult[i].data  = fu_results.mult[i];
-            // mult_request[i] is driven by mult module structurally - no procedural assignment needed
         end
     end
 
@@ -537,6 +550,15 @@ module stage_execute (
                 gnt_branch[i][k] = gnt_bus[i][BRANCH_START+k];
             end
         end
+
+        // Compute mult_grant: OR all CDB slots for each mult FU
+        // This signal tells the mult module its result was accepted
+        for (int k = 0; k < `NUM_FU_MULT; k++) begin
+            mult_grant[k] = 1'b0;
+            for (int i = 0; i < `N; i++) begin
+                mult_grant[k] |= gnt_mult[i][k];
+            end
+        end
     end
 
     // =========================================================================
@@ -554,6 +576,8 @@ module stage_execute (
         ex_comp.branch_target = '0;
 
         // MULT grants
+        // Use mult_meta_out for rob_idx/dest_pr (pipelined with the instruction)
+        // Use fu_results.mult for the actual computed result
         for (int i = 0; i < `N; i++) begin
             for (int k = 0; k < `NUM_FU_MULT; k++) begin
                 if (gnt_mult[i][k] && mult_done[k]) begin
@@ -564,7 +588,7 @@ module stage_execute (
                     ex_comp.branch_taken[i] = mult_meta_out[k].branch_taken;
                     ex_comp.branch_target[i] = mult_meta_out[k].branch_target;
                     ex_comp.dest_pr[i] = mult_meta_out[k].dest_pr;
-                    ex_comp.result[i] = mult_meta_out[k].result;
+                    ex_comp.result[i] = fu_results.mult[k];
                 end
             end
         end
