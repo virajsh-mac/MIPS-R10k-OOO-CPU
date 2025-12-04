@@ -45,7 +45,7 @@ module store_queue (
     input logic [$clog2(`N+1)-1:0]  free_count,
 
     // Outputs
-    output logic [$clog2(`LSQ_SZ)-1:0] complete_ptr,
+    // output logic [$clog2(`LSQ_SZ)-1:0] complete_ptr,
     output logic                       unexecuted_store,
     
     // To D-Cache
@@ -176,7 +176,7 @@ module store_queue (
                 break;
             end
         end
-        complete_ptr = ptr;
+        // complete_ptr = ptr;
     end
 
     // ============================================================
