@@ -132,7 +132,6 @@ module cpu (
     logic [$clog2(`N+1)-1:0] sq_free_count;
 
     // From Store Queue
-    logic [$clog2(`LSQ_SZ)-1:0] sq_complete_ptr;
     logic sq_unexecuted_store;
 
     // Store queue forwarding interface (execute <-> store queue)
@@ -599,7 +598,6 @@ module cpu (
         .free_count(sq_free_count),
 
         // Outputs
-        .complete_ptr(sq_complete_ptr),
         .unexecuted_store(sq_unexecuted_store),
         
         // To D-Cache
