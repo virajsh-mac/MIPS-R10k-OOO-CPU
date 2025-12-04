@@ -36,7 +36,7 @@ import "DPI-C" function string decode_inst(int inst);
 // import "DPI-C" function void close_pipeline_output_file();
 
 
-`define TB_MAX_CYCLES 10000
+`define TB_MAX_CYCLES 4000
 
 
 module testbench;
@@ -394,6 +394,12 @@ module testbench;
             if (error_status != NO_ERROR || clock_count > `TB_MAX_CYCLES) begin
 
                 $display("  %16t : Processor Finished", $realtime);
+
+                // Wait one more clock cycle to let any pending cache writes complete
+                // (memDP updates on posedge, so stores committed this cycle won't be 
+                // visible in cache until after the next posedge)
+                @(posedge clock);
+                #1;
 
                 // close the writeback output file (pipeline output disabled)
                 // close_pipeline_output_file();
