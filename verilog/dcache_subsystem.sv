@@ -208,6 +208,88 @@ module dcache_subsystem (
         end
     end
 
+    // D-Cache Subsystem Display - Mem FU Interface
+    always_ff @(posedge clock) begin
+        if (!reset) begin
+            $display("========================================");
+            $display("=== D-CACHE SUBSYSTEM (Cycle %0t) ===", $time);
+            $display("========================================");
+            
+            // Mem FU Requests
+            $display("--- Mem FU Requests ---");
+            for (int i = 0; i < 2; i++) begin
+                if (read_addrs[i].valid) begin
+                    $display("  Read[%0d]: Valid=1 Addr.tag=%h Addr.block_offset=%0d", 
+                             i, read_addrs[i].addr.tag, read_addrs[i].addr.block_offset);
+                end else begin
+                    $display("  Read[%0d]: Valid=0", i);
+                end
+            end
+            
+            // Our Responses
+            $display("--- Cache Responses ---");
+            for (int i = 0; i < 2; i++) begin
+                if (cache_outs[i].valid) begin
+                    $display("  Out[%0d]: Valid=1 Data=%h", i, cache_outs[i].data.dbbl_level);
+                end else begin
+                    $display("  Out[%0d]: Valid=0 (miss)", i);
+                end
+            end
+            
+            // Memory Requests We're Making
+            $display("--- Memory Requests ---");
+            if (mem_req_addr.valid) begin
+                $display("  Read Request: Valid=1 Addr.tag=%h Addr.block_offset=%0d Accepted=%0d", 
+                         mem_req_addr.addr.tag, mem_req_addr.addr.block_offset, mem_req_accepted);
+            end else begin
+                $display("  Read Request: Valid=0");
+            end
+            
+            // Memory Writebacks
+            if (mem_write_valid) begin
+                $display("  Writeback: Valid=1 Addr.tag=%h Data=%h", 
+                         mem_write_addr.addr.tag, mem_write_data.dbbl_level);
+            end else begin
+                $display("  Writeback: Valid=0");
+            end
+            
+            // Memory Data Coming Back
+            if (mem_data_tag != 0) begin
+                $display("  Memory Data Returned: Tag=%0d Data=%h", 
+                         mem_data_tag, mem_data.dbbl_level);
+            end
+            
+            // Store Interface
+            $display("--- Store Interface ---");
+            if (proc_store_valid) begin
+                $display("  Store Request: Valid=1 Addr=%h Data=%h Hit=%0d Response=%0d", 
+                         proc_store_addr, proc_store_data, store_hit_dcache, proc_store_response);
+            end else begin
+                $display("  Store Request: Valid=0");
+            end
+            
+            // MSHR State
+            $display("--- MSHR State ---");
+            $display("  Oldest Miss Addr: Valid=%0d Tag=%h", 
+                     oldest_miss_addr.valid, oldest_miss_addr.addr.tag);
+            $display("  MSHR Addr Found (duplicate): %0d", mshr_addr_found);
+            $display("  Cache Full: %0d", dcache_full);
+            
+            // Refill State
+            if (dcache_write_addr_refill_local.valid) begin
+                $display("  Refill: Valid=1 Addr.tag=%h", dcache_write_addr_refill_local.addr.tag);
+            end
+            
+            // Eviction State
+            if (evicted_valid) begin
+                $display("  Eviction: Valid=1 Dirty=%0d Tag=%h", 
+                         evicted_line.dirty, evicted_line.tag);
+            end
+            
+            $display("");
+        end
+    end
+
 endmodule
 
 // D-Cache MSHR (Miss Status Handling Register)
@@ -283,6 +365,29 @@ module d_mshr #(
             head <= next_head;
             tail <= next_tail;
             mshr_entries <= next_mshr_entries;
+        end
+    end
+
+    // MSHR Debug Display
+    always_ff @(posedge clock) begin
+        if (!reset) begin
+            $display("--- D-Cache MSHR State ---");
+            $display("  Head: %0d, Tail: %0d", head, tail);
+            $display("  Entries:");
+            for (int i = 0; i < MSHR_WIDTH; i++) begin
+                if (mshr_entries[i].valid) begin
+                    $display("    [%0d] Valid=1, MemTag=%0d, DAddr.tag=%h", 
+                             i, mshr_entries[i].mem_tag, mshr_entries[i].d_addr.tag);
+                end
+            end
+            if (mem_data_tag != 0) begin
+                $display("  Memory Data Returned: Tag=%0d", mem_data_tag);
+            end
+            if (new_entry.valid) begin
+                $display("  New Entry Pushed: MemTag=%0d, DAddr.tag=%h", 
+                         new_entry.mem_tag, new_entry.d_addr.tag);
+            end
+            $display("");
         end
     end
 
@@ -451,5 +556,26 @@ module dcache #(
         end
     end
     assign cache_outs = cache_outs_temp;
+
+    // D-Cache State Display
+    always_ff @(posedge clock) begin
+        if (!reset) begin
+            $display("========================================");
+            $display("=== D-CACHE STATE (Cycle %0t) ===", $time);
+            $display("========================================");
+            $display("Cache Lines (Total: %0d):", MEM_DEPTH);
+            for (int i = 0; i < MEM_DEPTH; i++) begin
+                if (cache_lines[i].valid) begin
+                    $display("  [%2d] Valid=1 Dirty=%0d Tag=%h Data=%h", 
+                             i, cache_lines[i].dirty, cache_lines[i].tag, 
+                             cache_lines[i].data.dbbl_level);
+                end else begin
+                    $display("  [%2d] Valid=0 (empty)", i);
+                end
+            end
+            $display("Cache Full: %0d", full);
+            $display("");
+        end
+    end
 
 endmodule
