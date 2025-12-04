@@ -100,7 +100,17 @@ module cpu (
     output FETCH_PACKET [3:0]   fetch_packet_dbg,
 
     // Debug output, exposes DCache so memory is written back to .out file
-    output D_CACHE_LINE [`DCACHE_LINES-1:0]      cache_lines_dbg
+    output D_CACHE_LINE [`DCACHE_LINES-1:0]      cache_lines_dbg,
+
+    // store to dcache
+    output logic sq_to_dcache_valid_dbg,
+    output ADDR  sq_to_dcache_addr_dbg,
+    output DATA  sq_to_dcache_data_dbg,
+
+    // store forwarding
+    output logic [`NUM_FU_MEM-1:0] sq_forward_valid_dbg,
+    output DATA [`NUM_FU_MEM-1:0] sq_forward_data_dbg,
+    output logic [`NUM_FU_MEM-1:0] sq_forward_stall_dbg
 );
 
     //////////////////////////////////////////////////
@@ -1158,4 +1168,13 @@ module cpu (
     // ROB info
     assign rob_free_slots_dbg = rob_free_slots;
 
+    // Store to dcache debug signals
+    assign sq_to_dcache_valid_dbg = sq_to_dcache_valid;
+    assign sq_to_dcache_addr_dbg = sq_to_dcache_addr;
+    assign sq_to_dcache_data_dbg = sq_to_dcache_data;
+
+    // Store forward debug signals
+    assign sq_forward_valid_dbg = sq_forward_valid;
+    assign sq_forward_data_dbg = sq_forward_data;
+    assign sq_forward_stall_dbg = sq_forward_stall;
 endmodule  // cpu

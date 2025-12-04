@@ -133,6 +133,16 @@ module testbench;
     // Store Queue entry packet output
     STOREQ_ENTRY [`N-1:0] sq_entry_packet;
 
+    // Store -> DCache
+    logic sq_to_dcache_valid;
+    ADDR  sq_to_dcache_addr;
+    DATA  sq_to_dcache_data;
+
+    // store forwarding
+    logic      [`NUM_FU_MEM-1:0] sq_forward_valid;
+    DATA       [`NUM_FU_MEM-1:0] sq_forward_data;
+    logic      [`NUM_FU_MEM-1:0] sq_forward_stall;
+
     // Issue clear signals debug output
     RS_CLEAR_SIGNALS rs_clear_signals;
 
@@ -228,6 +238,16 @@ module testbench;
 
         // store queue outputs
         .sq_entry_packet_dbg(sq_entry_packet),
+
+        // store queue -> dcache
+        .sq_to_dcache_valid_dbg(sq_to_dcache_valid),
+        .sq_to_dcache_addr_dbg(sq_to_dcache_addr),
+        .sq_to_dcache_data_dbg(sq_to_dcache_data),
+
+        // store forwarding
+        .sq_forward_valid_dbg(sq_forward_valid),
+        .sq_forward_data_dbg(sq_forward_data),
+        .sq_forward_stall_dbg(sq_forward_stall),
 
         // Issue clear signals debug output
         .rs_clear_signals_dbg(rs_clear_signals),
@@ -511,6 +531,8 @@ module testbench;
     task print_custom_data;
         integer prf_count;
         integer i;
+        int fu;
+        int line;
 
         $display("\n=================================================================================");
         $display("CPU STATE SNAPSHOT - Cycle %0d", clock_count - 1);
@@ -578,6 +600,31 @@ module testbench;
                 $display("  SQ_IN[%0d]: INVALID", i);
             end
         end
+
+        // =====================================
+        // 1) Store Queue -> DCache (retire)
+        // =====================================
+        $display("--- SQ -> DCache ---");
+        $display("  sq_to_dcache_valid = %0d", sq_to_dcache_valid);
+        if (sq_to_dcache_valid) begin
+            $display("  sq_to_dcache_addr  = 0x%08h", sq_to_dcache_addr);
+            $display("  sq_to_dcache_data  = 0x%08h", sq_to_dcache_data);
+        end
+
+        // =====================================
+        // 2) Store Forwarding (per MEM FU)
+        // =====================================
+        $display("--- Store Forwarding (SQ -> MEM FUs) ---");
+        for (fu = 0; fu < `NUM_FU_MEM; fu++) begin
+            if (sq_forward_valid[fu] || sq_forward_stall[fu]) begin
+                $display("  FU%0d: fwd_valid=%0d fwd_stall=%0d fwd_data=0x%08h",
+                            fu,
+                            sq_forward_valid[fu],
+                            sq_forward_stall[fu],
+                            sq_forward_data[fu]);
+            end
+        end
+        
 
         // RESERVATION STATIONS
         $display("\n--- RESERVATION STATIONS ---");
