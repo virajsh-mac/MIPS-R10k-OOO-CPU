@@ -565,19 +565,29 @@ module dcache #(
     assign cache_outs = cache_outs_temp;
 
     // D-Cache State Display
+    // Format matches final memory output: @@@ mem[%5d] = %h : %0d
     always_ff @(posedge clock) begin
         if (!reset) begin
+            logic [31:0] byte_addr;
             $display("========================================");
             $display("=== D-CACHE STATE (Cycle %0t) ===", $time);
             $display("========================================");
             $display("Cache Lines (Total: %0d):", MEM_DEPTH);
             for (int i = 0; i < MEM_DEPTH; i++) begin
                 if (cache_lines[i].valid) begin
-                    $display("  [%2d] Valid=1 Dirty=%0d Tag=%h Data=%h", 
-                             i, cache_lines[i].dirty, cache_lines[i].tag, 
-                             cache_lines[i].data.dbbl_level);
+                    // Convert tag to byte address: tag is addr[31:3], so byte_addr = tag << 3
+                    byte_addr = {cache_lines[i].tag, 3'b0};
+                    if (cache_lines[i].dirty) begin
+                        $display("  [%2d] @@@ mem[%5d] = %016h : %0d (DIRTY)", 
+                                 i, byte_addr, cache_lines[i].data.dbbl_level,
+                                 cache_lines[i].data.dbbl_level);
+                    end else begin
+                        $display("  [%2d] @@@ mem[%5d] = %016h : %0d", 
+                                 i, byte_addr, cache_lines[i].data.dbbl_level,
+                                 cache_lines[i].data.dbbl_level);
+                    end
                 end else begin
-                    $display("  [%2d] Valid=0 (empty)", i);
+                    $display("  [%2d] (empty)", i);
                 end
             end
             $display("Cache Full: %0d", full);
