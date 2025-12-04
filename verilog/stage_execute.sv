@@ -20,14 +20,6 @@ module stage_execute (
     input  PRF_READ_DATA prf_read_data_src1,
     input  PRF_READ_DATA prf_read_data_src2,
 
-    // // Interface to D-cache for memory operations (IGNORE FOR NOW)
-    // output MEM_COMMAND proc2dcache_command [`NUM_FU_MEM-1:0],
-    // output ADDR proc2dcache_addr [`NUM_FU_MEM-1:0],
-    // output DATA proc2dcache_data [`NUM_FU_MEM-1:0],  // For stores
-    // output MEM_SIZE proc2dcache_size [`NUM_FU_MEM-1:0],
-    // input logic [`NUM_FU_MEM-1:0] dcache_valid,
-    // input DATA [`NUM_FU_MEM-1:0] dcache_data,  // For loads
-
     output logic [`NUM_FU_MULT-1:0] mult_request,
     output CDB_FU_OUTPUTS fu_outputs,
 
@@ -35,8 +27,23 @@ module stage_execute (
     output logic [`N-1:0] ex_valid,
     output EX_COMPLETE_PACKET ex_comp,
 
+    // Late CDB requests from MEM FUs (for cache miss handling)
+    output logic [`NUM_FU_MEM-1:0] mem_cdb_requests_out,
+
     // to store queue
-    output EXECUTE_STOREQ_PACKET execute_storeq_packet,
+    output EXECUTE_STOREQ_ENTRY [`NUM_FU_MEM-1:0] mem_storeq_entries,
+
+    // to/from dcache
+    output D_ADDR_PACKET [1:0] dcache_read_addrs,
+    input  CACHE_DATA    [1:0] dcache_read_data,
+
+    // Store queue forwarding interface
+    output logic      [`NUM_FU_MEM-1:0] sq_lookup_valid,
+    output ADDR       [`NUM_FU_MEM-1:0] sq_lookup_addr,
+    output STOREQ_IDX [`NUM_FU_MEM-1:0] sq_lookup_sq_tail,
+    input  logic      [`NUM_FU_MEM-1:0] sq_forward_valid,
+    input  DATA       [`NUM_FU_MEM-1:0] sq_forward_data,
+    input  logic      [`NUM_FU_MEM-1:0] sq_forward_stall,
 
     // From CDB for grant selection
     input logic [`N-1:0][`NUM_FU_TOTAL-1:0] gnt_bus
@@ -59,6 +66,9 @@ module stage_execute (
     logic [`NUM_FU_MULT-1:0] mult_start, mult_done;
 
     // FU metadata computed on-the-fly in EX/COMP register fill (SoA approach)
+
+    // Load counter for dcache address selection
+    int load_count;
 
     // Metadata for mult module (passed through pipeline)
     EX_COMPLETE_ENTRY mult_meta_in[`NUM_FU_MULT-1:0];
@@ -377,9 +387,9 @@ module stage_execute (
     end
 
     // =========================================================================
-    // MEM Functional Units (Placeholder)
+    // MEM Functional Units
     // =========================================================================
-    // TODO stores implemented, load instructions need to be implemented (WIP)
+    // Store operations handled by MEM FUs with store queue interaction
 
     always_comb begin
         for (int i = 0; i < `NUM_FU_MEM; i++) begin
@@ -390,40 +400,95 @@ module stage_execute (
         end
     end
 
-    mem_fu mem_inst[`NUM_FU_MEM-1:0] (
-        .rs1(mem_rs1),
-        .rs2(mem_rs2),
-        .imm(mem_src2_imm),
-        .addr(mem_addr),
-        .data(mem_data)
-    );
+    // Outputs from each MEM FU
+    EXECUTE_STOREQ_ENTRY [`NUM_FU_MEM-1:0] mem_store_queue_entries;
+    CDB_ENTRY [`NUM_FU_MEM-1:0] mem_cdb_results;
+    logic [`NUM_FU_MEM-1:0] mem_cdb_requests;  // CDB requests from MEM FUs
+    logic [`NUM_FU_MEM-1:0] mem_is_load_request;
+    logic [`NUM_FU_MEM-1:0] mem_is_store;
+    D_ADDR [`NUM_FU_MEM-1:0] mem_dcache_addrs;
+    
+    // Store queue forwarding lookup signals from MEM FUs
+    logic      [`NUM_FU_MEM-1:0] mem_lookup_valid;
+    ADDR       [`NUM_FU_MEM-1:0] mem_lookup_addr;
+    STOREQ_IDX [`NUM_FU_MEM-1:0] mem_lookup_sq_tail;
+    
+    // Maps MEM FU index to dcache slot (0 or 1) for load data routing
+    logic [1:0] mem_fu_to_dcache_slot [`NUM_FU_MEM-1:0];
 
-    // send store instruction address and data to store queue
+    // Generate MEM FUs
+    generate
+        for (genvar i = 0; i < `NUM_FU_MEM; i++) begin : mem_fu_gen
+            mem_fu mem_inst (
+                .clock(clock),
+                .reset(reset | mispredict),
+                .valid(issue_entries.mem[i].valid),
+                .func(mem_funcs[i]),
+                .rs1(mem_rs1[i]),
+                .rs2(mem_rs2[i]),
+                .imm(mem_src2_imm[i]),
+                .store_queue_idx(issue_entries.mem[i].store_queue_idx),
+                .dest_tag(issue_entries.mem[i].dest_tag),
+                .cache_hit_data(dcache_read_data[mem_fu_to_dcache_slot[i]]),
+                
+                // Store queue forwarding inputs
+                .forward_valid(sq_forward_valid[i]),
+                .forward_data(sq_forward_data[i]),
+                .forward_stall(sq_forward_stall[i]),
+                
+                // Outputs
+                .addr(mem_addr[i]),
+                .data(mem_data[i]),
+                .store_queue_entry(mem_store_queue_entries[i]),
+                .cdb_result(mem_cdb_results[i]),
+                .cdb_request(mem_cdb_requests[i]),
+                .is_load_request(mem_is_load_request[i]),
+                .is_store_op(mem_is_store[i]),
+                .dcache_addr(mem_dcache_addrs[i]),
+                
+                // Store queue forwarding lookup outputs
+                .lookup_valid(mem_lookup_valid[i]),
+                .lookup_addr(mem_lookup_addr[i]),
+                .lookup_sq_tail(mem_lookup_sq_tail[i])
+            );
+        end
+    endgenerate
+    
+    // Route forwarding lookup signals to store queue
+    assign sq_lookup_valid   = mem_lookup_valid;
+    assign sq_lookup_addr    = mem_lookup_addr;
+    assign sq_lookup_sq_tail = mem_lookup_sq_tail;
+
+    // Output MEM FU store queue entries directly
+    assign mem_storeq_entries = mem_store_queue_entries;
+
+    // Late CDB requests from MEM FUs
+    assign mem_cdb_requests_out = mem_cdb_requests;
+
+    // Send load addresses to dcache (first 2 MEM FUs that request loads)
     always_comb begin
-        execute_storeq_packet = '0;
+        dcache_read_addrs = '0;
+        mem_fu_to_dcache_slot = '{default: '0};
 
-        for (int i = 0; i < `NUM_FU_MEM; i++) begin
-            // This lane is active AND this MEM op is a store (SB/SH/SW/SD)
-            if ( issue_entries.mem[i].valid &&
-                (issue_entries.mem[i].op_type.func == STORE_BYTE   ||
-                 issue_entries.mem[i].op_type.func == STORE_HALF   ||
-                 issue_entries.mem[i].op_type.func == STORE_WORD   ||
-                 issue_entries.mem[i].op_type.func == STORE_DOUBLE) ) begin
+        // Collect load requests from MEM FUs and send first 2 to dcache
+        load_count = 0;
+        for (int i = 0; i < `NUM_FU_MEM && load_count < 2; i++) begin
+            if (mem_is_load_request[i]) begin
+                dcache_read_addrs[load_count].valid = 1'b1;
+                dcache_read_addrs[load_count].addr = mem_dcache_addrs[i];
 
-                execute_storeq_packet.valid[i]          = 1'b1;
-                execute_storeq_packet.addr[i]           = mem_addr[i];                // effective address from mem_fu
-                execute_storeq_packet.data[i]           = mem_data[i];                // store data from mem_fu
-                execute_storeq_packet.store_queue_idx[i] = issue_entries.mem[i].store_queue_idx; // index from dispatch/RS
+                mem_fu_to_dcache_slot[i] = load_count;  // Record which dcache slot this FU uses
+                load_count++;
             end
         end
     end
 
+    // Set CDB outputs from MEM FU results
     always_comb begin
         for (int i = 0; i < `NUM_FU_MEM; i++) begin
             fu_results.mem[i] = '0;  // Initialize MEM results to 0
-            fu_outputs.mem[i].valid = 1'b0;
-            fu_outputs.mem[i].tag = '0;
-            fu_outputs.mem[i].data = '0;
+            // Use CDB results from MEM FUs (for cache hit loads)
+            fu_outputs.mem[i] = mem_cdb_results[i];
         end
     end
 
@@ -504,14 +569,16 @@ module stage_execute (
             end
         end
 
-        // MEM grants (placeholder)
+        // MEM grants (loads/stores that complete)
         for (int i = 0; i < `N; i++) begin
             for (int k = 0; k < `NUM_FU_MEM; k++) begin
                 if (gnt_mem[i][k]) begin
-                    ex_valid[i] = 1'b1;
                     ex_comp.rob_idx[i] = issue_entries.mem[k].rob_idx;
                     ex_comp.dest_pr[i] = issue_entries.mem[k].dest_tag;
-                    ex_comp.result[i] = fu_results.mem[k];  // Will be 0 for now
+
+                    // MEM operations complete when they get CDB grants (they only request when ready)
+                    ex_valid[i] = 1'b1;
+                    ex_comp.result[i] = mem_cdb_results[k].valid ? mem_cdb_results[k].data : '0;
                 end
             end
         end

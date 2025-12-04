@@ -27,6 +27,8 @@ module stage_dispatch (
     input logic   [     $clog2(`RS_MULT_SZ+1)-1:0] rs_mult_free_slots,
     input logic   [   $clog2(`RS_BRANCH_SZ+1)-1:0] rs_branch_free_slots,
     input logic   [      $clog2(`RS_MEM_SZ+1)-1:0] rs_mem_free_slots,
+   // input logic [$clog2(`LSQ_SZ)-1:0] store_queue_complete_ptr, // Maybe can you use this to compare with load_position pointer later
+    input logic                         store_queue_has_pending_store,
 
 
     // To Instruction Buffer: dispatch count (0 = stall)
@@ -35,8 +37,9 @@ module stage_dispatch (
     // To ROB: allocation entries
     output ROB_ENTRY [`N-1:0] rob_entry_packet,
 
-    // From Store Queue: alloc idxs
+    // From Store Queue: alloc idxs and tail for loads
     input STOREQ_IDX [`N-1:0] store_queue_alloc_idxs,
+    input STOREQ_IDX          store_queue_tail_idx,  // Current SQ tail (for load forwarding)
     // To Store Queue: allocation entries
     output STOREQ_ENTRY [`N-1:0] store_queue_entry_packet,
 
@@ -60,7 +63,7 @@ module stage_dispatch (
     logic rs_bank_available;
 
     // RS allocation counters
-    int alu_count, mult_count, branch_count, mem_count;
+    int alu_count, mult_count, branch_count, mem_count, storeq_count;
 
     // Track RS usage dynamically as we go
     int alu_used;
@@ -68,6 +71,9 @@ module stage_dispatch (
     int branch_used;
     int mem_used;
     int storeq_used;
+    logic is_store;
+    logic is_load;
+    logic saw_store_in_bundle;
 
     // Map table read results
     logic [`PHYS_TAG_BITS-1:0] local_reg1_tag[`N-1:0];
@@ -75,6 +81,10 @@ module stage_dispatch (
     logic local_reg1_ready[`N-1:0];
     logic local_reg2_ready[`N-1:0];
     logic [`PHYS_TAG_BITS-1:0] local_Told[`N-1:0];
+    
+    // Does this instruction need rs2 to be ready before issuing?
+    // TRUE for: (1) instructions using rs2 as ALU operand B, OR (2) stores (rs2 holds data to store)
+    logic needs_rs2[`N-1:0];
 
     // Extracted physical register allocations from freelist grants
     PHYS_TAG [`N-1:0] allocated_phys;
@@ -113,9 +123,36 @@ module stage_dispatch (
         branch_used = 0;
         mem_used = 0;
         storeq_used = 0;
+        saw_store_in_bundle = 1'b0;
 
         for (int i = 0; i < `N; i++) begin
             if (i >= num_valid_from_fetch) break;  // No more valid instructions
+
+            // Determine instruction properties
+            // Use the actual func field to identify stores, not uses_rd
+            // This handles edge cases like "lw x0, ..." which has uses_rd=false but is a load
+            is_store = decode_op_type[i].category == CAT_MEM && 
+                       (decode_op_type[i].func == STORE_BYTE || 
+                        decode_op_type[i].func == STORE_HALF || 
+                        decode_op_type[i].func == STORE_WORD || 
+                        decode_op_type[i].func == STORE_DOUBLE);
+            is_load  = decode_op_type[i].category == CAT_MEM && 
+                       (decode_op_type[i].func == LOAD_BYTE || 
+                        decode_op_type[i].func == LOAD_HALF || 
+                        decode_op_type[i].func == LOAD_WORD || 
+                        decode_op_type[i].func == LOAD_DOUBLE ||
+                        decode_op_type[i].func == LOAD_BYTE_U || 
+                        decode_op_type[i].func == LOAD_HALF_U);
+
+            // CRITICAL: Do NOT dispatch loads until ALL stores in the store queue have executed.
+            // This prevents deadlock where:
+            //   1. Loads issue to MEM FU and stall waiting for older stores
+            //   2. Stores can't execute because MEM FU is blocked by waiting loads
+            // Also block loads after a store in the SAME bundle (store's SQ index not visible yet).
+            if (is_load && (store_queue_has_pending_store || saw_store_in_bundle)) begin
+                // Don't dispatch this load - wait for all stores to execute first
+                break;
+            end
 
             // Check ROB space
             if (rob_slots_used >= free_slots_rob) break;
@@ -123,10 +160,8 @@ module stage_dispatch (
             // Check freelist space (only if instruction uses a destination register)
             if (decode_uses_rd[i] && freelist_slots_used >= freelist_free_slots) break;
 
-            // checks if there is space in store queue if instruction is a store
-            if (decode_op_type[i].category == CAT_MEM && !decode_uses_rd[i]) begin
-                if (storeq_used >= store_queue_free_slots) break;
-            end
+            // Check store queue space (only for store instructions)
+            if (is_store && storeq_used >= store_queue_free_slots) break;
 
             // Check RS bank space for this instruction's functional unit
             case (decode_op_type[i].category)
@@ -141,10 +176,9 @@ module stage_dispatch (
             num_to_dispatch++;
             rob_slots_used++;
             if (decode_uses_rd[i]) freelist_slots_used++;
-
-            // Count how many stores we’re dispatching (for LSQ capacity check)
-            if (decode_op_type[i].category == CAT_MEM && !decode_uses_rd[i]) begin
+            if (is_store) begin
                 storeq_used++;
+                saw_store_in_bundle = 1'b1;  // mark that there is an older store in this group
             end
 
             // Reserve RS slot for this instruction type
@@ -179,17 +213,28 @@ module stage_dispatch (
             local_reg2_tag[i]   = maptable_read_resp.rs2_entries[i].phys_reg;
             local_reg1_ready[i] = maptable_read_resp.rs1_entries[i].ready;
             local_reg2_ready[i] = maptable_read_resp.rs2_entries[i].ready;
+            local_Told[i]       = maptable_read_resp.told_entries[i].phys_reg;
+
+            // Determine if this instruction needs rs2 to be ready:
+            // - Normal case: opb_select == OPB_IS_RS2 (rs2 is ALU operand B)
+            // - Store case: MEM instruction that is a store (rs2 holds data to store)
+            // Use func field to identify stores (not uses_rd, to handle lw x0 correctly)
+            needs_rs2[i] = (decode_opb_select[i] == OPB_IS_RS2) ||
+                           (decode_op_type[i].category == CAT_MEM && 
+                            (decode_op_type[i].func == STORE_BYTE || 
+                             decode_op_type[i].func == STORE_HALF || 
+                             decode_op_type[i].func == STORE_WORD || 
+                             decode_op_type[i].func == STORE_DOUBLE));
 
             // Halt instructions don't use source registers, so mark them ready
             if (decode_halt[i]) begin
                 local_reg1_ready[i] = 1'b1;
                 local_reg2_ready[i] = 1'b1;
             end
-
-            if ((decode_opb_select[i] != OPB_IS_RS2) && !decode_halt[i]) begin
+            // If instruction doesn't need rs2, mark it as ready (won't wait for it)
+            else if (!needs_rs2[i]) begin
                 local_reg2_ready[i] = 1'b1;
             end
-            local_Told[i] = maptable_read_resp.told_entries[i].phys_reg;
         end
 
         // Extract physical register allocations from freelist grants
@@ -221,7 +266,8 @@ module stage_dispatch (
                         local_reg1_tag[i] = dispatch_renames[decode_rs1_idx[i]];
                         local_reg1_ready[i] = 1'b0;
                     end
-                    if (has_rename[decode_rs2_idx[i]] && decode_opb_select[i] == OPB_IS_RS2) begin
+                    // Forward rs2 if instruction needs it and an earlier inst renamed it
+                    if (has_rename[decode_rs2_idx[i]] && needs_rs2[i]) begin
                         local_reg2_tag[i] = dispatch_renames[decode_rs2_idx[i]];
                         local_reg2_ready[i] = 1'b0;
                     end
@@ -251,6 +297,7 @@ module stage_dispatch (
         mult_count = 0;
         branch_count = 0;
         mem_count = 0;
+        storeq_count = 0;
 
         for (int i = 0; i < dispatch_count; i++) begin
             if (i < window_valid_count) begin
@@ -262,6 +309,11 @@ module stage_dispatch (
                     phys_rd: allocated_phys[i],
                     prev_phys_rd: local_Told[i],
                     complete: 1'b0,
+                    store:        (decode_op_type[i].category == CAT_MEM && 
+                                   (decode_op_type[i].func == STORE_BYTE || 
+                                    decode_op_type[i].func == STORE_HALF || 
+                                    decode_op_type[i].func == STORE_WORD || 
+                                    decode_op_type[i].func == STORE_DOUBLE)),
                     exception: NO_ERROR,
                     branch: (decode_op_type[i].category == CAT_BRANCH),
                     pred_target: dispatch_window[i].bp_pred_target,  // No prediction target
@@ -292,8 +344,12 @@ module stage_dispatch (
                         rs_alloc.mem.valid[mem_count]   = 1'b1;
                         rs_alloc.mem.entries[mem_count] = create_rs_entry(i);
 
-                        // Store instructions: MEM category and no dest register
-                        if (!decode_uses_rd[i]) begin
+                        // Store instructions: use func field to identify stores (same logic as counting loop)
+                        // This correctly handles "lw x0, ..." which has uses_rd=false but is a load
+                        if (decode_op_type[i].func == STORE_BYTE || 
+                            decode_op_type[i].func == STORE_HALF || 
+                            decode_op_type[i].func == STORE_WORD || 
+                            decode_op_type[i].func == STORE_DOUBLE) begin
                             // Create store queue entry at position storeq_used
                             store_queue_entry_packet[storeq_used] = '{
                                 valid:   1'b1,
@@ -309,19 +365,33 @@ module stage_dispatch (
                             // Move to next free SQ allocation lane
                             storeq_used++;
                         end
-                        // else: load instruction
-                        //      - it still uses RS_MEM
-                        //      - but it does NOT allocate a store queue entry
-                        //      - create_rs_entry already set store_queue_idx = '0
+                        else begin // load instruction
+                            // For loads, store the current SQ tail + stores from this bundle
+                            // This tells the store queue which stores are "older" than this load
+                            rs_alloc.mem.entries[mem_count].store_queue_idx = 
+                                STOREQ_IDX'((store_queue_tail_idx + storeq_used) % `LSQ_SZ);
+                        end
 
                         mem_count++;
                     end
-                    // CAT_MEM: begin
-                    //     rs_alloc.mem.valid[mem_count]   = 1'b1;
-                    //     rs_alloc.mem.entries[mem_count] = create_rs_entry(i);
-                    //     mem_count++;
-                    // end
                 endcase
+
+                // // Store queue allocation for store instructions
+                // if (decode_op_type[i].category == CAT_MEM && !decode_uses_rd[i]) begin
+                //     // Create store queue entry
+                //     store_queue_entry_packet[storeq_count] = '{
+                //         valid:   1'b1,
+                //         rob_idx: rob_alloc_idxs[i],
+                //         address: '0,   // filled in later by execute
+                //         data:    '0,   // filled in later by execute
+                //         default: '0
+                //     };
+
+                //     // Tell the RS entry which SQ index this store owns
+                //     rs_alloc.mem.entries[mem_count-1].store_queue_idx = store_queue_alloc_idxs[storeq_count];
+
+                //     storeq_count++;
+                // end
 
                 // Request physical register allocation
                 free_alloc_valid[i] = decode_uses_rd[i];

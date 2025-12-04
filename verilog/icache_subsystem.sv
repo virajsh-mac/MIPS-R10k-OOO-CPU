@@ -64,10 +64,10 @@ module icache_subsystem (
     // Oldest miss address logic
     always_comb begin
         oldest_miss_addr = '0;
-        if (read_addrs[0].valid && (cache_outs[0].valid == 1'b0)) begin
+        if (read_addrs[0].valid && !cache_outs[0].valid) begin
             oldest_miss_addr.valid = 1'b1;
             oldest_miss_addr.addr  = read_addrs[0].addr;
-        end else if (read_addrs[1].valid && (cache_outs[1].valid == 1'b0)) begin
+        end else if (read_addrs[1].valid && !cache_outs[1].valid) begin
             oldest_miss_addr.valid = 1'b1;
             oldest_miss_addr.addr  = read_addrs[1].addr;
         end
@@ -75,7 +75,7 @@ module icache_subsystem (
 
     // Mem request address logic
     always_comb begin
-        mem_req_addr = '0;  // Default assignment to prevent latch
+        mem_req_addr = '0;
         if (~snooping_found_icache & ~snooping_found_mshr) begin
             mem_req_addr = {prefetcher_snooping_addr[32:3], 3'b0};
         end

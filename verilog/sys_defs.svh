@@ -58,7 +58,7 @@
 `define NUM_FU_ALU 3      // Enough for superscalar width
 `define NUM_FU_MULT 1     // Single pipelined multiplier
 `define NUM_FU_BRANCH 1   // Single branch resolver
-`define NUM_FU_MEM 1     // Single address calculator for mem ops
+`define NUM_FU_MEM 2     // Single address calculator for mem ops
 `define NUM_FU_TOTAL (`NUM_FU_ALU + `NUM_FU_MULT + `NUM_FU_BRANCH + `NUM_FU_MEM)
 
 // reservation station sizes per FU type
@@ -158,9 +158,8 @@ typedef logic [3:0] MEM_TAG;
 `define DCACHE_LINE_BYTES 8      // 8 bytes/line 8 * 32 (2 words; 256 bytes total)
 `define DCACHE_VICTIM_SZ 4       // Small victim cache
 
-`define DSET_INDEX_BITS $clog2(`DCACHE_LINES / `DCACHE_ASSOC)   // indexing into each cache line
 `define DBLOCK_OFFSET_BITS $clog2(`DCACHE_LINE_BYTES)           // indexing into bytes in a cache line/block
-`define DTAG_BITS 16 - `DSET_INDEX_BITS - `DBLOCK_OFFSET_BITS
+`define DTAG_BITS 32 - `DBLOCK_OFFSET_BITS                      // Tag for fully associative cache
 
 typedef union packed {
     logic [7:0][7:0]  byte_level;
@@ -170,12 +169,20 @@ typedef union packed {
 } MEM_BLOCK;
 
 typedef logic [`ITAG_BITS-1:0]      I_TAG;
+typedef logic [`DTAG_BITS-1:0]      D_TAG;
 
 typedef struct packed {
     logic valid;
     I_TAG tag;
     MEM_BLOCK data;
 } I_CACHE_LINE;
+
+typedef struct packed {
+    logic valid;
+    logic dirty;
+    logic [`DTAG_BITS-1:0] tag;
+    MEM_BLOCK data;
+} D_CACHE_LINE;
 
 typedef struct packed {
     logic valid;
@@ -194,6 +201,17 @@ typedef struct packed {
 } I_ADDR_PACKET;
 
 typedef struct packed {
+    logic [15:0]                    zeros;
+    logic [`DTAG_BITS-1:0]          tag;
+    logic [`DBLOCK_OFFSET_BITS-1:0] block_offset;
+} D_ADDR; // DCache Breakdown of fully associative D-cache address
+
+typedef struct packed {
+    logic valid;
+    D_ADDR  addr;
+} D_ADDR_PACKET;
+
+typedef struct packed {
     logic valid;
     I_TAG  addr;
 } I_TAG_PACKET;
@@ -205,12 +223,10 @@ typedef struct packed {
 } MSHR_PACKET;
 
 typedef struct packed {
-    logic [15:0]                    zeros;
-    logic [`DTAG_BITS-1:0]          tag;
-    logic [`DSET_INDEX_BITS-1:0]    index;
-    logic                           bank;
-    logic [`DBLOCK_OFFSET_BITS-1:0] block_offset;
-} D_ADDR; // DCache Breakdown of D-cache address
+    logic   valid;
+    MEM_TAG mem_tag;
+    D_ADDR  d_addr;
+} D_MSHR_PACKET;
 
 typedef enum logic [1:0] {
     BYTE   = 2'h0,
@@ -238,6 +254,21 @@ typedef struct packed {
     logic valid;  // Valid broadcasts this cycle
     PHYS_TAG tag;  // Physical dest tags
 } CDB_EARLY_TAG_ENTRY;
+
+// Store Queue Entry structure
+typedef struct packed {
+    ADDR                   address;   // Store address
+    DATA                   data;      // Store data
+    ROB_IDX                rob_idx;   // associated rob idx (may not be needed but kept for squashing)
+    logic                  valid;     // Entry occupancy bit
+} STOREQ_ENTRY;
+
+typedef struct packed {
+    logic valid;
+    ADDR  addr;
+    DATA  data;
+    STOREQ_IDX store_queue_idx;
+} EXECUTE_STOREQ_ENTRY;
 
 // Map table entry structure
 typedef struct packed {
@@ -639,26 +670,18 @@ typedef struct packed {
     PHYS_TAG       prev_phys_rd;   // Previous physical mapping (for free on commit)
     DATA           value;          // Computed value (from Complete, if needed)
     logic          complete;       // Instruction has completed
+    logic          store;          // is this a store instruction
     EXCEPTION_CODE exception;      // Any exception code
     logic          branch;         // Is this a branch?
-    ADDR           branch_target;  // Resolved branch target
     logic          branch_taken;   // Resolved taken/not taken
-    ADDR           pred_target;    // Predicted branch target
+    ADDR           branch_target;  // Resolved branch target
     logic          pred_taken;     // Predicted taken/not taken
+    ADDR           pred_target;    // Predicted branch target
     logic [`BP_GHR_WIDTH-1:0] ghr_snapshot;   // new: GHR snapshot
     logic          mispredict;     // Branch misprediction flag
     logic          halt;           // Is this a halt?
     logic          illegal;        // Is this illegal?
 } ROB_ENTRY;
-
-
-// Store Queue Entry structure
-typedef struct packed {
-    ADDR                   address;   // Store address
-    DATA                   data;      // Store data
-    ROB_IDX                rob_idx;   // associated rob idx (may not be needed but kept for squashing)
-    logic                  valid;     // Entry occupancy bit
-} STOREQ_ENTRY;
 
 typedef struct packed {
     logic [`NUM_FU_MEM-1:0] valid;

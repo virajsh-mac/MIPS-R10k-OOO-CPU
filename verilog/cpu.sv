@@ -81,14 +81,36 @@ module cpu (
     output logic [`NUM_FU_TOTAL-1:0] cdb_grants_flat_dbg,
     output CDB_EARLY_TAG_ENTRY [`N-1:0] cdb_early_tags_dbg,
 
-    // Dispatch packet debug output
-    output FETCH_DISP_PACKET fetch_disp_packet_dbg,
+    // Instruction Buffer debug output
+    output FETCH_PACKET [`N-1:0] ib_output_disp_wdn_dbg,
+
+    // Store Queue entry packet output
+    output STOREQ_ENTRY [`N-1:0] sq_entry_packet_dbg,
+    output logic [$clog2(`LSQ_SZ+1)-1:0] sq_free_slots_dbg,
+    output logic [$clog2(`LSQ_SZ)-1:0] head_idx_dbg,
+    output logic [$clog2(`LSQ_SZ)-1:0] tail_idx_dbg,
+
+    // ROB entry free slots output
+    output logic [$clog2(`ROB_SZ+1)-1:0] rob_free_slots_dbg,
 
     // Issue clear signals debug output
     output RS_CLEAR_SIGNALS rs_clear_signals_dbg,
 
     // Fetch stage debug outputs
-    output FETCH_PACKET [3:0]   fetch_packet_dbg
+    output FETCH_PACKET [3:0]   fetch_packet_dbg,
+
+    // Debug output, exposes DCache so memory is written back to .out file
+    output D_CACHE_LINE [`DCACHE_LINES-1:0]      cache_lines_dbg,
+
+    // store to dcache
+    output logic sq_to_dcache_valid_dbg,
+    output ADDR  sq_to_dcache_addr_dbg,
+    output DATA  sq_to_dcache_data_dbg,
+
+    // store forwarding
+    output logic [`NUM_FU_MEM-1:0] sq_forward_valid_dbg,
+    output DATA [`NUM_FU_MEM-1:0] sq_forward_data_dbg,
+    output logic [`NUM_FU_MEM-1:0] sq_forward_stall_dbg
 );
 
     //////////////////////////////////////////////////
@@ -119,13 +141,37 @@ module cpu (
     // Store Queue wires
     STOREQ_ENTRY [`N-1:0] sq_dispatch_packet;  // from dispatch
     STOREQ_IDX   [`N-1:0] sq_alloc_idxs;       // indices assigned by SQ
+    STOREQ_IDX            sq_tail_idx;         // current SQ tail (for load forwarding)
     logic [$clog2(`LSQ_SZ+1)-1:0] sq_free_slots;
 
     // From execute: address/data updates for stores
-    EXECUTE_STOREQ_PACKET execute_storeq_packet;
+    EXECUTE_STOREQ_ENTRY [`NUM_FU_MEM-1:0] mem_storeq_entries;
 
     // From ROB: how many SQ entries to free this cycle
     logic [$clog2(`N+1)-1:0] sq_free_count;
+
+    // From Store Queue
+    logic sq_unexecuted_store;
+
+    // Store queue forwarding interface (execute <-> store queue)
+    logic      [`NUM_FU_MEM-1:0] sq_lookup_valid;
+    ADDR       [`NUM_FU_MEM-1:0] sq_lookup_addr;
+    STOREQ_IDX [`NUM_FU_MEM-1:0] sq_lookup_sq_tail;
+    logic      [`NUM_FU_MEM-1:0] sq_forward_valid;
+    DATA       [`NUM_FU_MEM-1:0] sq_forward_data;
+    logic      [`NUM_FU_MEM-1:0] sq_forward_stall;
+
+    // From Store Queue to D-Cache (Processor Store)
+    logic sq_to_dcache_valid;
+    ADDR  sq_to_dcache_addr;
+    DATA  sq_to_dcache_data;
+
+    // Retire <-> D-Cache Handshake
+    logic retire_store_request;
+    logic dcache_store_response;
+    
+    // Retire count from stage_retire to ROB
+    logic [$clog2(`N+1)-1:0] retire_count;
 
     // Free list allocation signals
     logic                   [                         `N-1:0]                        free_alloc_valid;
@@ -172,6 +218,7 @@ module cpu (
     PRF_READ_TAGS prf_read_tag_src1, prf_read_tag_src2;
     PRF_READ_DATA prf_read_data_src1, prf_read_data_src2;
     logic [`NUM_FU_MULT-1:0] mult_request;
+    logic [`NUM_FU_MEM-1:0] execute_mem_cdb_requests;
 
     // Retire stage signals
     ROB_ENTRY [`N-1:0] rob_head_entries;
@@ -203,7 +250,7 @@ module cpu (
     assign cdb_requests.alu    = issue_cdb_requests.alu;  // From issue stage
     assign cdb_requests.mult   = mult_request;  // From execute stage (when completing)
     assign cdb_requests.branch = issue_cdb_requests.branch;  // From issue stage
-    assign cdb_requests.mem    = issue_cdb_requests.mem;  // From issue stage
+    assign cdb_requests.mem    = execute_mem_cdb_requests;  // From execute stage (late requests for cache hits)
 
     // Connect dispatch outputs to freelist inputs
     assign freelist_alloc_req  = free_alloc_valid;
@@ -222,9 +269,10 @@ module cpu (
 
 
     // I-cache <-> fetch
-    I_ADDR_PACKET          [1:0] i_cache_read_addrs ;
-    I_ADDR_PACKET           mem_req_addr;
-    CACHE_DATA             [1:0] icache_data ;
+    I_ADDR_PACKET          [1:0] i_cache_read_addrs;
+    I_ADDR_PACKET           icache_mem_req_addr;
+    CACHE_DATA             [1:0] icache_data;
+    logic                        icache_mem_req_accepted;
 
     icache_subsystem icache_subsystem_inst (
         .clock            (clock),
@@ -238,60 +286,95 @@ module cpu (
         .mem_data_tag     (mem2proc_data_tag),
 
         // Arbitor IOs
-        .mem_req_addr     (mem_req_addr),
-        .mem_req_accepted (mem_req_accepted)
+        .mem_req_addr     (icache_mem_req_addr),
+        .mem_req_accepted (icache_mem_req_accepted)
     );
 
-    // icache access memory only
-    // needs to be decided by arbitrator later when dcache is done
-    always_comb begin
-        dmem_req_valid   = 1'b0;
-        dmem_req_command = MEM_NONE;
-        dmem_req_addr    = '0;
-        dmem_req_data    = '0;
-    `ifndef CACHE_MODE
-        dmem_req_size    = WORD;  // sw = store word
-    `endif
+    //////////////////////////////////////////////////
+    //                                              //
+    //                dcache                        //
+    //                                              //
+    //////////////////////////////////////////////////
 
-        // For now, if any MEM FU lane has a valid store, use that
-        for (int i = 0; i < `NUM_FU_MEM; i++) begin
-            if (execute_storeq_packet.valid[i]) begin
-                dmem_req_valid   = 1'b1;
-                dmem_req_command = MEM_STORE;
-                dmem_req_addr    = execute_storeq_packet.addr[i];
-                // MEM_BLOCK is 64 bits; store word goes in low bits
-                dmem_req_data[31:0] = execute_storeq_packet.data[i];
-            end
-        end
-    end
+    // D-cache <-> memory execution
+    // TODO: Connect these to actual memory operation addresses from execute stage
+    D_ADDR_PACKET          [1:0] d_cache_read_addrs;
+    CACHE_DATA             [1:0] dcache_data;
+    D_ADDR_PACKET                dcache_mem_req_addr;
+    D_ADDR_PACKET                dcache_mem_write_addr;
+    MEM_BLOCK                    dcache_mem_write_data;
+    logic                        dcache_mem_write_valid;
+    logic                        dcache_mem_req_accepted;
 
+
+    // Dcache read addresses come from execute stage (for loads)
+    // Note: This is connected below in the execute stage instantiation
+
+    dcache_subsystem dcache_subsystem_inst (
+        .clock            (clock),
+        .reset            (reset),
+        // Memory operations read
+        .read_addrs       (d_cache_read_addrs),
+        .cache_outs       (dcache_data),
+        // Mem.sv IOs - Read requests
+        .current_req_tag  (mem2proc_transaction_tag),
+        .mem_data         (mem2proc_data),
+        .mem_data_tag     (mem2proc_data_tag),
+        // Arbitor IOs - Read requests
+        .mem_req_addr     (dcache_mem_req_addr),
+        .mem_req_accepted (dcache_mem_req_accepted),
+        // Arbitor IOs - Write requests (dirty writebacks)
+        .mem_write_addr   (dcache_mem_write_addr),
+        .mem_write_data   (dcache_mem_write_data),
+        .mem_write_valid  (dcache_mem_write_valid),
+        // Processor Stores
+        .proc_store_valid (retire_store_request), // Driven by Retire, using data from SQ
+        .proc_store_addr  (sq_to_dcache_addr),
+        .proc_store_data  (sq_to_dcache_data),
+        .proc_store_response (dcache_store_response),
+        // debug to expose DCache to testbench
+        .cache_lines_debug (cache_lines_dbg)
+    );
     //////////////////////////////////////////////////
     //                                              //
     //          Memory Arbiter Logic                //
     //                                              //
     //////////////////////////////////////////////////
 
-    logic icache_mem_req_accepted;
-
-    // Arbitration: Data stores (from store queue) prioritized over instruction requests (icache)
+    // Arbitration: Data requests (dcache) prioritized over instruction requests (icache)
+    // Writes: Only dcache writes, no conflicts
+    // 
+    // D_ADDR to 32-bit address conversion:
+    // D_ADDR stores: tag = addr[31:3] (29 bits), block_offset = addr[2:0] (3 bits)
+    // To reconstruct 8-byte-aligned address: {tag, 3'b0}
     always_comb begin
         // Default values
         proc2mem_command = MEM_NONE;
         proc2mem_addr    = '0;
         proc2mem_data    = '0;
         icache_mem_req_accepted = 1'b0;
+        dcache_mem_req_accepted = 1'b0;
 
-        // Priority 1: Store queue writes (stores from execute stage)
-        if (dmem_req_valid) begin
+        // Priority 1: Dcache writes (dirty writebacks)
+        if (dcache_mem_write_valid) begin
             proc2mem_command = MEM_STORE;
-            proc2mem_addr    = dmem_req_addr;
-            proc2mem_data    = dmem_req_data;
-            // Stores are always accepted (no need to check tag)
+            // Convert D_ADDR to 32-bit 8-byte-aligned address
+            proc2mem_addr    = {dcache_mem_write_addr.addr.tag, 3'b0};
+            proc2mem_data    = dcache_mem_write_data;
+            // Writes are always accepted if transaction tag is available
+            // Note: mem_req_accepted logic is for reads only
         end
-        // Priority 2: Icache reads (instruction fetch)
-        else if (mem_req_addr.valid) begin
+        // Priority 2: Dcache reads (data memory operations)
+        else if (dcache_mem_req_addr.valid) begin
             proc2mem_command = MEM_LOAD;
-            proc2mem_addr    = mem_req_addr.addr;
+            // Convert D_ADDR to 32-bit 8-byte-aligned address
+            proc2mem_addr    = {dcache_mem_req_addr.addr.tag, 3'b0};
+            dcache_mem_req_accepted = (mem2proc_transaction_tag != 0);
+        end
+        // Priority 3: Icache reads (instruction fetch)
+        else if (icache_mem_req_addr.valid) begin
+            proc2mem_command = MEM_LOAD;
+            proc2mem_addr    = icache_mem_req_addr.addr;
             icache_mem_req_accepted = (mem2proc_transaction_tag != 0);
         end
 
@@ -299,10 +382,6 @@ module cpu (
         proc2mem_size = DOUBLE; // Always 64-bit blocks in cache mode
 `endif
     end
-
-    // Keep old interface for compatibility
-    assign mem_req_accepted = icache_mem_req_accepted;
-
     //////////////////////////////////////////////////
     //                                              //
     //                  Fetch-Stage                 //
@@ -454,6 +533,9 @@ module cpu (
         .rs_branch_free_slots(rs_branch.free_slots),
         .rs_mem_free_slots   (rs_mem.free_slots),
 
+        // From Store Queue
+        .store_queue_has_pending_store(sq_unexecuted_store),
+
         // To Instruction Buffer
         .dispatch_count(dispatch_count),
 
@@ -465,6 +547,7 @@ module cpu (
 
         // To Store Queue
         .store_queue_alloc_idxs   (sq_alloc_idxs),      // indices from SQ
+        .store_queue_tail_idx     (sq_tail_idx),        // SQ tail for load forwarding
         .store_queue_entry_packet (sq_dispatch_packet), // entries to SQ
 
         // TO RS (structured allocation requests)
@@ -499,6 +582,7 @@ module cpu (
         .rob_update_packet(rob_update_packet),
 
         // Retire
+        .retire_count_in(retire_count),
         .head_entries(rob_head_entries),
         .head_idxs(rob_head_idxs),
         .head_valids(rob_head_valids)
@@ -518,13 +602,34 @@ module cpu (
         .sq_dispatch_packet(sq_dispatch_packet),
         .free_slots        (sq_free_slots),
         .sq_alloc_idxs     (sq_alloc_idxs),
+        .sq_tail_idx       (sq_tail_idx),
 
         // Execute side
-        .execute_storeq_packet(execute_storeq_packet),
+        .mem_storeq_entries(mem_storeq_entries),
+
+        // Load forwarding interface (from execute stage MEM FUs)
+        .load_lookup_valid (sq_lookup_valid),
+        .load_lookup_addr  (sq_lookup_addr),
+        .load_lookup_sq_tail(sq_lookup_sq_tail),
+        .forward_valid     (sq_forward_valid),
+        .forward_data      (sq_forward_data),
+        .forward_stall     (sq_forward_stall),
 
         // Retire / flush side
         .mispredict(mispredict),
-        .free_count(sq_free_count)
+        .free_count(sq_free_count),
+
+        // Outputs
+        .unexecuted_store(sq_unexecuted_store),
+        
+        // To D-Cache
+        .dcache_store_valid(sq_to_dcache_valid),
+        .dcache_store_addr (sq_to_dcache_addr),
+        .dcache_store_data (sq_to_dcache_data),
+
+        // Dbg Signals
+        .head_idx_dbg (head_idx_dbg),
+        .tail_idx_dbg (tail_idx_dbg)
     );
 
     //////////////////////////////////////////////////
@@ -744,9 +849,23 @@ module cpu (
         // From CDB for grant selection
         .gnt_bus(cdb_0.grant_bus_out),
 
-        // To Store Queue
-        .execute_storeq_packet(execute_storeq_packet)
+        // to/from dcache
+        .dcache_read_addrs(d_cache_read_addrs),
+        .dcache_read_data(dcache_data),
 
+        // To Store Queue
+        .mem_storeq_entries(mem_storeq_entries),
+
+        // Late CDB requests from MEM FUs
+        .mem_cdb_requests_out(execute_mem_cdb_requests),
+
+        // Store queue forwarding interface
+        .sq_lookup_valid(sq_lookup_valid),
+        .sq_lookup_addr(sq_lookup_addr),
+        .sq_lookup_sq_tail(sq_lookup_sq_tail),
+        .sq_forward_valid(sq_forward_valid),
+        .sq_forward_data(sq_forward_data),
+        .sq_forward_stall(sq_forward_stall)
     );
 
     //////////////////////////////////////////////////
@@ -975,7 +1094,20 @@ module cpu (
         .arch_table_snapshot(arch_table_snapshot),
 
         // To freelist: restore mask on mispredict
-        .freelist_restore_mask(freelist_restore_mask)
+        .freelist_restore_mask(freelist_restore_mask),
+
+        // to store queue: free entries and writes to DCache
+        .sq_free_count(sq_free_count),
+
+        // From store queue
+        .sq_head_valid(sq_to_dcache_valid),
+
+        // To D-Cache
+        .dcache_store_request(retire_store_request),
+        .dcache_store_response(dcache_store_response),
+        
+        // To ROB: how many to actually retire
+        .retire_count_out(retire_count)
     );
 
     //////////////////////////////////////////////////
@@ -1026,4 +1158,23 @@ module cpu (
     // Fetch stage debug outputs
     assign fetch_packet_dbg      = fetch_packet;
 
+    // Instruction Buffer debug outputs
+    assign ib_output_disp_wdn_dbg = ib_dispatch_window;
+
+    // Store Queue entry packet output
+    assign sq_entry_packet_dbg = sq_dispatch_packet;
+    assign sq_free_slots_dbg = sq_free_slots;
+
+    // ROB info
+    assign rob_free_slots_dbg = rob_free_slots;
+
+    // Store to dcache debug signals
+    assign sq_to_dcache_valid_dbg = sq_to_dcache_valid;
+    assign sq_to_dcache_addr_dbg = sq_to_dcache_addr;
+    assign sq_to_dcache_data_dbg = sq_to_dcache_data;
+
+    // Store forward debug signals
+    assign sq_forward_valid_dbg = sq_forward_valid;
+    assign sq_forward_data_dbg = sq_forward_data;
+    assign sq_forward_stall_dbg = sq_forward_stall;
 endmodule  // cpu

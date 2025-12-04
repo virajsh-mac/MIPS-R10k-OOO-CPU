@@ -243,10 +243,9 @@ module stage_issue (
             cdb_requests.branch[i] = issue_register_next.branch[i].valid;
         end
 
-        // MEM requests: one-hot array where each bit indicates FU has valid instruction
-        for (int i = 0; i < `NUM_FU_MEM; i++) begin
-            cdb_requests.mem[i] = issue_register_next.mem[i].valid;
-        end
+        // MEM requests: MEM operations request CDB access from execute stage when results are ready
+        // (not at issue time due to variable cache miss latency)
+        cdb_requests.mem = '0;
 
         // MULT requests come from execute stage (pipelined), not from issue register
         cdb_requests.mult = '0;

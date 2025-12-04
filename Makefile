@@ -96,7 +96,7 @@
 # there should be no need to change anything for project 3
 
 # this is a global clock period variable used in the tcl script and referenced in testbenches
-export CLOCK_PERIOD = 11.0
+export CLOCK_PERIOD = 13.0
 
 # the Verilog Compiler command and arguments
 VCS = module load vcs/2023.12-SP2-1 && \
@@ -286,6 +286,7 @@ CPU_SOURCES = verilog/cpu.sv \
 			  verilog/alu.sv \
 			  verilog/branch.sv \
 			  verilog/icache_subsystem.sv \
+			  verilog/dcache_subsystem.sv \
 			  verilog/stage_fetch.sv \
 			  verilog/instruction_buffer.sv \
 			  verilog/mem_fu.sv \
