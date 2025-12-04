@@ -81,6 +81,10 @@ module stage_dispatch (
     logic local_reg1_ready[`N-1:0];
     logic local_reg2_ready[`N-1:0];
     logic [`PHYS_TAG_BITS-1:0] local_Told[`N-1:0];
+    
+    // Does this instruction need rs2 to be ready before issuing?
+    // TRUE for: (1) instructions using rs2 as ALU operand B, OR (2) stores (rs2 holds data to store)
+    logic needs_rs2[`N-1:0];
 
     // Extracted physical register allocations from freelist grants
     PHYS_TAG [`N-1:0] allocated_phys;
@@ -198,17 +202,23 @@ module stage_dispatch (
             local_reg2_tag[i]   = maptable_read_resp.rs2_entries[i].phys_reg;
             local_reg1_ready[i] = maptable_read_resp.rs1_entries[i].ready;
             local_reg2_ready[i] = maptable_read_resp.rs2_entries[i].ready;
+            local_Told[i]       = maptable_read_resp.told_entries[i].phys_reg;
+
+            // Determine if this instruction needs rs2 to be ready:
+            // - Normal case: opb_select == OPB_IS_RS2 (rs2 is ALU operand B)
+            // - Store case: MEM instruction with no dest (rs2 holds data to store)
+            needs_rs2[i] = (decode_opb_select[i] == OPB_IS_RS2) ||
+                           (decode_op_type[i].category == CAT_MEM && !decode_uses_rd[i]);
 
             // Halt instructions don't use source registers, so mark them ready
             if (decode_halt[i]) begin
                 local_reg1_ready[i] = 1'b1;
                 local_reg2_ready[i] = 1'b1;
             end
-
-            if ((decode_opb_select[i] != OPB_IS_RS2) && !decode_halt[i]) begin
+            // If instruction doesn't need rs2, mark it as ready (won't wait for it)
+            else if (!needs_rs2[i]) begin
                 local_reg2_ready[i] = 1'b1;
             end
-            local_Told[i] = maptable_read_resp.told_entries[i].phys_reg;
         end
 
         // Extract physical register allocations from freelist grants
@@ -240,7 +250,8 @@ module stage_dispatch (
                         local_reg1_tag[i] = dispatch_renames[decode_rs1_idx[i]];
                         local_reg1_ready[i] = 1'b0;
                     end
-                    if (has_rename[decode_rs2_idx[i]] && decode_opb_select[i] == OPB_IS_RS2) begin
+                    // Forward rs2 if instruction needs it and an earlier inst renamed it
+                    if (has_rename[decode_rs2_idx[i]] && needs_rs2[i]) begin
                         local_reg2_tag[i] = dispatch_renames[decode_rs2_idx[i]];
                         local_reg2_ready[i] = 1'b0;
                     end
