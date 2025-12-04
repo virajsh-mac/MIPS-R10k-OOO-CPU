@@ -37,6 +37,14 @@ module stage_execute (
     output D_ADDR_PACKET [1:0] dcache_read_addrs,
     input  CACHE_DATA    [1:0] dcache_read_data,
 
+    // Store queue forwarding interface
+    output logic      [`NUM_FU_MEM-1:0] sq_lookup_valid,
+    output ADDR       [`NUM_FU_MEM-1:0] sq_lookup_addr,
+    output STOREQ_IDX [`NUM_FU_MEM-1:0] sq_lookup_sq_tail,
+    input  logic      [`NUM_FU_MEM-1:0] sq_forward_valid,
+    input  DATA       [`NUM_FU_MEM-1:0] sq_forward_data,
+    input  logic      [`NUM_FU_MEM-1:0] sq_forward_stall,
+
     // From CDB for grant selection
     input logic [`N-1:0][`NUM_FU_TOTAL-1:0] gnt_bus
 );
@@ -400,6 +408,11 @@ module stage_execute (
     logic [`NUM_FU_MEM-1:0] mem_is_store;
     D_ADDR [`NUM_FU_MEM-1:0] mem_dcache_addrs;
     
+    // Store queue forwarding lookup signals from MEM FUs
+    logic      [`NUM_FU_MEM-1:0] mem_lookup_valid;
+    ADDR       [`NUM_FU_MEM-1:0] mem_lookup_addr;
+    STOREQ_IDX [`NUM_FU_MEM-1:0] mem_lookup_sq_tail;
+    
     // Maps MEM FU index to dcache slot (0 or 1) for load data routing
     logic [1:0] mem_fu_to_dcache_slot [`NUM_FU_MEM-1:0];
 
@@ -416,7 +429,14 @@ module stage_execute (
                 .imm(mem_src2_imm[i]),
                 .store_queue_idx(issue_entries.mem[i].store_queue_idx),
                 .dest_tag(issue_entries.mem[i].dest_tag),
-                .cache_hit_data(dcache_read_data[mem_fu_to_dcache_slot[i]]), // Cache hit data for this FU
+                .cache_hit_data(dcache_read_data[mem_fu_to_dcache_slot[i]]),
+                
+                // Store queue forwarding inputs
+                .forward_valid(sq_forward_valid[i]),
+                .forward_data(sq_forward_data[i]),
+                .forward_stall(sq_forward_stall[i]),
+                
+                // Outputs
                 .addr(mem_addr[i]),
                 .data(mem_data[i]),
                 .store_queue_entry(mem_store_queue_entries[i]),
@@ -424,10 +444,20 @@ module stage_execute (
                 .cdb_request(mem_cdb_requests[i]),
                 .is_load_request(mem_is_load_request[i]),
                 .is_store_op(mem_is_store[i]),
-                .dcache_addr(mem_dcache_addrs[i])
+                .dcache_addr(mem_dcache_addrs[i]),
+                
+                // Store queue forwarding lookup outputs
+                .lookup_valid(mem_lookup_valid[i]),
+                .lookup_addr(mem_lookup_addr[i]),
+                .lookup_sq_tail(mem_lookup_sq_tail[i])
             );
         end
     endgenerate
+    
+    // Route forwarding lookup signals to store queue
+    assign sq_lookup_valid   = mem_lookup_valid;
+    assign sq_lookup_addr    = mem_lookup_addr;
+    assign sq_lookup_sq_tail = mem_lookup_sq_tail;
 
     // Output MEM FU store queue entries directly
     assign mem_storeq_entries = mem_store_queue_entries;

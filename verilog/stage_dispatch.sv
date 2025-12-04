@@ -37,8 +37,9 @@ module stage_dispatch (
     // To ROB: allocation entries
     output ROB_ENTRY [`N-1:0] rob_entry_packet,
 
-    // From Store Queue: alloc idxs
+    // From Store Queue: alloc idxs and tail for loads
     input STOREQ_IDX [`N-1:0] store_queue_alloc_idxs,
+    input STOREQ_IDX          store_queue_tail_idx,  // Current SQ tail (for load forwarding)
     // To Store Queue: allocation entries
     output STOREQ_ENTRY [`N-1:0] store_queue_entry_packet,
 
@@ -127,8 +128,14 @@ module stage_dispatch (
             is_store = decode_op_type[i].category == CAT_MEM && !decode_uses_rd[i];
             is_load  = (decode_op_type[i].category == CAT_MEM) &&  decode_uses_rd[i];
 
-            if (is_load && (store_queue_has_pending_store || saw_store_in_bundle)) begin
-                // Do not dispatch this load or anything after it this cycle
+            // With store-to-load forwarding, loads can dispatch even with pending stores.
+            // The forwarding mechanism handles dependencies:
+            // - If matching store has executed: forward data from store queue
+            // - If matching store hasn't executed: forward_stall prevents load completion
+            // However, we still block a load from dispatching AFTER a store in the SAME bundle
+            // since the store's SQ index won't be visible to the load's forwarding lookup.
+            if (is_load && saw_store_in_bundle) begin
+                // Don't dispatch this load after a store in the same bundle
                 break;
             end
 
@@ -324,7 +331,10 @@ module stage_dispatch (
                             storeq_used++;
                         end
                         else begin // load instruction
-                            rs_alloc.mem.entries[mem_count].store_queue_idx = store_queue_alloc_idxs[storeq_used];
+                            // For loads, store the current SQ tail + stores from this bundle
+                            // This tells the store queue which stores are "older" than this load
+                            rs_alloc.mem.entries[mem_count].store_queue_idx = 
+                                STOREQ_IDX'((store_queue_tail_idx + storeq_used) % `LSQ_SZ);
                         end
 
                         mem_count++;

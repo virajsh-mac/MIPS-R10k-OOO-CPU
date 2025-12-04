@@ -45,7 +45,10 @@ module stage_retire (
 
     // D-Cache Interface
     output logic dcache_store_request,
-    input logic  dcache_store_response
+    input logic  dcache_store_response,
+
+    // To ROB: how many instructions to actually retire
+    output logic [$clog2(`N+1)-1:0] retire_count_out
 
 );
 
@@ -61,6 +64,7 @@ module stage_retire (
 
 
     logic retired_store_this_cycle;
+    logic [$clog2(`N+1)-1:0] retire_count;
 
     always_comb begin
         freelist_checkpoint_mask_next = freelist_checkpoint_mask;
@@ -78,6 +82,7 @@ module stage_retire (
         sq_free_count = '0;
         dcache_store_request = '0;
         retired_store_this_cycle = 1'b0;
+        retire_count = '0;
 
         // branch info for fetch
         branch_target_out = '0;
@@ -131,6 +136,9 @@ module stage_retire (
             committed_insts[w].illegal = (entry.exception == ILLEGAL_INST);
             committed_insts[w].valid  = 1'b1;
 
+            // Count this instruction as retired
+            retire_count++;
+
             // Commit this entry (it's complete)
             if (entry.arch_rd != '0 && !entry.branch) begin
                 arch_write_enables[w]  = 1'b1;
@@ -174,6 +182,9 @@ module stage_retire (
             end
         end
     end
+
+    // Output the retire count to ROB
+    assign retire_count_out = retire_count;
 
     always_ff @(posedge clock) begin
         if (reset) begin

@@ -28,7 +28,8 @@ module rob (
     // Complete
     input ROB_UPDATE_PACKET rob_update_packet,
 
-    // Retire
+    // Retire (controlled by stage_retire)
+    input logic [$clog2(`N+1)-1:0] retire_count_in,  // How many to actually retire (from stage_retire)
     output ROB_ENTRY [`N-1:0] head_entries,  // Could be retired
     output ROB_IDX   [`N-1:0] head_idxs,     // Head entry indices
     output logic     [`N-1:0] head_valids    // Head entry valid flags
@@ -48,7 +49,8 @@ module rob (
     always_comb begin
         free_count_next = free_count;
         rob_entries_next = rob_entries;
-        retire_count = '0;
+        // retire_count is now an input from stage_retire
+        retire_count = retire_count_in;
 
         for (int i = 0; i < `N; i++) begin
             // Dispatch, assume incoming valid instructions to be contiguous from index 0
@@ -64,28 +66,22 @@ module rob (
                 rob_entries_next[rob_update_packet.idx[i]].branch_target = rob_update_packet.branch_targets[i];
             end
 
-            // For determining whether to retire
-            // head_entries[i] = rob_entries[(head_idx+i)%`ROB_SZ];
-            if ((i == retire_count) && rob_entries[(head_idx + i) % `ROB_SZ].valid && rob_entries[(head_idx + i) % `ROB_SZ].complete) begin
-                retire_count = retire_count + 1;
-            end
-
             // Free Count calculation
             entry_packet_valid_bits[i] = rob_entry_packet[i].valid;
         end
 
-        //num_retired = retire ? `N : 0;
         num_retired = retire_count;
         // Invalidate only the retired prefix at the head
-        for (int i = 0; i < retire_count; i++) begin
-            rob_entries_next[(head_idx + i) % `ROB_SZ].valid = 1'b0;
+        for (int i = 0; i < `N; i++) begin
+            if (i < retire_count) begin
+                rob_entries_next[(head_idx + i) % `ROB_SZ].valid = 1'b0;
+            end
         end
         num_dispatched = $countones(entry_packet_valid_bits);
         free_count_next = free_count + num_retired - num_dispatched;
 
         // Head and tail pointers
         head_idx_next = (head_idx + retire_count) % `ROB_SZ;
-        //    head_idx_next = retire ? ((head_idx + `N) % `ROB_SZ) : head_idx;
         tail_idx_next = (tail_idx + num_dispatched) % `ROB_SZ;
     end
 

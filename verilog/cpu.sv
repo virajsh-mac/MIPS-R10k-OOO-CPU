@@ -122,6 +122,7 @@ module cpu (
     // Store Queue wires
     STOREQ_ENTRY [`N-1:0] sq_dispatch_packet;  // from dispatch
     STOREQ_IDX   [`N-1:0] sq_alloc_idxs;       // indices assigned by SQ
+    STOREQ_IDX            sq_tail_idx;         // current SQ tail (for load forwarding)
     logic [$clog2(`LSQ_SZ+1)-1:0] sq_free_slots;
 
     // From execute: address/data updates for stores
@@ -134,6 +135,14 @@ module cpu (
     logic [$clog2(`LSQ_SZ)-1:0] sq_complete_ptr;
     logic sq_unexecuted_store;
 
+    // Store queue forwarding interface (execute <-> store queue)
+    logic      [`NUM_FU_MEM-1:0] sq_lookup_valid;
+    ADDR       [`NUM_FU_MEM-1:0] sq_lookup_addr;
+    STOREQ_IDX [`NUM_FU_MEM-1:0] sq_lookup_sq_tail;
+    logic      [`NUM_FU_MEM-1:0] sq_forward_valid;
+    DATA       [`NUM_FU_MEM-1:0] sq_forward_data;
+    logic      [`NUM_FU_MEM-1:0] sq_forward_stall;
+
     // From Store Queue to D-Cache (Processor Store)
     logic sq_to_dcache_valid;
     ADDR  sq_to_dcache_addr;
@@ -142,6 +151,9 @@ module cpu (
     // Retire <-> D-Cache Handshake
     logic retire_store_request;
     logic dcache_store_response;
+    
+    // Retire count from stage_retire to ROB
+    logic [$clog2(`N+1)-1:0] retire_count;
 
     // Free list allocation signals
     logic                   [                         `N-1:0]                        free_alloc_valid;
@@ -514,6 +526,7 @@ module cpu (
 
         // To Store Queue
         .store_queue_alloc_idxs   (sq_alloc_idxs),      // indices from SQ
+        .store_queue_tail_idx     (sq_tail_idx),        // SQ tail for load forwarding
         .store_queue_entry_packet (sq_dispatch_packet), // entries to SQ
 
         // TO RS (structured allocation requests)
@@ -548,6 +561,7 @@ module cpu (
         .rob_update_packet(rob_update_packet),
 
         // Retire
+        .retire_count_in(retire_count),
         .head_entries(rob_head_entries),
         .head_idxs(rob_head_idxs),
         .head_valids(rob_head_valids)
@@ -567,9 +581,18 @@ module cpu (
         .sq_dispatch_packet(sq_dispatch_packet),
         .free_slots        (sq_free_slots),
         .sq_alloc_idxs     (sq_alloc_idxs),
+        .sq_tail_idx       (sq_tail_idx),
 
         // Execute side
         .mem_storeq_entries(mem_storeq_entries),
+
+        // Load forwarding interface (from execute stage MEM FUs)
+        .load_lookup_valid (sq_lookup_valid),
+        .load_lookup_addr  (sq_lookup_addr),
+        .load_lookup_sq_tail(sq_lookup_sq_tail),
+        .forward_valid     (sq_forward_valid),
+        .forward_data      (sq_forward_data),
+        .forward_stall     (sq_forward_stall),
 
         // Retire / flush side
         .mispredict(mispredict),
@@ -810,8 +833,15 @@ module cpu (
         .mem_storeq_entries(mem_storeq_entries),
 
         // Late CDB requests from MEM FUs
-        .mem_cdb_requests_out(execute_mem_cdb_requests)
+        .mem_cdb_requests_out(execute_mem_cdb_requests),
 
+        // Store queue forwarding interface
+        .sq_lookup_valid(sq_lookup_valid),
+        .sq_lookup_addr(sq_lookup_addr),
+        .sq_lookup_sq_tail(sq_lookup_sq_tail),
+        .sq_forward_valid(sq_forward_valid),
+        .sq_forward_data(sq_forward_data),
+        .sq_forward_stall(sq_forward_stall)
     );
 
     //////////////////////////////////////////////////
@@ -1050,7 +1080,10 @@ module cpu (
 
         // To D-Cache
         .dcache_store_request(retire_store_request),
-        .dcache_store_response(dcache_store_response)
+        .dcache_store_response(dcache_store_response),
+        
+        // To ROB: how many to actually retire
+        .retire_count_out(retire_count)
     );
 
     //////////////////////////////////////////////////

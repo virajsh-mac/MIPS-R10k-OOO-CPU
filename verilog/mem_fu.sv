@@ -1,27 +1,38 @@
 `include "sys_defs.svh"
 
 // Memory Functional Unit: compute addresses and handle load/store operations
-// Stateful to handle cache miss latency - loads wait for cache hits before completing
+// Supports store-to-load forwarding via store queue interface
 module mem_fu (
     input clock,
-    reset,
-    valid,
+    input reset,
+    input valid,
     input MEM_FUNC func,
     input DATA rs1,
-    rs2,
-    imm,
-    input STOREQ_IDX store_queue_idx,
+    input DATA rs2,
+    input DATA imm,
+    input STOREQ_IDX store_queue_idx,  // For stores: SQ slot; For loads: SQ tail (to find older stores)
     input PHYS_TAG dest_tag,
     input CACHE_DATA cache_hit_data,
 
+    // Store-to-load forwarding from store queue
+    input logic forward_valid,   // Store queue found matching store with data
+    input DATA  forward_data,    // Forwarded data from store queue
+    input logic forward_stall,   // Matching store exists but hasn't executed yet
+
+    // Outputs
     output DATA addr,
-    data,
+    output DATA data,
     output EXECUTE_STOREQ_ENTRY store_queue_entry,
     output CDB_ENTRY cdb_result,
     output logic cdb_request,
-    is_load_request,
-    is_store_op,
-    output D_ADDR dcache_addr
+    output logic is_load_request,
+    output logic is_store_op,
+    output D_ADDR dcache_addr,
+    
+    // Store queue forwarding lookup outputs
+    output logic lookup_valid,      // Request forwarding lookup from store queue
+    output ADDR  lookup_addr,       // Address to look up
+    output STOREQ_IDX lookup_sq_tail // SQ tail to determine which stores are older
 );
 
     // =========================================================================
@@ -31,8 +42,8 @@ module mem_fu (
     typedef struct packed {
         logic valid;
         PHYS_TAG dest_tag;
-        D_ADDR addr;
-        logic word_offset;  // bit [2] of full address for word selection
+        ADDR full_addr;     // Full 32-bit address for forwarding lookup
+        STOREQ_IDX sq_tail; // SQ tail for forwarding lookup on retry
     } PENDING_LOAD;
 
     PENDING_LOAD pending_load, pending_load_next;
@@ -45,17 +56,19 @@ module mem_fu (
     logic is_load, is_store;
     logic pending_load_hit;
     D_ADDR current_dcache_addr;
+    ADDR computed_addr;
 
     always_comb begin
-        // Compute effective address (always valid)
-        addr = rs1 + imm;
+        // Compute effective address
+        computed_addr = rs1 + imm;
+        addr = computed_addr;
         data = rs2;
 
         // Extract dcache address from computed address
         current_dcache_addr = '{
             zeros: 16'b0,
-            tag: addr[31:12],
-            block_offset: addr[4:3]
+            tag: computed_addr[31:12],
+            block_offset: computed_addr[4:3]
         };
 
         // Determine operation type
@@ -65,17 +78,17 @@ module mem_fu (
         is_store = (func == STORE_BYTE || func == STORE_HALF ||
                     func == STORE_WORD || func == STORE_DOUBLE);
 
-        // Check if pending load now hits cache
-        pending_load_hit = pending_load.valid && cache_hit_data.valid;
+        // Check if pending load now gets data (from cache or forwarding)
+        pending_load_hit = pending_load.valid && (cache_hit_data.valid || forward_valid) && !forward_stall;
     end
 
-    // Store queue entry generation
+    // Store queue entry generation (for store operations)
     always_comb begin
         if (valid && is_store) begin
             store_queue_entry = '{
                 valid: 1'b1,
-                addr: addr,
-                data: data,
+                addr: computed_addr,
+                data: rs2,
                 store_queue_idx: store_queue_idx
             };
             is_store_op = 1'b1;
@@ -85,41 +98,74 @@ module mem_fu (
         end
     end
 
+    // Store queue forwarding lookup request
+    always_comb begin
+        lookup_valid   = 1'b0;
+        lookup_addr    = '0;
+        lookup_sq_tail = '0;
+
+        if (valid && is_load) begin
+            // New load - request forwarding lookup
+            lookup_valid   = 1'b1;
+            lookup_addr    = computed_addr;
+            lookup_sq_tail = store_queue_idx;  // SQ tail when load was dispatched
+        end else if (pending_load.valid) begin
+            // Pending load - continue lookup (in case it was stalled before)
+            lookup_valid   = 1'b1;
+            lookup_addr    = pending_load.full_addr;
+            lookup_sq_tail = pending_load.sq_tail;
+        end
+    end
+
     // Extract correct word from cache line based on address
     DATA loaded_data;
     logic word_select;
     always_comb begin
-        // Determine which word to extract: use pending load offset if that's what hit
-        // otherwise use current instruction's address
-        if (pending_load_hit) begin
-            word_select = pending_load.word_offset;
+        // Determine which word to extract: use pending load's address if completing a pending load
+        if (pending_load_hit && pending_load.valid) begin
+            word_select = pending_load.full_addr[2];
         end else begin
-            word_select = addr[2];
+            word_select = computed_addr[2];
         end
         
-        // Extract word from 64-bit cache line based on word offset
-        if (word_select) begin
-            loaded_data = cache_hit_data.data.word_level[1];  // Upper word
+        // Priority: forwarded data > cache data
+        if (forward_valid && !forward_stall) begin
+            // Use forwarded data from store queue
+            loaded_data = forward_data;
+        end else if (cache_hit_data.valid) begin
+            // Extract word from 64-bit cache line based on word offset
+            if (word_select) begin
+                loaded_data = cache_hit_data.data.word_level[1];  // Upper word
+            end else begin
+                loaded_data = cache_hit_data.data.word_level[0];  // Lower word
+            end
         end else begin
-            loaded_data = cache_hit_data.data.word_level[0];  // Lower word
+            loaded_data = '0;
         end
         
         // TODO: Handle byte/halfword loads with proper sign extension
-        // For now, assumes all loads are word-sized
     end
 
     // CDB result and request generation
     always_comb begin
-        if (pending_load_hit) begin
-            // Pending load completes when cache hit occurs
+        cdb_result  = '0;
+        cdb_request = 1'b0;
+
+        if (forward_stall) begin
+            // Matching store hasn't executed yet - cannot complete this load
+            // No CDB request - load must wait
+            cdb_result  = '0;
+            cdb_request = 1'b0;
+        end else if (pending_load_hit) begin
+            // Pending load completes (either from cache hit or forwarding)
             cdb_result = '{
                 valid: 1'b1,
                 tag: pending_load.dest_tag,
                 data: loaded_data
             };
             cdb_request = 1'b1;
-        end else if (valid && is_load && cache_hit_data.valid) begin
-            // New load hits cache immediately (no store queue forwarding yet)
+        end else if (valid && is_load && (cache_hit_data.valid || forward_valid)) begin
+            // New load completes immediately (cache hit or store forwarding)
             cdb_result = '{
                 valid: 1'b1,
                 tag: dest_tag,
@@ -128,30 +174,33 @@ module mem_fu (
             cdb_request = 1'b1;
         end else if (valid && is_store) begin
             // Store completes immediately (address/data sent to store queue)
-            cdb_result = '0;
+            cdb_result  = '0;
             cdb_request = 1'b1;
-        end else begin
-            // No completion this cycle
-            cdb_result = '0;
-            cdb_request = 1'b0;
         end
     end
 
     // Dcache request generation
-    // NOTE: Load-Store Forwarding is NOT yet implemented
-    // Loads always go to D-cache; they do not check store queue for newer values
+    // Only request from cache if forwarding didn't provide data
     always_comb begin
-        if (valid && is_load) begin
-            // New load request - goes directly to dcache
-            is_load_request = 1'b1;
-            dcache_addr = current_dcache_addr;
-        end else if (pending_load.valid) begin
-            // Continue requesting for pending load (cache miss case)
-            is_load_request = 1'b1;
-            dcache_addr = pending_load.addr;
-        end else begin
+        is_load_request = 1'b0;
+        dcache_addr     = '0;
+
+        if (forward_stall) begin
+            // Don't request from cache - we're waiting for a store to execute
             is_load_request = 1'b0;
-            dcache_addr = '0;
+            dcache_addr     = '0;
+        end else if (valid && is_load && !forward_valid) begin
+            // New load request - no forwarding available, go to dcache
+            is_load_request = 1'b1;
+            dcache_addr     = current_dcache_addr;
+        end else if (pending_load.valid && !forward_valid) begin
+            // Continue requesting for pending load (cache miss, no forwarding)
+            is_load_request = 1'b1;
+            dcache_addr     = '{
+                zeros: 16'b0,
+                tag: pending_load.full_addr[31:12],
+                block_offset: pending_load.full_addr[4:3]
+            };
         end
     end
 
@@ -159,20 +208,16 @@ module mem_fu (
     always_comb begin
         pending_load_next = pending_load;  // Default: keep state
 
-        if (pending_load_hit) begin
+        if (pending_load_hit && !forward_stall) begin
             // Clear pending load when it completes
             pending_load_next.valid = 1'b0;
-        end else if (valid && is_load && !cache_hit_data.valid && !pending_load.valid) begin
-            // New load misses cache - make it pending
+        end else if (valid && is_load && !cache_hit_data.valid && !forward_valid && !pending_load.valid && !forward_stall) begin
+            // New load misses both cache and store queue - make it pending
             pending_load_next = '{
                 valid: 1'b1,
                 dest_tag: dest_tag,
-                addr: '{
-                    zeros: 16'b0,
-                    tag: addr[31:12],
-                    block_offset: addr[4:3]
-                },
-                word_offset: addr[2]
+                full_addr: computed_addr,
+                sq_tail: store_queue_idx
             };
         end
     end
