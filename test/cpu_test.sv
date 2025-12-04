@@ -132,6 +132,10 @@ module testbench;
 
     // Store Queue entry packet output
     STOREQ_ENTRY [`N-1:0] sq_entry_packet;
+    logic [$clog2(`LSQ_SZ+1)-1:0] sq_free_slots;
+    logic [$clog2(`LSQ_SZ)-1:0] head_idx;
+    logic [$clog2(`LSQ_SZ)-1:0] tail_idx;
+
 
     // Issue clear signals debug output
     RS_CLEAR_SIGNALS rs_clear_signals;
@@ -149,9 +153,6 @@ module testbench;
     ADDR proc2mem_addr;  // Address sent to memory
     MEM_BLOCK proc2mem_data;  // Data sent to memory
     MEM_SIZE proc2mem_size;  // Data size sent to memory
-
-    // debug to expose DCache to testbench
-    D_CACHE_LINE [`DCACHE_LINES-1:0]      cache_lines_debug;
 
     // Instantiate the Pipeline
     cpu verisimpleV (
@@ -228,15 +229,15 @@ module testbench;
 
         // store queue outputs
         .sq_entry_packet_dbg(sq_entry_packet),
+        .sq_free_slots_dbg(sq_free_slots),
+        .head_idx_dbg(head_idx),
+        .tail_idx_dbg(tail_idx),
 
         // Issue clear signals debug output
         .rs_clear_signals_dbg(rs_clear_signals),
 
         // Fetch stage debug outputs
-        .fetch_packet_dbg(fetch_packet_out),
-
-        // debug to expose DCache to testbench
-        .cache_lines_dbg(cache_lines_debug)
+        .fetch_packet_dbg(fetch_packet_out)
     );
 
     // Instruction Memory (for fake-fetch only - data operations disconnected)
@@ -451,38 +452,20 @@ module testbench;
     task show_final_mem_and_status;
         input EXCEPTION_CODE final_status;
         int showing_data;
-        logic [63:0] value;
-        logic [`DTAG_BITS-1:0] addr_tag;
-        int offset;
-        int i;
         begin
             $fdisplay(out_fileno, "\nFinal memory state and exit status:\n");
             $fdisplay(out_fileno, "@@@ Unified Memory contents hex on left, decimal on right: ");
             $fdisplay(out_fileno, "@@@");
             showing_data = 0;
-
             for (int k = 0; k <= `MEM_64BIT_LINES - 1; k = k + 1) begin
-                // compute tag & offset for fully associative cache
-                addr_tag = k; // for simplicity, assume 1:1 mapping to cache line index for 64-bit words
-                value = memory.unified_memory[k]; // default to memory
-
-                // search all cache lines
-                for (i = 0; i < `DCACHE_LINES; i++) begin
-                    if (cache_lines_debug[i].valid && cache_lines_debug[i].dirty && cache_lines_debug[i].tag == addr_tag) begin
-                        value = cache_lines_debug[i].data; // override with cache content
-                        break;
-                    end
-                end
-
-                if (value != 0) begin
-                    $fdisplay(out_fileno, "@@@ mem[%5d] = %x : %0d", k * 8, value, value);
+                if (memory.unified_memory[k] != 0) begin
+                    $fdisplay(out_fileno, "@@@ mem[%5d] = %x : %0d", k * 8, memory.unified_memory[k], memory.unified_memory[k]);
                     showing_data = 1;
                 end else if (showing_data != 0) begin
                     $fdisplay(out_fileno, "@@@");
                     showing_data = 0;
                 end
             end
-
             $fdisplay(out_fileno, "@@@");
 
             case (final_status)
@@ -494,8 +477,7 @@ module testbench;
             $fdisplay(out_fileno, "@@@");
             $fclose(out_fileno);
         end
-    endtask
-
+    endtask  // task show_final_mem_and_status
 
 
 
@@ -564,7 +546,14 @@ module testbench;
         // ========================================
         // Store Queue Debug (entries coming from Dispatch)
         // ========================================
-        $display("\n--- STORE QUEUE DISPATCH PACKET ---");
+
+        $display("\n--- STORE QUEUE: Free Slots ---");
+        $display("\n   SQ Free slots: %0d   ", sq_free_slots);
+        $display("\n   SQ Head Pointer: %d   ", head_idx);
+        $display("\n   SQ Tail Pointer: %d   ", tail_idx);
+
+
+        $display("\n--- STORE QUEUE from DISPATCH PACKET ---");
         for (i = 0; i < `N; i++) begin
             if (sq_entry_packet[i].valid) begin
                 $display(

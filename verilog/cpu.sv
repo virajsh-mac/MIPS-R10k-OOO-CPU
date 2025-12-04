@@ -86,6 +86,11 @@ module cpu (
 
     // Store Queue entry packet output
     output STOREQ_ENTRY [`N-1:0] sq_entry_packet_dbg,
+    output logic [$clog2(`LSQ_SZ+1)-1:0] sq_free_slots_dbg,
+    output logic [$clog2(`LSQ_SZ)-1:0] head_idx_dbg,
+    output logic [$clog2(`LSQ_SZ)-1:0] tail_idx_dbg,
+
+
 
     // Issue clear signals debug output
     output RS_CLEAR_SIGNALS rs_clear_signals_dbg,
@@ -609,7 +614,11 @@ module cpu (
         // To D-Cache
         .dcache_store_valid(sq_to_dcache_valid),
         .dcache_store_addr (sq_to_dcache_addr),
-        .dcache_store_data (sq_to_dcache_data)
+        .dcache_store_data (sq_to_dcache_data),
+
+        // Dbg Signals
+        .head_idx_dbg (head_idx_dbg),
+        .tail_idx_dbg (tail_idx_dbg)
     );
 
     //////////////////////////////////////////////////
@@ -1143,5 +1152,6 @@ module cpu (
 
     // Store Queue entry packet output
     assign sq_entry_packet_dbg = sq_dispatch_packet;
+    assign sq_free_slots_dbg = sq_free_slots;
 
 endmodule  // cpu

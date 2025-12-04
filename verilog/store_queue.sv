@@ -51,7 +51,11 @@ module store_queue (
     // To D-Cache
     output logic                    dcache_store_valid,
     output ADDR                     dcache_store_addr,
-    output DATA                     dcache_store_data
+    output DATA                     dcache_store_data,
+
+    // To Dbg
+    output logic [$clog2(`LSQ_SZ)-1:0] head_idx_dbg,
+    output logic [$clog2(`LSQ_SZ)-1:0] tail_idx_dbg
 );
 
     // ============================================================
@@ -160,6 +164,10 @@ module store_queue (
 
     assign free_slots = free_slots_reg;
     assign sq_tail_idx = tail_idx;
+
+    // dbg sig
+    assign head_idx_dbg = head_idx;
+    assign tail_idx_dbg = tail_idx;
 
     // ============================================================
     // Complete Pointer: First index that is NOT (valid && executed)
