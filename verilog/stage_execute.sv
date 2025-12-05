@@ -50,10 +50,38 @@ module stage_execute (
 );
 
     // =========================================================================
+    // FU Flat Indexing Constants
+    // =========================================================================
+    localparam int BRANCH_START = 0;
+    localparam int ALU_START    = BRANCH_START + `NUM_FU_BRANCH;
+    localparam int MEM_START    = ALU_START + `NUM_FU_ALU;
+    localparam int MULT_START   = MEM_START + `NUM_FU_MEM;
+
+    // =========================================================================
+    // Unified Grant Computation
+    // =========================================================================
+    // Single flat array: for each FU, OR together grants from all CDB slots
+    logic [`NUM_FU_TOTAL-1:0] fu_grant_any;
+
+    always_comb begin
+        for (int k = 0; k < `NUM_FU_TOTAL; k++) begin
+            fu_grant_any[k] = 1'b0;
+            for (int i = 0; i < `N; i++) begin
+                fu_grant_any[k] |= gnt_bus[i][k];
+            end
+        end
+    end
+
+    // Extract grants for multi-cycle FUs (used to clear their holding state)
+    logic [`NUM_FU_MULT-1:0] mult_grant;
+    logic [`NUM_FU_MEM-1:0]  mem_grant;
+
+    assign mult_grant = fu_grant_any[MULT_START +: `NUM_FU_MULT];
+    assign mem_grant  = fu_grant_any[MEM_START +: `NUM_FU_MEM];
+
+    // =========================================================================
     // Internal Signals
     // =========================================================================
-
-    // FU result storage (SoA)
     FU_RESULTS fu_results;
 
     // ALU signals
@@ -64,91 +92,79 @@ module stage_execute (
     DATA [`NUM_FU_MULT-1:0] mult_rs1, mult_rs2;
     MULT_FUNC [`NUM_FU_MULT-1:0] mult_func;
     logic [`NUM_FU_MULT-1:0] mult_start, mult_done;
-    logic [`NUM_FU_MULT-1:0] mult_grant;  // Grant signal to clear mult completion
-
-    // MEM grant signals (computed from gnt_bus, sent to MEM FUs to clear pending results)
-    logic [`NUM_FU_MEM-1:0] mem_grant;
-
-    // FU metadata computed on-the-fly in EX/COMP register fill (SoA approach)
-
-    // Load counter for dcache address selection
-    int load_count;
-
-    // Metadata for mult module (passed through pipeline)
-    EX_COMPLETE_ENTRY mult_meta_in[`NUM_FU_MULT-1:0];
-    EX_COMPLETE_ENTRY mult_meta_out[`NUM_FU_MULT-1:0];
-
-    // Pulse generation for mult start (mult expects start pulse, not held high)
-    // We track both valid AND rob_idx to detect new instructions even when
-    // back-to-back (valid stays 1 but rob_idx changes)
-    logic [`NUM_FU_MULT-1:0] prev_mult_valid;
-    ROB_IDX [`NUM_FU_MULT-1:0] prev_mult_rob_idx;
 
     // BRANCH signals
     DATA [`NUM_FU_BRANCH-1:0] branch_rs1, branch_rs2;
-    BRANCH_FUNC [`NUM_FU_BRANCH-1:0] branch_funcs;  // Array of 3-bit func values
-    ADDR [`NUM_FU_BRANCH-1:0] branch_pcs;           // PC values for branch FUs
-    DATA [`NUM_FU_BRANCH-1:0] branch_offsets;       // Branch offsets for branch FUs
+    BRANCH_FUNC [`NUM_FU_BRANCH-1:0] branch_funcs;
+    ADDR [`NUM_FU_BRANCH-1:0] branch_pcs;
+    DATA [`NUM_FU_BRANCH-1:0] branch_offsets;
     logic [`NUM_FU_BRANCH-1:0] branch_take;
     ADDR [`NUM_FU_BRANCH-1:0] branch_targets;
 
-    // MEM signals (placeholder for future implementation)
+    // MEM signals
     DATA [`NUM_FU_MEM-1:0] mem_rs1, mem_rs2, mem_src2_imm;
     MEM_FUNC [`NUM_FU_MEM-1:0] mem_funcs;
     DATA [`NUM_FU_MEM-1:0] mem_data;
     ADDR [`NUM_FU_MEM-1:0] mem_addr;
 
+    // Metadata for mult pipeline
+    EX_COMPLETE_ENTRY mult_meta_in  [`NUM_FU_MULT-1:0];
+    EX_COMPLETE_ENTRY mult_meta_out [`NUM_FU_MULT-1:0];
 
-    // Operand resolution: choose between PRF data, CDB forwarding, or RS stored value
+    // Mult start pulse generation state
+    logic [`NUM_FU_MULT-1:0] prev_mult_valid;
+    ROB_IDX [`NUM_FU_MULT-1:0] prev_mult_rob_idx;
+
+    // Operand resolution
     PRF_READ_DATA resolved_src1, resolved_src2;
 
-    // =========================================================================
-    // PRF Read Request Generation (Structured)
-    // =========================================================================
+    // Load counter for dcache port allocation
+    int load_count;
 
-    // Read from PRF when operands are needed (structured by FU type)
+    // =========================================================================
+    // PRF Read Request Generation
+    // =========================================================================
     always_comb begin
-        // Initialize
         prf_read_en_src1  = '0;
         prf_read_en_src2  = '0;
         prf_read_tag_src1 = '0;
         prf_read_tag_src2 = '0;
 
-        // ALU reads
+        // ALU
         for (int i = 0; i < `NUM_FU_ALU; i++) begin
             if (issue_entries.alu[i].valid) begin
-                prf_read_en_src1.alu[i] = 1'b1;  // SRC1 always comes from register
-                prf_read_en_src2.alu[i]  = (issue_entries.alu[i].opb_select == OPB_IS_RS2);  // SRC2 only from PRF if it's a register
+                prf_read_en_src1.alu[i]  = 1'b1;
+                prf_read_en_src2.alu[i]  = (issue_entries.alu[i].opb_select == OPB_IS_RS2);
                 prf_read_tag_src1.alu[i] = issue_entries.alu[i].src1_tag;
                 prf_read_tag_src2.alu[i] = issue_entries.alu[i].src2_tag;
             end
         end
 
-        // MULT reads
+        // MULT
         for (int i = 0; i < `NUM_FU_MULT; i++) begin
             if (issue_entries.mult[i].valid) begin
-                prf_read_en_src1.mult[i]  = 1'b1;  // SRC1 always comes from register
-                prf_read_en_src2.mult[i]  = 1'b1;  // SRC2 always comes from register for MULT
+                prf_read_en_src1.mult[i]  = 1'b1;
+                prf_read_en_src2.mult[i]  = 1'b1;
                 prf_read_tag_src1.mult[i] = issue_entries.mult[i].src1_tag;
                 prf_read_tag_src2.mult[i] = issue_entries.mult[i].src2_tag;
             end
         end
 
-        // BRANCH reads
+        // BRANCH
         for (int i = 0; i < `NUM_FU_BRANCH; i++) begin
             if (issue_entries.branch[i].valid) begin
-                prf_read_en_src1.branch[i]  = 1'b1;  // SRC1 always comes from register
-                prf_read_en_src2.branch[i]  = 1'b1;  // SRC2 always comes from register for BRANCH
+                prf_read_en_src1.branch[i]  = 1'b1;
+                prf_read_en_src2.branch[i]  = 1'b1;
                 prf_read_tag_src1.branch[i] = issue_entries.branch[i].src1_tag;
                 prf_read_tag_src2.branch[i] = issue_entries.branch[i].src2_tag;
             end
         end
 
-        // MEM reads (placeholder)
+        // MEM
         for (int i = 0; i < `NUM_FU_MEM; i++) begin
             if (issue_entries.mem[i].valid) begin
-                prf_read_en_src1.mem[i]  = 1'b1;  // SRC1 always comes from register
-                prf_read_en_src2.mem[i]  = 1'b1;  // SRC2 always comes from register for MEM (placeholder)
+                prf_read_en_src1.mem[i]  = 1'b1;
+                prf_read_en_src2.mem[i]  = 1'b1;
                 prf_read_tag_src1.mem[i] = issue_entries.mem[i].src1_tag;
                 prf_read_tag_src2.mem[i] = issue_entries.mem[i].src2_tag;
             end
@@ -156,115 +172,49 @@ module stage_execute (
     end
 
     // =========================================================================
-    // Operand Resolution with CDB Forwarding (Structured)
+    // Operand Resolution with CDB Forwarding
     // =========================================================================
-
     always_comb begin
-        // Default: use PRF read data
         resolved_src1 = prf_read_data_src1;
         resolved_src2 = prf_read_data_src2;
 
-        // Check for CDB forwarding (data just computed this cycle)
         // ALU forwarding
         for (int i = 0; i < `NUM_FU_ALU; i++) begin
-            for (int cdb_idx = 0; cdb_idx < `N; cdb_idx++) begin
-                if (cdb_data[cdb_idx].valid) begin
-                    if (prf_read_tag_src1.alu[i] == cdb_data[cdb_idx].tag) begin
-                        resolved_src1.alu[i] = cdb_data[cdb_idx].data;
-                    end
-                    if (prf_read_tag_src2.alu[i] == cdb_data[cdb_idx].tag) begin
-                        resolved_src2.alu[i] = cdb_data[cdb_idx].data;
-                    end
-                end
+            for (int c = 0; c < `N; c++) begin
+                if (cdb_data[c].valid && prf_read_tag_src1.alu[i] == cdb_data[c].tag)
+                    resolved_src1.alu[i] = cdb_data[c].data;
+                if (cdb_data[c].valid && prf_read_tag_src2.alu[i] == cdb_data[c].tag)
+                    resolved_src2.alu[i] = cdb_data[c].data;
             end
         end
 
         // MULT forwarding
         for (int i = 0; i < `NUM_FU_MULT; i++) begin
-            for (int cdb_idx = 0; cdb_idx < `N; cdb_idx++) begin
-                if (cdb_data[cdb_idx].valid) begin
-                    if (prf_read_tag_src1.mult[i] == cdb_data[cdb_idx].tag) begin
-                        resolved_src1.mult[i] = cdb_data[cdb_idx].data;
-                    end
-                    if (prf_read_tag_src2.mult[i] == cdb_data[cdb_idx].tag) begin
-                        resolved_src2.mult[i] = cdb_data[cdb_idx].data;
-                    end
-                end
+            for (int c = 0; c < `N; c++) begin
+                if (cdb_data[c].valid && prf_read_tag_src1.mult[i] == cdb_data[c].tag)
+                    resolved_src1.mult[i] = cdb_data[c].data;
+                if (cdb_data[c].valid && prf_read_tag_src2.mult[i] == cdb_data[c].tag)
+                    resolved_src2.mult[i] = cdb_data[c].data;
             end
         end
 
         // BRANCH forwarding
         for (int i = 0; i < `NUM_FU_BRANCH; i++) begin
-            for (int cdb_idx = 0; cdb_idx < `N; cdb_idx++) begin
-                if (cdb_data[cdb_idx].valid) begin
-                    if (prf_read_tag_src1.branch[i] == cdb_data[cdb_idx].tag) begin
-                        resolved_src1.branch[i] = cdb_data[cdb_idx].data;
-                    end
-                    if (prf_read_tag_src2.branch[i] == cdb_data[cdb_idx].tag) begin
-                        resolved_src2.branch[i] = cdb_data[cdb_idx].data;
-                    end
-                end
+            for (int c = 0; c < `N; c++) begin
+                if (cdb_data[c].valid && prf_read_tag_src1.branch[i] == cdb_data[c].tag)
+                    resolved_src1.branch[i] = cdb_data[c].data;
+                if (cdb_data[c].valid && prf_read_tag_src2.branch[i] == cdb_data[c].tag)
+                    resolved_src2.branch[i] = cdb_data[c].data;
             end
         end
 
         // MEM forwarding
         for (int i = 0; i < `NUM_FU_MEM; i++) begin
-            for (int cdb_idx = 0; cdb_idx < `N; cdb_idx++) begin
-                if (cdb_data[cdb_idx].valid) begin
-                    if (prf_read_tag_src1.mem[i] == cdb_data[cdb_idx].tag) begin
-                        resolved_src1.mem[i] = cdb_data[cdb_idx].data;
-                    end
-                    if (prf_read_tag_src2.mem[i] == cdb_data[cdb_idx].tag) begin
-                        resolved_src2.mem[i] = cdb_data[cdb_idx].data;
-                    end
-                end
-            end
-        end
-    end
-
-
-    // =========================================================================
-    // Mult start pulse generation
-    // =========================================================================
-
-    always_ff @(posedge clock) begin
-        if (reset | mispredict) begin
-            prev_mult_valid <= '0;
-            prev_mult_rob_idx <= '0;
-        end else begin
-            for (int i = 0; i < `NUM_FU_MULT; i++) begin
-                prev_mult_valid[i] <= issue_entries.mult[i].valid;
-                prev_mult_rob_idx[i] <= issue_entries.mult[i].rob_idx;
-            end
-        end
-    end
-
-    always_comb begin
-        for (int i = 0; i < `NUM_FU_MULT; i++) begin
-            // Start when:
-            // 1. Valid and wasn't valid before (new instruction), OR
-            // 2. Valid and ROB index changed (different instruction back-to-back)
-            mult_start[i] = issue_entries.mult[i].valid && 
-                            (!prev_mult_valid[i] || 
-                             (issue_entries.mult[i].rob_idx != prev_mult_rob_idx[i]));
-        end
-    end
-
-    // =========================================================================
-    // Mult metadata input setup
-    // =========================================================================
-
-    always_comb begin
-        for (int i = 0; i < `NUM_FU_MULT; i++) begin
-            if (issue_entries.mult[i].valid) begin
-                mult_meta_in[i].rob_idx = issue_entries.mult[i].rob_idx;
-                mult_meta_in[i].branch_valid = 0;
-                mult_meta_in[i].branch_taken = 0;
-                mult_meta_in[i].branch_target = 0;
-                mult_meta_in[i].dest_pr = issue_entries.mult[i].dest_tag;
-                mult_meta_in[i].result = 0;  // Will be set in mult module
-            end else begin
-                mult_meta_in[i] = '0;
+            for (int c = 0; c < `N; c++) begin
+                if (cdb_data[c].valid && prf_read_tag_src1.mem[i] == cdb_data[c].tag)
+                    resolved_src1.mem[i] = cdb_data[c].data;
+                if (cdb_data[c].valid && prf_read_tag_src2.mem[i] == cdb_data[c].tag)
+                    resolved_src2.mem[i] = cdb_data[c].data;
             end
         end
     end
@@ -272,10 +222,8 @@ module stage_execute (
     // =========================================================================
     // ALU Functional Units (Combinational)
     // =========================================================================
-
     always_comb begin
         for (int i = 0; i < `NUM_FU_ALU; i++) begin
-            // Select operand A
             case (issue_entries.alu[i].opa_select)
                 OPA_IS_RS1:  alu_opas[i] = resolved_src1.alu[i];
                 OPA_IS_NPC:  alu_opas[i] = issue_entries.alu[i].PC + 4;
@@ -284,23 +232,20 @@ module stage_execute (
                 default:     alu_opas[i] = 32'hdeadface;
             endcase
 
-            // Select operand B
             case (issue_entries.alu[i].opb_select)
                 OPB_IS_RS2:   alu_opbs[i] = resolved_src2.alu[i];
-                OPB_IS_I_IMM: alu_opbs[i] = issue_entries.alu[i].src2_immediate;
-                OPB_IS_S_IMM: alu_opbs[i] = issue_entries.alu[i].src2_immediate;
-                OPB_IS_B_IMM: alu_opbs[i] = issue_entries.alu[i].src2_immediate;
-                OPB_IS_U_IMM: alu_opbs[i] = issue_entries.alu[i].src2_immediate;
+                OPB_IS_I_IMM,
+                OPB_IS_S_IMM,
+                OPB_IS_B_IMM,
+                OPB_IS_U_IMM,
                 OPB_IS_J_IMM: alu_opbs[i] = issue_entries.alu[i].src2_immediate;
                 default:      alu_opbs[i] = 32'hfacefeed;
             endcase
 
-            // Extract ALU function
             alu_funcs[i] = issue_entries.alu[i].op_type.func;
         end
     end
 
-    // Instantiate ALU modules
     alu alu_inst[`NUM_FU_ALU-1:0] (
         .opa(alu_opas),
         .opb(alu_opbs),
@@ -308,29 +253,43 @@ module stage_execute (
         .result(fu_results.alu)
     );
 
-    // ALU outputs to CDB
-    always_comb begin
-        for (int i = 0; i < `NUM_FU_ALU; i++) begin
-            fu_outputs.alu[i].valid = issue_entries.alu[i].valid && (issue_entries.alu[i].dest_tag != '0);
-            fu_outputs.alu[i].tag   = issue_entries.alu[i].dest_tag;
-            fu_outputs.alu[i].data  = fu_results.alu[i];
-        end
-    end
-
     // =========================================================================
     // MULT Functional Units (Pipelined)
     // =========================================================================
 
-    always_comb begin
-        for (int i = 0; i < `NUM_FU_MULT; i++) begin
-            mult_rs1[i]  = resolved_src1.mult[i];
-            mult_rs2[i]  = resolved_src2.mult[i];
-            mult_func[i] = issue_entries.mult[i].op_type.func;
+    // Start pulse: new instruction when valid rises or ROB index changes
+    always_ff @(posedge clock) begin
+        if (reset | mispredict) begin
+            prev_mult_valid   <= '0;
+            prev_mult_rob_idx <= '0;
+        end else begin
+            for (int i = 0; i < `NUM_FU_MULT; i++) begin
+                prev_mult_valid[i]   <= issue_entries.mult[i].valid;
+                prev_mult_rob_idx[i] <= issue_entries.mult[i].rob_idx;
+            end
         end
     end
 
-    // Instantiate MULT modules
-    // The mult module now holds its result until grant is received
+    always_comb begin
+        for (int i = 0; i < `NUM_FU_MULT; i++) begin
+            mult_start[i] = issue_entries.mult[i].valid &&
+                           (!prev_mult_valid[i] ||
+                            issue_entries.mult[i].rob_idx != prev_mult_rob_idx[i]);
+
+            mult_rs1[i]  = resolved_src1.mult[i];
+            mult_rs2[i]  = resolved_src2.mult[i];
+            mult_func[i] = issue_entries.mult[i].op_type.func;
+
+            mult_meta_in[i] = '{
+                rob_idx:       issue_entries.mult[i].valid ? issue_entries.mult[i].rob_idx : '0,
+                branch_valid:  1'b0,
+                branch_taken:  1'b0,
+                branch_target: '0,
+                dest_pr:       issue_entries.mult[i].valid ? issue_entries.mult[i].dest_tag : '0,
+                result:        '0
+            };
+        end
+    end
 
     mult mult_inst[`NUM_FU_MULT-1:0] (
         .clock(clock),
@@ -347,20 +306,9 @@ module stage_execute (
         .meta_out(mult_meta_out)
     );
 
-    // MULT outputs to CDB (when done/pending)
-    // Use mult_meta_out for tag since it contains the correct dest from when the mult started
-    always_comb begin
-        for (int i = 0; i < `NUM_FU_MULT; i++) begin
-            fu_outputs.mult[i].valid = mult_done[i] && (mult_meta_out[i].dest_pr != '0);
-            fu_outputs.mult[i].tag   = mult_meta_out[i].dest_pr;
-            fu_outputs.mult[i].data  = fu_results.mult[i];
-        end
-    end
-
     // =========================================================================
     // BRANCH Functional Units (Combinational)
     // =========================================================================
-
     always_comb begin
         for (int i = 0; i < `NUM_FU_BRANCH; i++) begin
             branch_rs1[i]     = resolved_src1.branch[i];
@@ -371,67 +319,39 @@ module stage_execute (
         end
     end
 
-    // Instantiate BRANCH modules
     branch branch_inst[`NUM_FU_BRANCH-1:0] (
-        .rs1 (branch_rs1),
-        .rs2 (branch_rs2),
-        .func(branch_funcs),  // Connect func array directly
-        .pc  (branch_pcs),    // Current PC for each branch
-        .offset(branch_offsets), // Branch offset for each branch
+        .rs1(branch_rs1),
+        .rs2(branch_rs2),
+        .func(branch_funcs),
+        .pc(branch_pcs),
+        .offset(branch_offsets),
         .take(branch_take),
-        .target(branch_targets) // Target address computed by branch FU
+        .target(branch_targets)
     );
-
-    // Branch targets are now computed inside the branch functional units
-
-    // BRANCH outputs to CDB
-    // Only JAL and JALR produce data results; conditional branches don't
-    always_comb begin
-        if (issue_entries.branch[0].valid &&
-            (issue_entries.branch[0].op_type.func == JAL ||
-             issue_entries.branch[0].op_type.func == JALR) &&
-            (issue_entries.branch[0].dest_tag != '0)) begin
-            fu_outputs.branch[0].valid = 1'b1;
-            fu_outputs.branch[0].tag   = issue_entries.branch[0].dest_tag;
-            fu_outputs.branch[0].data  = issue_entries.branch[0].PC + 4;  // Return address for JAL/JALR
-        end else begin
-            fu_outputs.branch[0].valid = 1'b0;
-            fu_outputs.branch[0].tag   = '0;
-            fu_outputs.branch[0].data  = '0;
-        end
-    end
 
     // =========================================================================
     // MEM Functional Units
     // =========================================================================
-    // Store operations handled by MEM FUs with store queue interaction
-
-    always_comb begin
-        for (int i = 0; i < `NUM_FU_MEM; i++) begin
-            mem_rs1[i] = resolved_src1.mem[i];
-            mem_rs2[i] = resolved_src2.mem[i];
-            mem_src2_imm[i] = issue_entries.mem[i].src2_immediate;
-            mem_funcs[i] = issue_entries.mem[i].op_type.func;
-        end
-    end
-
-    // Outputs from each MEM FU
     EXECUTE_STOREQ_ENTRY [`NUM_FU_MEM-1:0] mem_store_queue_entries;
     CDB_ENTRY [`NUM_FU_MEM-1:0] mem_cdb_results;
-    logic [`NUM_FU_MEM-1:0] mem_cdb_requests;  // CDB requests from MEM FUs
+    logic [`NUM_FU_MEM-1:0] mem_cdb_requests;
     logic [`NUM_FU_MEM-1:0] mem_is_load_request;
     logic [`NUM_FU_MEM-1:0] mem_is_store;
     D_ADDR [`NUM_FU_MEM-1:0] mem_dcache_addrs;
-    
-    // Store queue forwarding lookup signals from MEM FUs
-    logic      [`NUM_FU_MEM-1:0] mem_lookup_valid;
-    ADDR       [`NUM_FU_MEM-1:0] mem_lookup_addr;
+    logic [`NUM_FU_MEM-1:0] mem_lookup_valid;
+    ADDR [`NUM_FU_MEM-1:0] mem_lookup_addr;
     STOREQ_IDX [`NUM_FU_MEM-1:0] mem_lookup_sq_tail;
-    
-    // Maps MEM FU index to dcache slot (0 or 1) for load data routing
     logic [1:0] mem_fu_to_dcache_slot [`NUM_FU_MEM-1:0];
 
-    // Generate MEM FUs
+    always_comb begin
+        for (int i = 0; i < `NUM_FU_MEM; i++) begin
+            mem_rs1[i]      = resolved_src1.mem[i];
+            mem_rs2[i]      = resolved_src2.mem[i];
+            mem_src2_imm[i] = issue_entries.mem[i].src2_immediate;
+            mem_funcs[i]    = issue_entries.mem[i].op_type.func;
+        end
+    end
+
     generate
         for (genvar i = 0; i < `NUM_FU_MEM; i++) begin : mem_fu_gen
             mem_fu mem_inst (
@@ -445,16 +365,10 @@ module stage_execute (
                 .store_queue_idx(issue_entries.mem[i].store_queue_idx),
                 .dest_tag(issue_entries.mem[i].dest_tag),
                 .cache_hit_data(dcache_read_data[mem_fu_to_dcache_slot[i]]),
-                
-                // Store queue forwarding inputs
                 .forward_valid(sq_forward_valid[i]),
                 .forward_data(sq_forward_data[i]),
                 .forward_stall(sq_forward_stall[i]),
-                
-                // Grant signal from CDB to clear pending result
                 .grant(mem_grant[i]),
-                
-                // Outputs
                 .addr(mem_addr[i]),
                 .data(mem_data[i]),
                 .store_queue_entry(mem_store_queue_entries[i]),
@@ -463,180 +377,156 @@ module stage_execute (
                 .is_load_request(mem_is_load_request[i]),
                 .is_store_op(mem_is_store[i]),
                 .dcache_addr(mem_dcache_addrs[i]),
-                
-                // Store queue forwarding lookup outputs
                 .lookup_valid(mem_lookup_valid[i]),
                 .lookup_addr(mem_lookup_addr[i]),
                 .lookup_sq_tail(mem_lookup_sq_tail[i])
             );
         end
     endgenerate
-    
-    // Route forwarding lookup signals to store queue
+
     assign sq_lookup_valid   = mem_lookup_valid;
     assign sq_lookup_addr    = mem_lookup_addr;
     assign sq_lookup_sq_tail = mem_lookup_sq_tail;
-
-    // Output MEM FU store queue entries directly
     assign mem_storeq_entries = mem_store_queue_entries;
-
-    // Late CDB requests from MEM FUs
     assign mem_cdb_requests_out = mem_cdb_requests;
 
-    // Send load addresses to dcache (first 2 MEM FUs that request loads)
+    // Dcache port allocation: first 2 load requests get ports
     always_comb begin
         dcache_read_addrs = '0;
         mem_fu_to_dcache_slot = '{default: '0};
-
-        // Collect load requests from MEM FUs and send first 2 to dcache
         load_count = 0;
         for (int i = 0; i < `NUM_FU_MEM && load_count < 2; i++) begin
             if (mem_is_load_request[i]) begin
                 dcache_read_addrs[load_count].valid = 1'b1;
-                dcache_read_addrs[load_count].addr = mem_dcache_addrs[i];
-
-                mem_fu_to_dcache_slot[i] = load_count;  // Record which dcache slot this FU uses
+                dcache_read_addrs[load_count].addr  = mem_dcache_addrs[i];
+                mem_fu_to_dcache_slot[i] = load_count;
                 load_count++;
             end
         end
     end
 
-    // Set CDB outputs from MEM FU results
+    // =========================================================================
+    // CDB Output Generation
+    // =========================================================================
     always_comb begin
+        // ALU: valid when issued and has destination
+        for (int i = 0; i < `NUM_FU_ALU; i++) begin
+            fu_outputs.alu[i].valid = issue_entries.alu[i].valid &&
+                                      (issue_entries.alu[i].dest_tag != '0);
+            fu_outputs.alu[i].tag   = issue_entries.alu[i].dest_tag;
+            fu_outputs.alu[i].data  = fu_results.alu[i];
+        end
+
+        // MULT: valid when done and has destination
+        for (int i = 0; i < `NUM_FU_MULT; i++) begin
+            fu_outputs.mult[i].valid = mult_done[i] && (mult_meta_out[i].dest_pr != '0);
+            fu_outputs.mult[i].tag   = mult_meta_out[i].dest_pr;
+            fu_outputs.mult[i].data  = fu_results.mult[i];
+        end
+
+        // BRANCH: only JAL/JALR produce results
+        for (int i = 0; i < `NUM_FU_BRANCH; i++) begin
+            if (issue_entries.branch[i].valid &&
+                (issue_entries.branch[i].op_type.func == JAL ||
+                 issue_entries.branch[i].op_type.func == JALR) &&
+                (issue_entries.branch[i].dest_tag != '0)) begin
+                fu_outputs.branch[i].valid = 1'b1;
+                fu_outputs.branch[i].tag   = issue_entries.branch[i].dest_tag;
+                fu_outputs.branch[i].data  = issue_entries.branch[i].PC + 4;
+            end else begin
+                fu_outputs.branch[i] = '0;
+            end
+        end
+
+        // MEM: from mem_fu results
         for (int i = 0; i < `NUM_FU_MEM; i++) begin
-            fu_results.mem[i] = '0;  // Initialize MEM results to 0
-            // Use CDB results from MEM FUs (for cache hit loads)
             fu_outputs.mem[i] = mem_cdb_results[i];
         end
+
+        fu_results.branch = '0;
+        fu_results.mem = '0;
     end
 
-    localparam int BRANCH_START = 0;
-    localparam int ALU_START = BRANCH_START + `NUM_FU_BRANCH;
-    localparam int MEM_START = ALU_START + `NUM_FU_ALU;
-    localparam int MULT_START = MEM_START + `NUM_FU_MEM;
-
-
-    // Separate grant signals for each FU type (extracted from global gnt_bus)
-    logic [`N-1:0][`NUM_FU_MULT-1:0]   gnt_mult;
-    logic [`N-1:0][`NUM_FU_MEM-1:0]    gnt_mem;
-    logic [`N-1:0][`NUM_FU_ALU-1:0]    gnt_alu;
-    logic [`N-1:0][`NUM_FU_BRANCH-1:0] gnt_branch;
+    // =========================================================================
+    // Completion Candidates (Unified structure for ex_comp generation)
+    // =========================================================================
+    EX_COMPLETE_ENTRY [`NUM_FU_TOTAL-1:0] candidates;
+    logic [`NUM_FU_TOTAL-1:0] candidate_valid;
 
     always_comb begin
-        // Extract MULT grants
-        for (int i = 0; i < `N; i++) begin
-            for (int k = 0; k < `NUM_FU_MULT; k++) begin
-                gnt_mult[i][k] = gnt_bus[i][MULT_START+k];
-            end
+        candidates = '0;
+        candidate_valid = '0;
+
+        // BRANCH candidates
+        for (int k = 0; k < `NUM_FU_BRANCH; k++) begin
+            candidates[BRANCH_START+k] = '{
+                rob_idx:       issue_entries.branch[k].rob_idx,
+                branch_valid:  1'b1,
+                branch_taken:  branch_take[k],
+                branch_target: branch_targets[k],
+                dest_pr:       issue_entries.branch[k].dest_tag,
+                result:        issue_entries.branch[k].PC + 4
+            };
+            candidate_valid[BRANCH_START+k] = issue_entries.branch[k].valid;
         end
 
-        // Extract MEM grants
-        for (int i = 0; i < `N; i++) begin
-            for (int k = 0; k < `NUM_FU_MEM; k++) begin
-                gnt_mem[i][k] = gnt_bus[i][MEM_START+k];
-            end
+        // ALU candidates
+        for (int k = 0; k < `NUM_FU_ALU; k++) begin
+            candidates[ALU_START+k] = '{
+                rob_idx:       issue_entries.alu[k].rob_idx,
+                branch_valid:  1'b0,
+                branch_taken:  1'b0,
+                branch_target: '0,
+                dest_pr:       issue_entries.alu[k].dest_tag,
+                result:        fu_results.alu[k]
+            };
+            candidate_valid[ALU_START+k] = issue_entries.alu[k].valid;
         end
 
-        // Extract ALU grants
-        for (int i = 0; i < `N; i++) begin
-            for (int k = 0; k < `NUM_FU_ALU; k++) begin
-                gnt_alu[i][k] = gnt_bus[i][ALU_START+k];
-            end
-        end
-
-        // Extract BRANCH grants
-        for (int i = 0; i < `N; i++) begin
-            for (int k = 0; k < `NUM_FU_BRANCH; k++) begin
-                gnt_branch[i][k] = gnt_bus[i][BRANCH_START+k];
-            end
-        end
-
-        // Compute mult_grant: OR all CDB slots for each mult FU
-        // This signal tells the mult module its result was accepted
-        for (int k = 0; k < `NUM_FU_MULT; k++) begin
-            mult_grant[k] = 1'b0;
-            for (int i = 0; i < `N; i++) begin
-                mult_grant[k] |= gnt_mult[i][k];
-            end
-        end
-
-        // Compute mem_grant: OR all CDB slots for each mem FU
-        // This signal tells the mem module its result was accepted
+        // MEM candidates
         for (int k = 0; k < `NUM_FU_MEM; k++) begin
-            mem_grant[k] = 1'b0;
-            for (int i = 0; i < `N; i++) begin
-                mem_grant[k] |= gnt_mem[i][k];
-            end
+            candidates[MEM_START+k] = '{
+                rob_idx:       issue_entries.mem[k].rob_idx,
+                branch_valid:  1'b0,
+                branch_taken:  1'b0,
+                branch_target: '0,
+                dest_pr:       issue_entries.mem[k].dest_tag,
+                result:        mem_cdb_results[k].data
+            };
+            candidate_valid[MEM_START+k] = mem_cdb_results[k].valid;
+        end
+
+        // MULT candidates (use pipelined metadata)
+        for (int k = 0; k < `NUM_FU_MULT; k++) begin
+            candidates[MULT_START+k] = '{
+                rob_idx:       mult_meta_out[k].rob_idx,
+                branch_valid:  mult_meta_out[k].branch_valid,
+                branch_taken:  mult_meta_out[k].branch_taken,
+                branch_target: mult_meta_out[k].branch_target,
+                dest_pr:       mult_meta_out[k].dest_pr,
+                result:        fu_results.mult[k]
+            };
+            candidate_valid[MULT_START+k] = mult_done[k];
         end
     end
 
     // =========================================================================
-    // EX/COMP Register Fill via CDB Grants (SoA approach with per-FU grants)
+    // Unified EX/COMP Register Fill
     // =========================================================================
-
     always_comb begin
         ex_valid = '0;
         ex_comp = '0;
 
-        // Initialize defaults (non-branch)
-        ex_comp.branch_valid = '0;
-        ex_comp.branch_taken = '0;
-        ex_comp.branch_target = '0;
-
-        // MULT grants
-        // Use mult_meta_out for rob_idx/dest_pr (pipelined with the instruction)
-        // Use fu_results.mult for the actual computed result
         for (int i = 0; i < `N; i++) begin
-            for (int k = 0; k < `NUM_FU_MULT; k++) begin
-                if (gnt_mult[i][k] && mult_done[k]) begin
-                    ex_valid[i] = 1'b1;
-                    ex_comp.rob_idx[i] = mult_meta_out[k].rob_idx;
-                    ex_comp.branch_valid[i] = mult_meta_out[k].branch_valid;
-                    ex_comp.branch_taken[i] = mult_meta_out[k].branch_taken;
-                    ex_comp.branch_target[i] = mult_meta_out[k].branch_target;
-                    ex_comp.dest_pr[i] = mult_meta_out[k].dest_pr;
-                    ex_comp.result[i] = fu_results.mult[k];
-                end
-            end
-        end
-
-        // MEM grants (loads/stores that complete)
-        for (int i = 0; i < `N; i++) begin
-            for (int k = 0; k < `NUM_FU_MEM; k++) begin
-                if (gnt_mem[i][k]) begin
-                    ex_comp.rob_idx[i] = issue_entries.mem[k].rob_idx;
-                    ex_comp.dest_pr[i] = issue_entries.mem[k].dest_tag;
-
-                    // MEM operations complete when they get CDB grants (they only request when ready)
-                    ex_valid[i] = 1'b1;
-                    ex_comp.result[i] = mem_cdb_results[k].valid ? mem_cdb_results[k].data : '0;
-                end
-            end
-        end
-
-        // ALU grants
-        for (int i = 0; i < `N; i++) begin
-            for (int k = 0; k < `NUM_FU_ALU; k++) begin
-                if (gnt_alu[i][k]) begin
-                    ex_valid[i] = 1'b1;
-                    ex_comp.rob_idx[i] = issue_entries.alu[k].rob_idx;
-                    ex_comp.dest_pr[i] = issue_entries.alu[k].dest_tag;
-                    ex_comp.result[i] = fu_results.alu[k];
-                end
-            end
-        end
-
-        // BRANCH grants
-        for (int i = 0; i < `N; i++) begin
-            for (int k = 0; k < `NUM_FU_BRANCH; k++) begin
-                if (gnt_branch[i][k]) begin
-                    ex_valid[i] = 1'b1;
-                    ex_comp.rob_idx[i] = issue_entries.branch[k].rob_idx;
-                    ex_comp.branch_valid[i] = 1;
-                    ex_comp.branch_taken[i] = branch_take[k];
-                    ex_comp.branch_target[i] = branch_targets[k];
-                    ex_comp.dest_pr[i] = issue_entries.branch[k].dest_tag;
-                    ex_comp.result[i] = issue_entries.branch[k].PC + 4;
+            for (int k = 0; k < `NUM_FU_TOTAL; k++) begin
+                if (gnt_bus[i][k] && candidate_valid[k]) begin
+                    ex_valid[i]              = 1'b1;
+                    ex_comp.rob_idx[i]       = candidates[k].rob_idx;
+                    ex_comp.branch_valid[i]  = candidates[k].branch_valid;
+                    ex_comp.branch_taken[i]  = candidates[k].branch_taken;
+                    ex_comp.branch_target[i] = candidates[k].branch_target;
+                    ex_comp.dest_pr[i]       = candidates[k].dest_pr;
+                    ex_comp.result[i]        = candidates[k].result;
                 end
             end
         end
