@@ -189,6 +189,7 @@ module mult (
     // ============================================================
     // Multiplier Pipeline Debug Display
     // ============================================================
+`ifdef DEBUG
     always_ff @(posedge clock) begin
         if (!reset) begin
             $display("========================================");
@@ -237,6 +238,7 @@ module mult (
             $display("");
         end
     end
+`endif
 
 endmodule  // mult
 

@@ -266,6 +266,7 @@ module store_queue (
     // ============================================================
     // Store Queue Debug Display
     // ============================================================
+`ifdef DEBUG
     always_ff @(posedge clock) begin
         if (!reset) begin
             $display("========================================");
@@ -334,5 +335,6 @@ module store_queue (
             $display("");
         end
     end
+`endif
 
 endmodule

@@ -298,43 +298,59 @@ module testbench;
         $dumpfile("cpu_test.vcd");
         $dumpvars(0, testbench);
 
+`ifdef DEBUG
         $display("\n---- Starting CPU Testbench (Fake-Fetch) ----\n");
+`endif
 
         // set paramterized strings, see comment at start of module
         if ($value$plusargs("MEMORY=%s", program_memory_file)) begin
+`ifdef DEBUG
             $display("Using memory file  : %s", program_memory_file);
+`endif
         end else begin
+`ifdef DEBUG
             $display("Did not receive '+MEMORY=' argument. Exiting.\n");
+`endif
             $finish;
         end
         if ($value$plusargs("OUTPUT=%s", output_name)) begin
+`ifdef DEBUG
             $display("Using output files : %s.{out, cpi, wb}", output_name);
+`endif
             out_outfile       = {output_name, ".out"};  // this is how you concatenate strings in verilog
             cpi_outfile       = {output_name, ".cpi"};
             writeback_outfile = {output_name, ".wb"};
             // pipeline_outfile  = {output_name, ".ppln"};
         end else begin
+`ifdef DEBUG
             $display("\nDid not receive '+OUTPUT=' argument. Exiting.\n");
+`endif
             $finish;
         end
 
         clock = 1'b0;
         reset = 1'b0;
 
+`ifdef DEBUG
         $display("\n  %16t : Asserting Reset", $realtime);
+`endif
         reset = 1'b1;
 
         @(posedge clock);
         @(posedge clock);
 
+`ifdef DEBUG
         $display("  %16t : Loading Unified Memory", $realtime);
+`endif
         // load the compiled program's hex data into the memory module
         $readmemh(program_memory_file, memory.unified_memory);
 
         @(posedge clock);
         @(posedge clock);
         #1;  // This reset is at an odd time to avoid the pos & neg clock edges
+`ifdef DEBUG
         $display("  %16t : Deasserting Reset", $realtime);
+`endif
         reset = 1'b0;
 
         wb_fileno = $fopen(writeback_outfile);
@@ -346,7 +362,9 @@ module testbench;
 
         out_fileno = $fopen(out_outfile);
 
+`ifdef DEBUG
         $display("  %16t : Running Processor", $realtime);
+`endif
     end
 
 
@@ -361,7 +379,9 @@ module testbench;
 
             clock_count = clock_count + 1;
 
+`ifdef DEBUG
             if ((clock_count % 10000) == 0) $display("  %16t : %0d cycles", $realtime, clock_count);
+`endif
 
             // Optional: peek at fake-fetch behavior
             // $display("%0t [FF] pc=%h consumed=%0d br=%0d tgt=%h", $time, fake_pc, fake_consumed, ff_branch_taken,
@@ -393,7 +413,9 @@ module testbench;
             // stop the processor
             if (error_status != NO_ERROR || clock_count > `TB_MAX_CYCLES) begin
 
+`ifdef DEBUG
                 $display("  %16t : Processor Finished", $realtime);
+`endif
 
                 // Wait one more clock cycle to let any pending cache writes complete
                 // (memDP updates on posedge, so stores committed this cycle won't be 
@@ -410,7 +432,9 @@ module testbench;
                 // output the final CPI
                 output_cpi_file();
 
+`ifdef DEBUG
                 $display("\n---- Finished CPU Testbench (Fake-Fetch) ----\n");
+`endif
 
                 #100 $finish;
             end
@@ -542,6 +566,7 @@ module testbench;
     // endtask
 
     task print_custom_data;
+`ifdef DEBUG
         integer prf_count;
         integer i;
         int fu;
@@ -966,6 +991,7 @@ module testbench;
         // if (prf_count == 0) $display("  (All registers are zero)");
 
         $display("=================================================================================\n");
+`endif
     endtask
 
 

@@ -384,6 +384,7 @@ module cpu (
     end
 
     // Debug: Memory Arbiter Output
+`ifdef DEBUG
     always_ff @(negedge clock) begin
         if (!reset) begin
             $display("=== MEMORY ARBITER (negedge) ===");
@@ -400,6 +401,7 @@ module cpu (
             $display("");
         end
     end
+`endif
     //////////////////////////////////////////////////
     //                                              //
     //                  Fetch-Stage                 //

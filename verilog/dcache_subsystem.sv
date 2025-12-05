@@ -215,6 +215,7 @@ module dcache_subsystem (
     end
 
     // D-Cache Subsystem Display - Mem FU Interface
+`ifdef DEBUG
     always_ff @(posedge clock) begin
         if (!reset) begin
             $display("========================================");
@@ -295,6 +296,7 @@ module dcache_subsystem (
             $display("");
         end
     end
+`endif
 
 endmodule
 
@@ -375,6 +377,7 @@ module d_mshr #(
     end
 
     // MSHR Debug Display
+`ifdef DEBUG
     always_ff @(posedge clock) begin
         if (!reset) begin
             $display("--- D-Cache MSHR State ---");
@@ -396,6 +399,7 @@ module d_mshr #(
             $display("");
         end
     end
+`endif
 
 endmodule
 
@@ -588,6 +592,7 @@ module dcache #(
 
     // D-Cache State Display
     // Format matches final memory output: @@@ mem[%5d] = %h : %0d
+`ifdef DEBUG
     always_ff @(posedge clock) begin
         if (!reset) begin
             logic [31:0] byte_addr;
@@ -616,5 +621,6 @@ module dcache #(
             $display("");
         end
     end
+`endif
 
 endmodule

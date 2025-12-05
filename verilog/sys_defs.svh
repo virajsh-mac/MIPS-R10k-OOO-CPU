@@ -13,12 +13,8 @@
 // all files should `include "sys_defs.svh" to at least define the timescale
 `timescale 1ns / 100ps
 
-///////////////////////////////////
-// ---- Starting Parameters ---- //
-///////////////////////////////////
+// `define DEBUG
 
-// some starting parameters that you should set
-// this is *your* processor, you decide these values (try analyzing which is best!)
 
 // =========================================
 // R10K Processor Parameters (6-stage pipeline)
