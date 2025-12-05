@@ -216,13 +216,17 @@ module stage_dispatch (
             // Determine if this instruction needs rs2 to be ready:
             // - Normal case: opb_select == OPB_IS_RS2 (rs2 is ALU operand B)
             // - Store case: MEM instruction that is a store (rs2 holds data to store)
+            // - Branch case: Conditional branches compare rs1 vs rs2 (but JAL/JALR don't use rs2)
             // Use func field to identify stores (not uses_rd, to handle lw x0 correctly)
             needs_rs2[i] = (decode_opb_select[i] == OPB_IS_RS2) ||
                            (decode_op_type[i].category == CAT_MEM && 
                             (decode_op_type[i].func == STORE_BYTE || 
                              decode_op_type[i].func == STORE_HALF || 
                              decode_op_type[i].func == STORE_WORD || 
-                             decode_op_type[i].func == STORE_DOUBLE));
+                             decode_op_type[i].func == STORE_DOUBLE)) ||
+                           (decode_op_type[i].category == CAT_BRANCH &&
+                            decode_op_type[i].func != JAL &&
+                            decode_op_type[i].func != JALR);
 
             // Halt instructions don't use source registers, so mark them ready
             if (decode_halt[i]) begin
