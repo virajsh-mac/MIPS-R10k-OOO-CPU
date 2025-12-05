@@ -36,7 +36,7 @@ import "DPI-C" function string decode_inst(int inst);
 // import "DPI-C" function void close_pipeline_output_file();
 
 
-`define TB_MAX_CYCLES 4000
+`define TB_MAX_CYCLES 10000
 
 
 module testbench;
@@ -53,15 +53,6 @@ module testbench;
     logic reset;
     logic [31:0] clock_count;  // also used for terminating infinite loops
     logic [31:0] instr_count;
-
-    // Disconnected: proc2mem/mem2proc portions (fake-fetch)
-    // MEM_COMMAND             proc2mem_command;
-    // ADDR                    proc2mem_addr;
-    // MEM_BLOCK               proc2mem_data;
-    // MEM_TAG                 mem2proc_transaction_tag;
-    // MEM_BLOCK               mem2proc_data;
-    // MEM_TAG                 mem2proc_data_tag;
-    // MEM_SIZE                proc2mem_size;
 
     COMMIT_PACKET [`N-1:0] committed_insts;
     EXCEPTION_CODE error_status = NO_ERROR;

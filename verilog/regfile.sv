@@ -108,5 +108,42 @@ module regfile (
     // remove as part of TODO above (when no longer needed)
     assign regfile_entries = register_file_entries;
 
+    // ============================================================
+    // Register File Debug Display
+    // ============================================================
+`ifdef DEBUG
+    always_ff @(posedge clock) begin
+        logic found_nonzero;
+
+        if (!reset) begin
+            $display("========================================");
+            $display("=== REGISTER FILE STATE (Cycle %0t) ===", $time);
+            $display("========================================");
+            
+            // Print non-zero register file entries
+            $display("--- Non-Zero Register File Entries ---");
+            found_nonzero = 1'b0;
+            for (int i = 0; i < `PHYS_REG_SZ_R10K; i++) begin
+                if (register_file_entries[i] != '0) begin
+                    $display("  PRF[%0d] = %h", i, register_file_entries[i]);
+                    found_nonzero = 1'b1;
+                end
+            end
+            if (!found_nonzero) begin
+                $display("  (All entries are zero)");
+            end
+            
+            // Print CDB writes
+            $display("--- CDB Writes (this cycle) ---");
+            for (int i = 0; i < `CDB_SZ; i++) begin
+                if (cdb_writes[i].valid && cdb_writes[i].tag != '0) begin
+                    $display("  CDB[%0d]: Tag=%0d Data=%h", i, cdb_writes[i].tag, cdb_writes[i].data);
+                end
+            end
+            
+            $display("");
+        end
+    end
+`endif
 
 endmodule

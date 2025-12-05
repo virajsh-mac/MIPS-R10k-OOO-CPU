@@ -66,6 +66,9 @@ module stage_execute (
     logic [`NUM_FU_MULT-1:0] mult_start, mult_done;
     logic [`NUM_FU_MULT-1:0] mult_grant;  // Grant signal to clear mult completion
 
+    // MEM grant signals (computed from gnt_bus, sent to MEM FUs to clear pending results)
+    logic [`NUM_FU_MEM-1:0] mem_grant;
+
     // FU metadata computed on-the-fly in EX/COMP register fill (SoA approach)
 
     // Load counter for dcache address selection
@@ -448,6 +451,9 @@ module stage_execute (
                 .forward_data(sq_forward_data[i]),
                 .forward_stall(sq_forward_stall[i]),
                 
+                // Grant signal from CDB to clear pending result
+                .grant(mem_grant[i]),
+                
                 // Outputs
                 .addr(mem_addr[i]),
                 .data(mem_data[i]),
@@ -551,6 +557,15 @@ module stage_execute (
             mult_grant[k] = 1'b0;
             for (int i = 0; i < `N; i++) begin
                 mult_grant[k] |= gnt_mult[i][k];
+            end
+        end
+
+        // Compute mem_grant: OR all CDB slots for each mem FU
+        // This signal tells the mem module its result was accepted
+        for (int k = 0; k < `NUM_FU_MEM; k++) begin
+            mem_grant[k] = 1'b0;
+            for (int i = 0; i < `N; i++) begin
+                mem_grant[k] |= gnt_mem[i][k];
             end
         end
     end

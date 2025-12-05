@@ -27,7 +27,6 @@ module stage_dispatch (
     input logic   [     $clog2(`RS_MULT_SZ+1)-1:0] rs_mult_free_slots,
     input logic   [   $clog2(`RS_BRANCH_SZ+1)-1:0] rs_branch_free_slots,
     input logic   [      $clog2(`RS_MEM_SZ+1)-1:0] rs_mem_free_slots,
-   // input logic [$clog2(`LSQ_SZ)-1:0] store_queue_complete_ptr, // Maybe can you use this to compare with load_position pointer later
     input logic                         store_queue_has_pending_store,
 
 

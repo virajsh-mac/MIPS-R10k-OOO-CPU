@@ -19,6 +19,9 @@ module mem_fu (
     input DATA  forward_data,    // Forwarded data from store queue
     input logic forward_stall,   // UNUSED - kept for interface compatibility (always 0)
 
+    // Grant signal from CDB - clears pending result when accepted
+    input logic grant,
+
     // Outputs
     output DATA addr,
     output DATA data,
@@ -47,6 +50,14 @@ module mem_fu (
     } PENDING_LOAD;
 
     PENDING_LOAD pending_load, pending_load_next;
+
+    // =========================================================================
+    // State for holding CDB result until granted (like mult module)
+    // This fixes timing: CDB grant arrives 1 cycle after request, but
+    // cache hit data only lasts 1 cycle. We must hold the result.
+    // =========================================================================
+    
+    CDB_ENTRY pending_result, pending_result_next;
 
     // =========================================================================
     // Combinational Logic
@@ -149,29 +160,51 @@ module mem_fu (
     end
 
     // CDB result and request generation
+    // Uses pending_result register to hold result until CDB grant arrives
     always_comb begin
         cdb_result  = '0;
         cdb_request = 1'b0;
+        pending_result_next = pending_result;  // Default: hold state
 
-        if (pending_load_hit) begin
+        // If we have a pending result waiting for grant, output it
+        if (pending_result.valid) begin
+            cdb_result = pending_result;
+            cdb_request = 1'b1;
+            
+            // Clear pending result when grant is received
+            if (grant) begin
+                pending_result_next.valid = 1'b0;
+            end
+        end
+        // New results: capture into pending_result register
+        else if (pending_load_hit) begin
             // Pending load completes (either from cache hit or forwarding)
-            cdb_result = '{
+            pending_result_next = '{
                 valid: 1'b1,
                 tag: pending_load.dest_tag,
                 data: loaded_data
             };
+            cdb_result = pending_result_next;
             cdb_request = 1'b1;
         end else if (valid && is_load && (cache_hit_data.valid || forward_valid)) begin
             // New load completes immediately (cache hit or store forwarding)
-            cdb_result = '{
+            pending_result_next = '{
                 valid: 1'b1,
                 tag: dest_tag,
                 data: loaded_data
             };
+            cdb_result = pending_result_next;
             cdb_request = 1'b1;
         end else if (valid && is_store) begin
             // Store completes immediately (address/data sent to store queue)
-            cdb_result  = '0;
+            // Stores don't produce data, so we don't use pending_result
+            // But we still need to hold the request until granted
+            pending_result_next = '{
+                valid: 1'b1,
+                tag: '0,  // No destination for stores
+                data: '0
+            };
+            cdb_result = pending_result_next;
             cdb_request = 1'b1;
         end
     end
@@ -215,12 +248,14 @@ module mem_fu (
         end
     end
 
-    // Sequential update of pending load state
+    // Sequential update of pending load state and pending result
     always_ff @(posedge clock) begin
         if (reset) begin
             pending_load <= '0;
+            pending_result <= '0;
         end else begin
             pending_load <= pending_load_next;
+            pending_result <= pending_result_next;
         end
     end
 endmodule  // mem_fu
