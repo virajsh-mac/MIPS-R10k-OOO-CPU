@@ -15,32 +15,43 @@ RESET="\033[0m"
 pass=0
 fail=0
 
+# Default comparison: .out
+COMPARE_EXT="out"      # extension we compare (out or wb)
+COMPARE_DESC=".out"    # human-readable label
+
+# Optional flag: -w -> compare .wb instead of .out
+if [[ "$1" == "-w" ]]; then
+  COMPARE_EXT="wb"
+  COMPARE_DESC=".wb"
+  shift
+fi
+
 # Store results for table
 RESULT_PROGS=()
 RESULT_STATUS=()
 
-# Auto-detect programs
+# Auto-detect programs based on presence of correct/<prog>/<prog>.<ext>.correct
 PROGS=()
 for d in "$CORRECT_DIR"/*; do
   [ -d "$d" ] || continue
   prog="$(basename "$d")"
-  if [ -f "$d/$prog.out.correct" ]; then
+  if [ -f "$d/$prog.$COMPARE_EXT.correct" ]; then
     PROGS+=("$prog")
   fi
 done
 
 if [ "${#PROGS[@]}" -eq 0 ]; then
-  echo -e "${RED}No <prog>.out.correct files detected under 'correct/<prog>/'.${RESET}"
+  echo -e "${RED}No <prog>${COMPARE_DESC}.correct files detected under 'correct/<prog>/'.${RESET}"
   exit 1
 fi
 
-echo -e "${CYAN}${BOLD}Running tests...${RESET}"
+echo -e "${CYAN}${BOLD}Running tests (comparing ${COMPARE_DESC} files)...${RESET}"
 echo
 
 for prog in "${PROGS[@]}"; do
   printf "Running %-20s ... " "$prog"
 
-  # Run ONLY make <prog>.out, suppress make's output
+  # Always build <prog>.out (this run should generate both .out and .wb in output/)
   if ! make -s "${prog}.out" > /dev/null 2>&1; then
     echo -e "${YELLOW}ERROR${RESET}"
     RESULT_PROGS+=("$prog")
@@ -49,8 +60,11 @@ for prog in "${PROGS[@]}"; do
     continue
   fi
 
-  # Compare ONLY the .out files, suppress diff output
-  if diff -u "correct/$prog/$prog.out.correct" "$OUT_DIR/$prog.out" > /dev/null 2>&1; then
+  golden="correct/$prog/$prog.$COMPARE_EXT.correct"
+  actual="$OUT_DIR/$prog.$COMPARE_EXT"
+
+  # Compare the chosen files (.out or .wb), suppress diff output
+  if diff -u "$golden" "$actual" > /dev/null 2>&1; then
     echo -e "${GREEN}PASS${RESET}"
     RESULT_PROGS+=("$prog")
     RESULT_STATUS+=("PASS")
