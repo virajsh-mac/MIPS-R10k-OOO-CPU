@@ -174,9 +174,14 @@ module dcache_subsystem (
                 end
 
                 DOUBLE: begin
-                    dcache_store_data_local.word_level[1] = proc_store_data[63:32];
-                    dcache_store_data_local.word_level[0] = proc_store_data[31:0];
-                    dcache_store_byte_en = 8'b1111_1111;
+                    // Treat DOUBLE the same as WORD, since proc_store_data is 32 bits
+                    if (proc_store_addr[2]) begin
+                        dcache_store_data_local.word_level[1] = proc_store_data;
+                        dcache_store_byte_en = 8'b1111_0000;
+                    end else begin
+                        dcache_store_data_local.word_level[0] = proc_store_data;
+                        dcache_store_byte_en = 8'b0000_1111;
+                    end
                 end
 
                 default: begin
