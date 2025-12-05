@@ -49,37 +49,37 @@ module rob (
     always_comb begin
         free_count_next = free_count;
         rob_entries_next = rob_entries;
-        // retire_count is now an input from stage_retire
         retire_count = retire_count_in;
 
-        for (int i = 0; i < `N; i++) begin
-            // Dispatch, assume incoming valid instructions to be contiguous from index 0
-            if (rob_entry_packet[i].valid) begin
-                rob_entries_next[(tail_idx+i)%`ROB_SZ] = rob_entry_packet[i];
-            end
-
-            // Complete ROB entries update
-            if (rob_update_packet.valid[i]) begin
-                rob_entries_next[rob_update_packet.idx[i]].complete = 1'b1;
-                rob_entries_next[rob_update_packet.idx[i]].branch_taken = rob_update_packet.branch_taken[i];
-                rob_entries_next[rob_update_packet.idx[i]].branch_target = rob_update_packet.branch_targets[i];
-            end
-
-            // Free Count calculation
-            entry_packet_valid_bits[i] = rob_entry_packet[i].valid;
-        end
-
-        num_retired = retire_count;
-        // Invalidate only the retired prefix at the head
+        // 1. Retire: Invalidate the retired prefix at the head FIRST
+        //    (Must happen before dispatch so dispatch can reuse freed slots)
         for (int i = 0; i < `N; i++) begin
             if (i < retire_count) begin
                 rob_entries_next[(head_idx + i) % `ROB_SZ].valid = 1'b0;
             end
         end
+
+        // 2. Dispatch: Write new entries (overwrites any just-invalidated slots)
+        for (int i = 0; i < `N; i++) begin
+            if (rob_entry_packet[i].valid) begin
+                rob_entries_next[(tail_idx + i) % `ROB_SZ] = rob_entry_packet[i];
+            end
+            entry_packet_valid_bits[i] = rob_entry_packet[i].valid;
+        end
+
+        // 3. Complete: Update ROB entries
+        for (int i = 0; i < `N; i++) begin
+            if (rob_update_packet.valid[i]) begin
+                rob_entries_next[rob_update_packet.idx[i]].complete = 1'b1;
+                rob_entries_next[rob_update_packet.idx[i]].branch_taken = rob_update_packet.branch_taken[i];
+                rob_entries_next[rob_update_packet.idx[i]].branch_target = rob_update_packet.branch_targets[i];
+            end
+        end
+
+        // 4. Update counters and pointers
+        num_retired = retire_count;
         num_dispatched = $countones(entry_packet_valid_bits);
         free_count_next = free_count + num_retired - num_dispatched;
-
-        // Head and tail pointers
         head_idx_next = (head_idx + retire_count) % `ROB_SZ;
         tail_idx_next = (tail_idx + num_dispatched) % `ROB_SZ;
     end
@@ -116,46 +116,78 @@ module rob (
         end
     end
 
-// `ifndef SYNTH
-// always_ff @(posedge clock) begin
-//   if (!reset) begin
-//     $display("\n=================================================================================");
-//     $display("ROB STATE - Cycle @%0t", $time);
-//     $display("=================================================================================");
-//     $display("Head=%0d Tail=%0d Free=%0d | Retire_count=%0d Dispatched=%0d",
-//              head_idx, tail_idx, free_count, retire_count, $countones(entry_packet_valid_bits));
-//     $display("---------------------------------------------------------------------------------");
-//     $display("Idx | Valid | Complete | PC      | Inst     | Rd | PReg | Val      | Branch | Taken | Target   | Mispred | Halt");
-//     $display("---------------------------------------------------------------------------------");
-
-//     for (int i = 0; i < `ROB_SZ; i++) begin
-//       automatic ROB_ENTRY entry = rob_entries[i];
-//       automatic string head_marker = (i == head_idx) ? "H->" : (i == tail_idx) ? "T->" : "   ";
-//       if (entry.valid) begin
-//         $display("%s%2d | %5b | %8b | %08h | %08h | %2d | P%2d | %08h | %6b | %5b | %08h | %7b | %4b",
-//                  head_marker, i,
-//                  entry.valid,
-//                  entry.complete,
-//                  entry.PC,
-//                  entry.inst,
-//                  entry.arch_rd,
-//                  entry.phys_rd,
-//                  entry.value,
-//                  entry.branch,
-//                  entry.branch_taken,
-//                  entry.branch_target,
-//                  entry.mispredict,
-//                  entry.halt);
-//       end else begin
-//         $display("%s%2d | %5b | %8b | -------- | -------- | -- | --- | -------- | ------ | ----- | -------- | ------- | ----",
-//                  head_marker, i,
-//                  entry.valid,
-//                  entry.complete);
-//       end
-//     end
-//     $display("=================================================================================\n");
-//   end
-// end
-// `endif
+`ifdef DEBUG
+    always_ff @(posedge clock) begin
+        if (!reset) begin
+            $display("========================================");
+            $display("=== ROB STATE (Cycle %0t) ===", $time);
+            $display("========================================");
+            
+            // Pointers and counters
+            $display("--- Pointers ---");
+            $display("  Head: %0d, Tail: %0d, Free Slots: %0d", head_idx, tail_idx, free_count);
+            $display("  Retire Count: %0d, Dispatched: %0d", retire_count, $countones(entry_packet_valid_bits));
+            
+            // ROB entries
+            $display("--- ROB Entries ---");
+            for (int i = 0; i < `ROB_SZ; i++) begin
+                automatic ROB_ENTRY entry = rob_entries[i];
+                if (entry.valid) begin
+                    if (entry.branch) begin
+                        $display("  [%2d] PC=%h Inst=%h rd=x%0d->P%0d Complete=%0d Branch(taken=%0d tgt=%h) %s%s%s",
+                                 i, entry.PC, entry.inst, entry.arch_rd, entry.phys_rd, entry.complete,
+                                 entry.branch_taken, entry.branch_target,
+                                 (i == head_idx) ? "<-HEAD" : "",
+                                 (i == tail_idx) ? "<-TAIL" : "",
+                                 entry.halt ? " HALT" : "");
+                    end else begin
+                        $display("  [%2d] PC=%h Inst=%h rd=x%0d->P%0d Complete=%0d Val=%h %s%s%s",
+                                 i, entry.PC, entry.inst, entry.arch_rd, entry.phys_rd, entry.complete,
+                                 entry.value,
+                                 (i == head_idx) ? "<-HEAD" : "",
+                                 (i == tail_idx) ? "<-TAIL" : "",
+                                 entry.halt ? " HALT" : "");
+                    end
+                end else begin
+                    $display("  [%2d] Valid=0 %s%s", i,
+                             (i == head_idx) ? "<-HEAD" : "",
+                             (i == tail_idx) ? "<-TAIL" : "");
+                end
+            end
+            
+            // Dispatch inputs
+            $display("--- Dispatch Inputs ---");
+            for (int i = 0; i < `N; i++) begin
+                if (rob_entry_packet[i].valid) begin
+                    $display("  Dispatch[%0d]: PC=%h Inst=%h rd=x%0d->P%0d -> Alloc Idx=%0d",
+                             i, rob_entry_packet[i].PC, rob_entry_packet[i].inst,
+                             rob_entry_packet[i].arch_rd, rob_entry_packet[i].phys_rd, alloc_idxs[i]);
+                end
+            end
+            
+            // Complete updates
+            $display("--- Complete Updates ---");
+            for (int i = 0; i < `N; i++) begin
+                if (rob_update_packet.valid[i]) begin
+                    $display("  Complete[%0d]: ROB_Idx=%0d Branch(taken=%0d tgt=%h)",
+                             i, rob_update_packet.idx[i],
+                             rob_update_packet.branch_taken[i], rob_update_packet.branch_targets[i]);
+                end
+            end
+            
+            // Retire outputs
+            $display("--- Retire ---");
+            for (int i = 0; i < `N; i++) begin
+                if (head_valids[i] && (i < retire_count)) begin
+                    $display("  Retiring[%0d]: ROB_Idx=%0d PC=%h rd=x%0d->P%0d",
+                             i, head_idxs[i], head_entries[i].PC,
+                             head_entries[i].arch_rd, head_entries[i].phys_rd);
+                end
+            end
+            
+            $display("");
+        end
+    end
+`endif
 
 endmodule
