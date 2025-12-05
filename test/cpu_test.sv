@@ -286,8 +286,8 @@ module testbench;
     endfunction
 
     initial begin
-        $dumpfile("cpu_test.vcd");
-        $dumpvars(0, testbench);
+        // $dumpfile("cpu_test.vcd");
+        // $dumpvars(0, testbench);
 
 `ifdef DEBUG
         $display("\n---- Starting CPU Testbench (Fake-Fetch) ----\n");
