@@ -36,7 +36,7 @@ import "DPI-C" function string decode_inst(int inst);
 // import "DPI-C" function void close_pipeline_output_file();
 
 
-`define TB_MAX_CYCLES 10000000
+`define TB_MAX_CYCLES 100000
 
 
 module testbench;
@@ -286,6 +286,8 @@ module testbench;
     endfunction
 
     initial begin
+        // $dumpfile("cpu_test.vcd");
+        // $dumpvars(0, testbench);
         // $dumpfile("cpu_test.vcd");
         // $dumpvars(0, testbench);
 

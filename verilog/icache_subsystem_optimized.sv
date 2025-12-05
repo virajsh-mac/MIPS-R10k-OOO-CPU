@@ -171,8 +171,9 @@ module i_mshr #(
 
 endmodule
 
-// Stops when cache full
-module i_prefetcher_greedy (
+module i_prefetcher #(
+    parameter PREFETCH_DEPTH = 6
+) (
     input clock,
     input reset,
 
@@ -184,28 +185,31 @@ module i_prefetcher_greedy (
 );
     I_ADDR_PACKET last_icache_miss_mem_req, next_last_icache_miss_mem_req;
     I_ADDR addr_incrementor, next_addr_incrementor;
+    logic [$clog2(PREFETCH_DEPTH + 1):0] prefetch_count, next_prefetch_count;
 
     always_comb begin
         prefetcher_snooping_addr = '0;
         next_addr_incrementor = addr_incrementor;
         next_last_icache_miss_mem_req = last_icache_miss_mem_req;
+        next_prefetch_count = prefetch_count;  // Preserve current count by default
 
         // New or first icache miss yet to successfully request
         if (icache_miss_addr.valid & (icache_miss_addr.addr != last_icache_miss_mem_req.addr | ~last_icache_miss_mem_req.valid)) begin
-            // Send mem snooping request
             prefetcher_snooping_addr.valid = '1;
             prefetcher_snooping_addr.addr  = icache_miss_addr.addr;
+            next_prefetch_count = '0;  // Reset counter on new miss
             if (mem_req_accepted) begin
                 next_last_icache_miss_mem_req.valid = '1;
                 next_last_icache_miss_mem_req.addr = icache_miss_addr.addr;
                 next_addr_incrementor = icache_miss_addr.addr;
             end 
-        end else if (~icache_full & last_icache_miss_mem_req.valid) begin
-            // Send lookahead snooping request
+        // On every miss, prefetch until icache_full, or up to until PREFETCH_DEPTH
+        end else if (last_icache_miss_mem_req.valid && (~icache_full || prefetch_count < PREFETCH_DEPTH) ) begin
             prefetcher_snooping_addr.valid = '1;
             prefetcher_snooping_addr.addr  = addr_incrementor + 'h8;
             if (mem_req_accepted) begin
                 next_addr_incrementor = addr_incrementor + 'h8;
+                next_prefetch_count = prefetch_count + 1;
             end
         end
     end
@@ -214,122 +218,15 @@ module i_prefetcher_greedy (
         if (reset) begin
             last_icache_miss_mem_req <= '0;
             addr_incrementor <= '0;
+            prefetch_count <= '0;
         end else begin
             addr_incrementor <= next_addr_incrementor;
             last_icache_miss_mem_req <= next_last_icache_miss_mem_req;
+            prefetch_count <= next_prefetch_count;
         end
     end
 
 endmodule
-
-module i_prefetcher (
-    input clock,
-    input reset,
-
-    input I_ADDR_PACKET icache_miss_addr,
-    input logic         icache_full,
-
-    input  logic         mem_req_accepted,
-    output I_ADDR_PACKET prefetcher_snooping_addr
-);
-    I_ADDR_PACKET last_icache_miss_mem_req, next_last_icache_miss_mem_req;
-    I_ADDR addr_incrementor, next_addr_incrementor;
-
-    always_comb begin
-        prefetcher_snooping_addr = '0;
-        next_addr_incrementor = addr_incrementor;
-        next_last_icache_miss_mem_req = last_icache_miss_mem_req;
-
-        // New or first icache miss yet to successfully request
-        if (icache_miss_addr.valid & (icache_miss_addr.addr != last_icache_miss_mem_req.addr | ~last_icache_miss_mem_req.valid)) begin
-            // Send mem snooping request
-            prefetcher_snooping_addr.valid = '1;
-            prefetcher_snooping_addr.addr  = icache_miss_addr.addr;
-            if (mem_req_accepted) begin
-                next_last_icache_miss_mem_req.valid = '1;
-                next_last_icache_miss_mem_req.addr = icache_miss_addr.addr;
-                next_addr_incrementor = icache_miss_addr.addr;
-            end 
-        end else if (~icache_full & last_icache_miss_mem_req.valid) begin
-            // Send lookahead snooping request
-            prefetcher_snooping_addr.valid = '1;
-            prefetcher_snooping_addr.addr  = addr_incrementor + 'h8;
-            if (mem_req_accepted) begin
-                next_addr_incrementor = addr_incrementor + 'h8;
-            end
-        end
-    end
-
-    always_ff @(posedge clock) begin
-        if (reset) begin
-            last_icache_miss_mem_req <= '0;
-            addr_incrementor <= '0;
-        end else begin
-            addr_incrementor <= next_addr_incrementor;
-            last_icache_miss_mem_req <= next_last_icache_miss_mem_req;
-        end
-    end
-
-endmodule
-
-// // Prefetch on miss and evict, stop when count's up
-// module i_prefetcher_parameterized #(
-//     parameter PREFETCH_COUNT = 10
-// ) (
-//     input clock,
-//     input reset,
-
-//     input I_ADDR_PACKET icache_miss_addr,
-//     input logic         icache_full,  // Not used, but kept for interface consistency
-
-//     input  logic         mem_req_accepted,
-//     output I_ADDR_PACKET prefetcher_snooping_addr
-// );
-//     I_ADDR_PACKET last_icache_miss_mem_req, next_last_icache_miss_mem_req;
-//     I_ADDR addr_incrementor, next_addr_incrementor;
-//     logic [$clog2(PREFETCH_COUNT+1)-1:0] prefetch_counter, next_prefetch_counter;
-
-//     always_comb begin
-//         prefetcher_snooping_addr = '0;
-//         next_addr_incrementor = addr_incrementor;
-//         next_last_icache_miss_mem_req = last_icache_miss_mem_req;
-//         next_prefetch_counter = prefetch_counter;
-
-//         // New or first icache miss yet to successfully request
-//         if (icache_miss_addr.valid & (icache_miss_addr.addr != last_icache_miss_mem_req.addr | ~last_icache_miss_mem_req.valid)) begin
-//             // Send mem snooping request
-//             prefetcher_snooping_addr.valid = '1;
-//             prefetcher_snooping_addr.addr  = icache_miss_addr.addr;
-//             if (mem_req_accepted) begin
-//                 next_last_icache_miss_mem_req.valid = '1;
-//                 next_last_icache_miss_mem_req.addr = icache_miss_addr.addr;
-//                 next_addr_incrementor = icache_miss_addr.addr;
-//                 next_prefetch_counter = '0;  // Reset counter on new miss
-//             end 
-//         end else if (last_icache_miss_mem_req.valid && (prefetch_counter < PREFETCH_COUNT)) begin
-//             // Send lookahead snooping request, stops after PREFETCH_COUNT
-//             prefetcher_snooping_addr.valid = '1;
-//             prefetcher_snooping_addr.addr  = addr_incrementor + 'h8;
-//             if (mem_req_accepted) begin
-//                 next_addr_incrementor = addr_incrementor + 'h8;
-//                 next_prefetch_counter = prefetch_counter + 1'b1;
-//             end
-//         end
-//     end
-
-//     always_ff @(posedge clock) begin
-//         if (reset) begin
-//             last_icache_miss_mem_req <= '0;
-//             addr_incrementor <= '0;
-//             prefetch_counter <= '0;
-//         end else begin
-//             addr_incrementor <= next_addr_incrementor;
-//             last_icache_miss_mem_req <= next_last_icache_miss_mem_req;
-//             prefetch_counter <= next_prefetch_counter;
-//         end
-//     end
-
-// endmodule
 
 module icache #(
     parameter MEM_DEPTH = `ICACHE_LINES + `PREFETCH_STREAM_BUFFER_SIZE,
