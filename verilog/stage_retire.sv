@@ -1,13 +1,13 @@
 `include "sys_defs.svh"
 
 module stage_retire (
-    input  logic clock,
-    input  logic reset,
+    input logic clock,
+    input logic reset,
 
     // From ROB: head window (0 = oldest, N-1 = youngest)
-    input  ROB_ENTRY [`N-1:0] head_entries,
-    input  logic     [`N-1:0] head_valids,
-    input  ROB_IDX   [`N-1:0] head_idxs,     // ROB index per head slot
+    input ROB_ENTRY [`N-1:0] head_entries,
+    input logic     [`N-1:0] head_valids,
+    input ROB_IDX   [`N-1:0] head_idxs,     // ROB index per head slot
 
     // To ROB: flush younger if head is a mispredicted branch
     output logic   mispredict,      // Single consolidated mispredict signal
@@ -17,16 +17,16 @@ module stage_retire (
     output logic [`PHYS_REG_SZ_R10K-1:0] free_mask,
 
     // To archMapTable: N write ports (commit multiple per cycle)
-    output logic    [`N-1:0]            arch_write_enables,
-    output REG_IDX [`N-1:0]             arch_write_addrs,
-    output PHYS_TAG[`N-1:0]             arch_write_phys_regs,
+    output logic    [`N-1:0] arch_write_enables,
+    output REG_IDX  [`N-1:0] arch_write_addrs,
+    output PHYS_TAG [`N-1:0] arch_write_phys_regs,
 
     // debug output which is used to count committed instructions at retire
     output COMMIT_PACKET [`N-1:0] committed_insts,
 
     // Fetch stage IOs
-    output ADDR              branch_target_out,
-    output BP_TRAIN_REQUEST  train_req_o,
+    output ADDR branch_target_out,
+    output BP_TRAIN_REQUEST train_req_o,
 
     // to read committed data from PRF
     input DATA [`PHYS_REG_SZ_R10K-1:0] regfile_entries,
@@ -38,54 +38,51 @@ module stage_retire (
     output logic [`PHYS_REG_SZ_R10K-1:0] freelist_restore_mask,
 
     // To store queue: free count
-    output logic [$clog2(`N+1)-1:0] sq_free_count,
+    output logic [$clog2(`N+1)-1:0]  sq_free_count,
 
     // From store queue: head store is ready
     input logic sq_head_valid,
 
     // D-Cache Interface
     output logic dcache_store_request,
-    input  logic dcache_store_response,
+    input logic  dcache_store_response,
 
     // To ROB: how many instructions to actually retire
     output logic [$clog2(`N+1)-1:0] retire_count_out
+
 );
 
     localparam int PRW = (`PHYS_REG_SZ_R10K <= 2) ? 1 : $clog2(`PHYS_REG_SZ_R10K);
-    localparam logic [`PHYS_REG_SZ_R10K-1:0] INITIAL_AVAIL_MASK =
-        {{`PHYS_REG_SZ_R10K - `ARCH_REG_SZ{1'b1}}, {`ARCH_REG_SZ{1'b0}}};
+    localparam logic [`PHYS_REG_SZ_R10K-1:0] INITIAL_AVAIL_MASK = {{`PHYS_REG_SZ_R10K - `ARCH_REG_SZ{1'b1}}, {`ARCH_REG_SZ{1'b0}}};
 
     ROB_ENTRY entry;
-    logic     trained;
-    logic     mispred_dir, mispred_tgt, mispred;
+    logic trained;
+    logic mispred_dir, mispred_tgt, mispred;
 
     // Freelist checkpoint for mispredict restore
-    logic [`PHYS_REG_SZ_R10K-1:0] freelist_checkpoint_mask;
-    logic [`PHYS_REG_SZ_R10K-1:0] freelist_checkpoint_mask_next;
+    logic [`PHYS_REG_SZ_R10K-1:0] freelist_checkpoint_mask, freelist_checkpoint_mask_next;
 
-    COMMIT_PACKET [`N-1:0] committed_insts_next;
-    COMMIT_PACKET [`N-1:0] committed_insts_reg;
 
+    logic retired_store_this_cycle;
     logic [$clog2(`N+1)-1:0] retire_count;
-    logic                     retired_store_this_cycle;
 
     always_comb begin
         freelist_checkpoint_mask_next = freelist_checkpoint_mask;
         {mispredict, rob_mispred_idx, free_mask} = '0;
-        train_req_o            = '{default: 0};
-        trained                = 1'b0;
-        arch_write_enables     = '0;
-        arch_write_addrs       = '0;
-        arch_write_phys_regs   = '0;
-        mispred_dir            = 1'b0;
-        mispred_tgt            = 1'b0;
-        mispred                = 1'b0;
-        entry                  = '0;
-        committed_insts_next   = '0;
-        sq_free_count          = '0;
-        dcache_store_request   = 1'b0;
+        train_req_o = '{default: 0};
+        trained = 1'b0;
+        arch_write_enables = '0;
+        arch_write_addrs = '0;
+        arch_write_phys_regs = '0;
+        mispred_dir = 1'b0;
+        mispred_tgt = 1'b0;
+        mispred = 1'b0;
+        entry = '0;
+        committed_insts = '0;
+        sq_free_count = '0;
+        dcache_store_request = '0;
         retired_store_this_cycle = 1'b0;
-        retire_count           = '0;
+        retire_count = '0;
 
         // branch info for fetch
         branch_target_out = '0;
@@ -110,19 +107,18 @@ module stage_retire (
                 // We can only retire ONE store per cycle because the D-cache interface
                 // and Store Queue head pointer can only handle one transaction at a time.
                 if (retired_store_this_cycle) begin
-                    break;
+                    break; 
                 end
 
                 // Only request if store queue has the data ready (executed)
                 if (sq_head_valid) begin
                     dcache_store_request = 1'b1;
-
+                    
                     // If D-Cache says "not done yet" (miss or busy), we STALL retirement
                     if (!dcache_store_response) begin
-                        // Stall: do not commit this instruction or any younger ones
-                        break;
+                        break; // Stall: do not commit this instruction or any younger ones
                     end
-
+                    
                     // If we are here, the store completed successfully in the cache
                     sq_free_count++;
                     retired_store_this_cycle = 1'b1;
@@ -135,12 +131,12 @@ module stage_retire (
             // Record debug info
             // Use phys_rd != 0 to determine if instruction writes to a register
             // This correctly handles JAL/JALR (which write PC+4 to rd) vs conditional branches
-            committed_insts_next[w].NPC     = entry.PC + 4;
-            committed_insts_next[w].data    = regfile_entries[entry.phys_rd];
-            committed_insts_next[w].reg_idx = (entry.phys_rd == '0) ? `ZERO_REG : entry.arch_rd;
-            committed_insts_next[w].halt    = entry.halt;
-            committed_insts_next[w].illegal = (entry.exception == ILLEGAL_INST);
-            committed_insts_next[w].valid   = 1'b1;
+            committed_insts[w].NPC    = entry.PC + 4;
+            committed_insts[w].data   = regfile_entries[entry.phys_rd];
+            committed_insts[w].reg_idx = (entry.phys_rd == '0) ? `ZERO_REG : entry.arch_rd;
+            committed_insts[w].halt   = entry.halt;
+            committed_insts[w].illegal = (entry.exception == ILLEGAL_INST);
+            committed_insts[w].valid  = 1'b1;
 
             // Count this instruction as retired
             retire_count++;
@@ -148,27 +144,28 @@ module stage_retire (
             // Commit this entry (it's complete) - update arch map and free old physical register
             // Check phys_rd != 0 to include JAL/JALR which have branch=true but still write to rd
             if (entry.phys_rd != '0) begin
-                arch_write_enables[w]   = 1'b1;
-                arch_write_addrs[w]     = entry.arch_rd;
+                arch_write_enables[w]  = 1'b1;
+                arch_write_addrs[w]    = entry.arch_rd;
                 arch_write_phys_regs[w] = entry.phys_rd;
 
                 freelist_checkpoint_mask_next[arch_write_phys_regs[w]] = 1'b0;
 
                 if ((entry.prev_phys_rd != '0) && (entry.prev_phys_rd < `PHYS_REG_SZ_R10K)) begin
-                    free_mask[entry.prev_phys_rd]                 = 1'b1;
+                    free_mask[entry.prev_phys_rd] = 1'b1;
                     freelist_checkpoint_mask_next[entry.prev_phys_rd] = 1'b1;
                 end
             end
 
             // If this entry is a branch, check for mispredict (compare prediction vs actual)
             if (entry.branch) begin
+
                 // to fetch stage
                 branch_target_out = entry.branch_target;
 
                 // Only consider mispredict if branch had completed
-                mispred_dir = (entry.pred_taken != entry.branch_taken);
-                mispred_tgt = (entry.branch_taken && (entry.pred_target != entry.branch_target));
-                mispred     = (mispred_dir || mispred_tgt);
+                mispred_dir               = (entry.pred_taken != entry.branch_taken);
+                mispred_tgt               = (entry.branch_taken && (entry.pred_target != entry.branch_target));
+                mispred                   = (mispred_dir || mispred_tgt);
 
                 // Train on retired branches
                 train_req_o.valid         = 1'b1;
@@ -182,6 +179,7 @@ module stage_retire (
                     mispredict      = 1'b1;
                     rob_mispred_idx = head_idxs[w];  // ROB index of the mispredicted branch
                     train_req_o.mispredict = 1'b1;
+
                     break;
                 end
             end
@@ -191,19 +189,15 @@ module stage_retire (
     // Output the retire count to ROB
     assign retire_count_out = retire_count;
 
-    always_ff @(posedge clock or posedge reset) begin
+    always_ff @(posedge clock) begin
         if (reset) begin
             freelist_checkpoint_mask <= INITIAL_AVAIL_MASK;  // Arch regs busy, extras free
-            committed_insts_reg      <= '{default: '0};
         end else begin
             freelist_checkpoint_mask <= freelist_checkpoint_mask_next;
-            committed_insts_reg      <= committed_insts_next;
         end
     end
 
     assign freelist_restore_mask = freelist_checkpoint_mask_next;
 
-    // Drive the external debug bus with the *registered* bundle
-    assign committed_insts = committed_insts_reg;
 
 endmodule
