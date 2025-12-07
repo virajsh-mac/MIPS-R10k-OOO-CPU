@@ -119,7 +119,7 @@ module stage_fetch (
         branch_target = first_is_cond ? compute_branch_target(first_branch_pc, insts[first_branch_idx]) : '0;
         
         // JAL/JALR always taken, conditional uses predictor
-        first_branch_taken = first_is_jal || first_is_jalr || (first_is_cond && bp_response.taken) || (branch_target == PC + 4);
+        first_branch_taken = first_is_jal || first_is_jalr || (first_is_cond && bp_response.taken) || (branch_target == first_branch_pc + 4);
     end
 
     // =========================================================================

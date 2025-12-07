@@ -13,7 +13,7 @@
 // all files should `include "sys_defs.svh" to at least define the timescale
 `timescale 1ns / 100ps
 
-// `define DEBUG
+//`define DEBUG
 
 
 // =========================================
@@ -61,7 +61,7 @@
 `define RS_ALU_SZ (2 * `NUM_FU_ALU)      // 6 entries for ALU
 `define RS_MULT_SZ (2 * `NUM_FU_MULT)    // 2 entries for MULT
 `define RS_BRANCH_SZ (2 * `NUM_FU_BRANCH) // 2 entries for BRANCH
-`define RS_MEM_SZ (2 * `NUM_FU_MEM)      // 2 entries for MEM
+`define RS_MEM_SZ (1 * `NUM_FU_MEM)      // 2 entries for MEM
 
 // FU category indices (for array indexing)
 `define FU_CAT_ALU 0
