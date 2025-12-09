@@ -172,7 +172,7 @@ module i_mshr #(
 endmodule
 
 module i_prefetcher #(
-    parameter PREFETCH_DEPTH = 7
+    parameter PREFETCH_DEPTH = 6
 ) (
     input clock,
     input reset,

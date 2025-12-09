@@ -87,7 +87,9 @@ module bp (
     always_ff @(posedge clock) begin
         if (reset) begin
             ghr                    <= '0;
-            pattern_history_table  <= '0;
+            for (int i = 0; i < PHT_ENTRY_COUNT; i = i + 1) begin
+                pattern_history_table[i] <= WEAKLY_TAKEN;
+            end
             btb_array              <= '0;
 
             // stats

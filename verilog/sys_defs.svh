@@ -27,7 +27,7 @@
 
 // structure sizes
 `define ROB_SZ 32 // ROB Size
-`define RS_SZ 16 // Reservation Station Size
+`define RS_SZ 32 // Reservation Station Size
 `define ARCH_REG_SZ 32 // 32 Architecural Registers in RISCV
 `define PHYS_REG_SZ_R10K (32 + `ROB_SZ)  // 64 physical registers for R10K
 
@@ -44,7 +44,7 @@
 `define IB_PUSH_WIDTH  4
 
 // branch prediction
-`define BP_GHR_WIDTH 7                              // ghr width
+`define BP_GHR_WIDTH 4                              // ghr width
 `define BP_PHT_BITS `BP_GHR_WIDTH + 1               // PHT entries = GH + 1
 `define BP_BTB_BITS 7                        // BTB entries = 2^BTB_BITS
 `define BP_PC_WORD_ALIGN_BITS 2              // PC[1:0] are word-aligned (ignore)
@@ -74,7 +74,7 @@
 `define MULT_STAGES 4
 
 // Load/Store Queue (not implemented in base design)
-`define LSQ_SZ 8
+`define LSQ_SZ 16
 
 ///////////////////////////////
 // ---- Basic Constants ---- //
