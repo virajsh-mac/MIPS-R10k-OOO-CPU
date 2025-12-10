@@ -44,7 +44,7 @@
 `define IB_PUSH_WIDTH  4
 
 // branch prediction
-`define BP_GHR_WIDTH 4                              // ghr width
+`define BP_GHR_WIDTH 7                              // ghr width
 `define BP_PHT_BITS `BP_GHR_WIDTH + 1               // PHT entries = GH + 1
 `define BP_BTB_BITS 7                        // BTB entries = 2^BTB_BITS
 `define BP_PC_WORD_ALIGN_BITS 2              // PC[1:0] are word-aligned (ignore)
